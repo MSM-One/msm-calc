@@ -190,33 +190,35 @@ class PdfReportService {
                 itemEntry.sizes.sort(
                     (a, b) => SortingUtils.compareSizes(a.label, b.label));
                 for (var s in itemEntry.sizes) {
-                  final double movementQty = (s.inQty - s.outQty).abs();
                   tableData.add([
                     pw.Text('${itemEntry.item} ${_pSizeLabel(cat, s.label)}',
                         style: pw.TextStyle(
                             fontWeight: pw.FontWeight.normal,
-                            fontSize: 11,
+                            fontSize: 10,
                             color: PdfColors.black)),
+                    pw.Text(s.opening.toStringAsFixed(3),
+                        style: const pw.TextStyle(
+                            fontSize: 10, color: PdfColors.black)),
                     pw.Text(s.inQty.toStringAsFixed(3),
                         style: const pw.TextStyle(
-                            fontSize: 11, color: PdfColors.black)),
+                            fontSize: 10, color: PdfColors.black)),
                     pw.Text(s.outQty.toStringAsFixed(3),
                         style: const pw.TextStyle(
-                            fontSize: 11, color: PdfColors.black)),
-                    pw.Text(movementQty.toStringAsFixed(3),
+                            fontSize: 10, color: PdfColors.black)),
+                    pw.Text(s.closing.toStringAsFixed(3),
                         style: pw.TextStyle(
                             fontWeight: pw.FontWeight.bold,
-                            fontSize: 11,
+                            fontSize: 10,
                             color: PdfColors.black)),
                   ]);
-                  catCl += movementQty;
+                  catCl += s.closing;
                 }
               }
 
               content.add(
                 pw.Center(
                   child: pw.SizedBox(
-                    width: 400,
+                    width: 450,
                     child: pw.TableHelper.fromTextArray(
                       border: pw.TableBorder.all(
                           color: PdfColors.grey200, width: 0.5),
@@ -224,26 +226,27 @@ class PdfReportService {
                       headerStyle: pw.TextStyle(
                           color: PdfColors.white,
                           fontWeight: pw.FontWeight.bold,
-                          fontSize: 11),
-                      cellStyle: const pw.TextStyle(fontSize: 11),
+                          fontSize: 10),
+                      cellStyle: const pw.TextStyle(fontSize: 10),
                       cellPadding: const pw.EdgeInsets.symmetric(
-                          vertical: 5, horizontal: 4),
+                          vertical: 4, horizontal: 4),
                       oddRowDecoration:
                           const pw.BoxDecoration(color: PdfColors.grey50),
                       headerAlignment: pw.Alignment.centerRight,
                       cellAlignment: pw.Alignment.centerRight,
                       columnWidths: {
-                        0: const pw.FixedColumnWidth(
-                            190), // Size Description (Snug layout for tags like 'MS Pipe 0.75" 19x19(1.6) 5kg')
-                        1: const pw.FixedColumnWidth(70), // Stock In (MT)
-                        2: const pw.FixedColumnWidth(70), // Stock Out (MT)
-                        3: const pw.FixedColumnWidth(70), // Movement Qty (MT)
+                        0: const pw.FixedColumnWidth(170), // Size Description
+                        1: const pw.FixedColumnWidth(65), // Opening (MT)
+                        2: const pw.FixedColumnWidth(65), // Inward (MT)
+                        3: const pw.FixedColumnWidth(65), // Outward (MT)
+                        4: const pw.FixedColumnWidth(70), // Closing (MT)
                       },
                       headers: [
                         'Size Description',
-                        'Stock In (MT)',
-                        'Stock Out (MT)',
-                        'Movement Qty (MT)'
+                        'Opening',
+                        'Inward',
+                        'Outward',
+                        'Closing'
                       ],
                       data: tableData,
                       cellAlignments: {
@@ -251,6 +254,7 @@ class PdfReportService {
                         1: pw.Alignment.centerRight,
                         2: pw.Alignment.centerRight,
                         3: pw.Alignment.centerRight,
+                        4: pw.Alignment.centerRight,
                       },
                     ),
                   ),
@@ -260,7 +264,7 @@ class PdfReportService {
               content.add(
                 pw.Center(
                   child: pw.SizedBox(
-                    width: 400,
+                    width: 450,
                     child: pw.Container(
                       padding: const pw.EdgeInsets.symmetric(
                           vertical: 6, horizontal: 8),

@@ -17,141 +17,7 @@ import '../models/report_models.dart';
 import '../utils/sorting_utils.dart';
 import '../utils/formatters.dart';
 
-// ---------------------------------------------------------------------------
-// TOP-LEVEL ISOLATE FUNCTION — must be outside class for compute() to work
-// ---------------------------------------------------------------------------
-/// Input: JSON-encoded list of StockTransaction maps.
-/// Output: Map with pre-calculated notifier values (all plain types).
-String _isolateNormalizeLocation(String? loc) {
-  if (loc == null) return 'YARD';
-  final trimmed = loc.trim().toUpperCase();
-  if (trimmed.contains('YARD') ||
-      trimmed.contains('WH') ||
-      trimmed.contains('WAREHOUSE') ||
-      trimmed.contains('YARD STOCK')) {
-    return 'YARD';
-  }
-  if (trimmed.contains('FACTORY') ||
-      trimmed.contains('PLANT') ||
-      trimmed.contains('FACTORY STOCK')) {
-    return 'FACTORY';
-  }
-  return trimmed;
-}
 
-Map<String, dynamic> _computeStockNotifiersIsolate(String jsonStr) {
-  final List<dynamic> decoded = jsonDecode(jsonStr);
-  final List<StockTransaction> txs =
-      decoded.map((e) => StockTransaction.fromJson(e)).toList();
-
-  double todayIn = 0;
-  double todayOut = 0;
-  double yardTotal = 0;
-  double factoryTotal = 0;
-
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
-  final Map<String, Map<String, dynamic>> variantsMap = {};
-
-  // Process ALL transactions — accumulate raw balance without mid-step clamping.
-  // Transactions arrive newest-first from the backend, so iterate in reverse
-  // to process chronologically (oldest-first).
-  for (int i = txs.length - 1; i >= 0; i--) {
-    final tx = txs[i];
-    if (tx.isReversed) continue;
-
-    final String txnType = tx.type.trim().toUpperCase();
-
-    // Explicitly ignore PURCHASE transactions for warehouse stock
-    if (txnType == 'PURCHASE') {
-      continue;
-    }
-
-    // Compound key: Item Name + Size + Location
-    final String loc = _isolateNormalizeLocation(tx.location);
-    final String normalizedSize = formatSizeDisplay(tx.itemName, tx.size);
-    final key = '${tx.itemName}|$normalizedSize|$loc';
-    variantsMap.putIfAbsent(
-        key,
-        () => {
-              'itemName': tx.itemName,
-              'category': tx.itemName,
-              'size': normalizedSize,
-              'currentStockMT': 0.0,
-              'location': loc,
-            });
-
-    final v = variantsMap[key]!;
-    final double q = (v['currentStockMT'] as double);
-
-    if (txnType == 'IN' ||
-        txnType == 'INWARD' ||
-        txnType == 'OPENING_STOCK' ||
-        txnType == 'OPENING' ||
-        txnType == 'RETURN' ||
-        txnType == 'ADJUSTMENT') {
-      v['currentStockMT'] = q + tx.qtyMT;
-      if (!tx.dateTime.isBefore(today) &&
-          (txnType == 'IN' || txnType == 'INWARD')) {
-        todayIn += tx.qtyMT;
-      }
-    } else if (txnType == 'OUT' ||
-        txnType == 'OUTWARD' ||
-        txnType == 'SALE' ||
-        txnType == 'RESERVE') {
-      v['currentStockMT'] = q - tx.qtyMT;
-      if (!tx.dateTime.isBefore(today) &&
-          (txnType == 'OUT' || txnType == 'OUTWARD' || txnType == 'SALE')) {
-        todayOut += tx.qtyMT;
-      }
-    } else if (txnType == 'TRANSFER') {
-      v['currentStockMT'] = q - tx.qtyMT;
-      if (tx.toLocation != null) {
-        final String toLoc = _isolateNormalizeLocation(tx.toLocation);
-        final toKey = '${tx.itemName}|$normalizedSize|$toLoc';
-        variantsMap.putIfAbsent(
-            toKey,
-            () => {
-                  'itemName': tx.itemName,
-                  'category': tx.itemName,
-                  'size': normalizedSize,
-                  'currentStockMT': 0.0,
-                  'location': toLoc,
-                });
-        variantsMap[toKey]!['currentStockMT'] =
-            (variantsMap[toKey]!['currentStockMT'] as double) + tx.qtyMT;
-      }
-    }
-  }
-
-  // Final-stage clamp: only clamp at output, never mid-accumulation
-  for (final v in variantsMap.values) {
-    final double stock = v['currentStockMT'] as double;
-    if (stock < 0.0) v['currentStockMT'] = 0.0;
-  }
-
-  final nonZero = variantsMap.values
-      .where((v) => (v['currentStockMT'] as double) != 0.0)
-      .toList();
-
-  double totalMT =
-      nonZero.fold(0.0, (s, v) => s + (v['currentStockMT'] as double));
-
-  for (final v in nonZero) {
-    final loc = (v['location'] as String).toUpperCase();
-    if (loc == 'YARD') yardTotal += v['currentStockMT'] as double;
-    if (loc == 'FACTORY') factoryTotal += v['currentStockMT'] as double;
-  }
-
-  return {
-    'totalMT': totalMT,
-    'yardTotal': yardTotal,
-    'factoryTotal': factoryTotal,
-    'todayIn': todayIn,
-    'todayOut': todayOut,
-    'inventoryList': nonZero,
-  };
-}
 
 class DataRepository {
   static const String _boxName = 'msm_cache_box';
@@ -835,7 +701,7 @@ class DataRepository {
           query = query.eq('location', locationFilter.toUpperCase());
         }
         final response = await query.limit(10000);
-        if (response != null && (response as List).isNotEmpty) {
+        if ((response as List).isNotEmpty) {
           return List<Map<String, dynamic>>.from(response);
         }
       } catch (_) {
@@ -1052,9 +918,13 @@ class DataRepository {
       final double pOut = _parseDouble(row['period_out_mt']);
       final double cl = _parseDouble(row['closing_stock_mt']);
 
+      final String cat = canonicalizeCategory(itemName);
+
       if (!ledgerMap.containsKey(key)) {
         ledgerMap[key] = {
           'itemName': itemName,
+          'category': cat,
+          'category_name': cat,
           'size': size,
           'opening': op,
           'opening_mt': op,
@@ -1409,152 +1279,79 @@ class DataRepository {
     });
   }
 
-  // ignore: unused_element
-  static Future<void> _deriveNotifiersViaCompute(
-      List<StockTransaction> txs) async {
-    try {
-      // Use ALL transactions — no reset cutoff for stock calculation.
-      debugPrint("Isolate Processing Txs: ${txs.length}");
-
-      final txJsonStr = jsonEncode(txs.map((t) => t.toJson()).toList());
-      final result = await compute(_computeStockNotifiersIsolate, txJsonStr);
-
-      final double totalVal = (result['totalMT'] as num).toDouble();
-      final double yardVal = (result['yardTotal'] as num).toDouble();
-      final double factoryVal = (result['factoryTotal'] as num).toDouble();
-      final double todayInVal = (result['todayIn'] as num).toDouble();
-      final double todayOutVal = (result['todayOut'] as num).toDouble();
-
-      final rawList = result['inventoryList'] as List<dynamic>;
-      final List<ItemVariant> derivedList = rawList.map((v) {
-        final m = v as Map<String, dynamic>;
-        return ItemVariant(
-          itemName: m['itemName'] as String,
-          category: m['category'] as String? ?? m['itemName'] as String,
-          size: m['size'] as String,
-          currentStockMT: (m['currentStockMT'] as num).toDouble(),
-          location: m['location'] as String,
-        );
-      }).toList();
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        totalStockNotifier.value = totalVal;
-        yardStockNotifier.value = yardVal;
-        factoryStockNotifier.value = factoryVal;
-        todayInNotifier.value = todayInVal;
-        todayOutNotifier.value = todayOutVal;
-        inventoryListNotifier.value = derivedList;
-        _updateErpStockNotifierFromInventoryList(derivedList);
-      });
-
-      // Persist Total Stock for instant launch feedback
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble('cached_total_stock', totalVal);
-    } catch (e) {
-      debugPrint("compute() failed, falling back to sync: $e");
-      await _deriveNotifiersFromTransactions(txs);
-    }
+  /// Fetches today's summary by calling the RPC 'get_stock_movement_report' for the given date window.
+  static Future<List<Map<String, dynamic>>> fetchTodaysSummary({
+    String locationFilter = 'ALL',
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    final now = DateTime.now();
+    final start = startDate ?? DateTime(now.year, now.month, now.day);
+    final end = endDate ??
+        DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
+    return fetchStockMovementReport(
+      startDate: start,
+      endDate: end,
+      locationFilter: locationFilter,
+    );
   }
 
-  static Future<void> _deriveNotifiersFromTransactions(
-      List<StockTransaction> txs) async {
-    double totalMT = 0;
-    double todayIn = 0;
-    double todayOut = 0;
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+  /// Calls RPC 'get_stock_movement_report' to compute opening balance,
+  /// period inward, period outward, and closing stock per item size,
+  /// structured as [StockMovementEntry] instances for reports and exports.
+  static Future<List<StockMovementEntry>> fetchStockMovementEntries({
+    required DateTime startDate,
+    required DateTime endDate,
+    String location = 'ALL',
+  }) async {
+    final rows = await fetchStockMovementReport(
+      startDate: startDate,
+      endDate: endDate,
+      locationFilter: location,
+    );
 
-    final Map<String, ItemVariant> variantsMap = {};
+    final Map<String, StockMovementEntry> itemMap = {};
 
-    // No reset cutoff — compute stock from ALL transactions to match Google Sheet.
-    // Process chronologically (oldest first) since txs arrive newest-first.
-    for (int i = txs.length - 1; i >= 0; i--) {
-      final tx = txs[i];
-      if (tx.isReversed) continue;
+    for (final row in rows) {
+      final itemName = row['item_name']?.toString() ?? '';
+      final size = row['size_label']?.toString() ?? '';
+      final cat = canonicalizeCategory(itemName);
 
-      // Compound key: Item Name + Size + Location
-      final String loc = _isolateNormalizeLocation(tx.location);
-      final String normalizedSize = formatSizeDisplay(tx.itemName, tx.size);
-      final key = "${tx.itemName}|$normalizedSize|$loc";
-      variantsMap.putIfAbsent(
-          key,
-          () => ItemVariant(
-                itemName: tx.itemName,
-                category: tx.itemName,
-                size: normalizedSize,
-                currentStockMT: 0,
-                location: loc,
-              ));
-
-      final v = variantsMap[key]!;
-      if (['IN', 'RETURN', 'ADJUSTMENT', 'OPENING'].contains(tx.type)) {
-        v.currentStockMT += tx.qtyMT;
-        if (!tx.dateTime.isBefore(today)) {
-          if (tx.type == 'IN') todayIn += tx.qtyMT;
-        }
-      } else if (tx.type == 'OUT' || tx.type == 'RESERVE') {
-        v.currentStockMT -= tx.qtyMT;
-        if (!tx.dateTime.isBefore(today)) {
-          if (tx.type == 'OUT') todayOut += tx.qtyMT;
-        }
-      } else if (tx.type == 'TRANSFER') {
-        v.currentStockMT -= tx.qtyMT;
-        if (tx.toLocation != null) {
-          final String toLoc = _isolateNormalizeLocation(tx.toLocation);
-          final toKey = "${tx.itemName}|$normalizedSize|$toLoc";
-          variantsMap.putIfAbsent(
-              toKey,
-              () => ItemVariant(
-                    itemName: tx.itemName,
-                    category: tx.itemName,
-                    size: normalizedSize,
-                    currentStockMT: 0,
-                    location: toLoc,
-                  ));
-          variantsMap[toKey]!.currentStockMT += tx.qtyMT;
-        }
+      if (['Binding Wire', 'Nails', 'Barbed Wire', 'Heavy Structure ISMB']
+          .contains(cat)) {
+        continue;
       }
+
+      final op = _parseDouble(row['opening_stock_mt']);
+      final pIn = _parseDouble(row['period_in_mt']);
+      final pOut = _parseDouble(row['period_out_mt']);
+      final cl = _parseDouble(row['closing_stock_mt']);
+
+      final key = "${cat.toUpperCase()}_${itemName.toUpperCase()}";
+      itemMap.putIfAbsent(
+        key,
+        () => StockMovementEntry(
+          category: cat,
+          item: itemName,
+          sizes: [],
+        ),
+      );
+
+      itemMap[key]!.sizes.add(StockSizeMovement(
+        label: size,
+        opening: op,
+        inQty: pIn,
+        outQty: pOut,
+        closing: cl,
+      ));
     }
 
-    // Final-stage clamp: only at output, never mid-accumulation
-    for (final v in variantsMap.values) {
-      if (v.currentStockMT < 0.0) v.currentStockMT = 0.0;
+    final list = itemMap.values.toList();
+    list.sort((a, b) => SortingUtils.compareCategories(a.item, b.item));
+    for (var entry in list) {
+      entry.sizes.sort((a, b) => SortingUtils.compareSizes(a.label, b.label));
     }
-
-    final inventoryList =
-        variantsMap.values.where((v) => v.currentStockMT != 0).toList();
-    inventoryList.sort((a, b) {
-      int catComp = SortingUtils.compareCategories(a.category, b.category);
-      if (catComp != 0) return catComp;
-      int itemComp = a.itemName.compareTo(b.itemName);
-      if (itemComp != 0) return itemComp;
-      int locComp = a.location.compareTo(b.location);
-      if (locComp != 0) return locComp;
-      return SortingUtils.compareSizes(a.size, b.size);
-    });
-    totalMT = inventoryList.fold(0.0, (sum, v) => sum + v.currentStockMT);
-
-    double yardTotal = 0;
-    double factoryTotal = 0;
-    for (var v in inventoryList) {
-      if (v.location.toUpperCase() == 'YARD') yardTotal += v.currentStockMT;
-      if (v.location.toUpperCase() == 'FACTORY')
-        factoryTotal += v.currentStockMT;
-    }
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      totalStockNotifier.value = totalMT;
-      yardStockNotifier.value = yardTotal;
-      factoryStockNotifier.value = factoryTotal;
-      todayInNotifier.value = todayIn;
-      todayOutNotifier.value = todayOut;
-      inventoryListNotifier.value = inventoryList;
-      _updateErpStockNotifierFromInventoryList(inventoryList);
-    });
-
-    // Persist Total Stock for instant launch feedback
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble('cached_total_stock', totalMT);
+    return list;
   }
 
   static Future<bool> submitTransactions(
@@ -1906,6 +1703,36 @@ class DataRepository {
 
     final Map<String, Map<String, dynamic>> ledgerMap = {};
 
+    // 1. Pre-populate ledgerMap with known inventory sizes to preserve items with 0 movements
+    for (final v in inventoryListNotifier.value) {
+      if (selectedLoc != 'ALL' && v.location.toUpperCase() != selectedLoc) {
+        continue;
+      }
+      final String cat = canonicalizeCategory(v.category);
+      if (['Binding Wire', 'Nails', 'Barbed Wire', 'Heavy Structure ISMB']
+              .contains(cat) &&
+          v.currentStockMT == 0) {
+        continue;
+      }
+      final key = "${v.itemName}_${v.size}";
+      ledgerMap.putIfAbsent(
+        key,
+        () => {
+          'itemName': v.itemName,
+          'category': cat,
+          'category_name': cat,
+          'size': v.size,
+          'opening': 0.0,
+          'opening_mt': 0.0,
+          'opening_balance': 0.0,
+          'inward': 0.0,
+          'outward': 0.0,
+          'closing': 0.0,
+          'closing_mt': 0.0,
+        },
+      );
+    }
+
     for (var tx in transactions) {
       if (tx.isReversed) continue;
       if (tx.txnId.startsWith('IN_V_')) continue;
@@ -1943,6 +1770,12 @@ class DataRepository {
           tx.category.isNotEmpty && tx.category != 'General'
               ? tx.category
               : tx.itemName);
+
+      if (['Binding Wire', 'Nails', 'Barbed Wire', 'Heavy Structure ISMB']
+          .contains(cat)) {
+        continue;
+      }
+
       ledgerMap.putIfAbsent(
           key,
           () => {
@@ -1983,7 +1816,11 @@ class DataRepository {
         }
       }
 
-      if (tx.dateTime.isBefore(startOfDay)) {
+      final bool isOpeningTxn = type == 'OPENING' ||
+          type == 'OPENING_STOCK' ||
+          tx.txnId.startsWith('OPENING-');
+
+      if (tx.dateTime.isBefore(startOfDay) || isOpeningTxn) {
         final double currentOp = (entry['opening'] as double) + (txIn - txOut);
         entry['opening'] = currentOp;
         entry['opening_mt'] = currentOp;
@@ -2005,6 +1842,12 @@ class DataRepository {
       entry['closing'] = cl;
       entry['closing_mt'] = cl;
     }
+
+    ledgerMap.removeWhere((k, v) =>
+        (v['opening'] as double) == 0.0 &&
+        (v['inward'] as double) == 0.0 &&
+        (v['outward'] as double) == 0.0 &&
+        (v['closing'] as double) == 0.0);
 
     return ledgerMap;
   }

@@ -80,7 +80,7 @@ class InventoryProvider extends ChangeNotifier {
     "MS Pipe",
     "MS Angle",
     "MS Channel",
-    "SQR BAR",
+    "Sqr Bar",
     "Flats",
     "Round Bar",
   ];
@@ -94,7 +94,7 @@ class InventoryProvider extends ChangeNotifier {
       "MS CHANNELS",
       "MS CHANNEL (STRUCTURAL)"
     ],
-    "SQR BAR": ["SQR BAR", "SQUARE BAR", "SQ BAR", "MS SQR BAR"],
+    "Sqr Bar": ["SQR BAR", "SQUARE BAR", "SQ BAR", "MS SQR BAR", "SQR. BAR"],
     "Flats": ["FLATS", "FLAT", "MS FLAT", "MS FLATS"],
     "Round Bar": ["ROUND BAR", "ROUND", "MS ROUND BAR", "MS ROUND"],
   };
@@ -125,7 +125,7 @@ class InventoryProvider extends ChangeNotifier {
       'C 100x50 (4"x 2") 56',
       'C 75x40 (3"X1.5") 36',
     ],
-    "SQR BAR": [
+    "Sqr Bar": [
       "10mm",
       "12mm",
     ],
@@ -292,7 +292,7 @@ class InventoryProvider extends ChangeNotifier {
           return matchesAlias || matchesNorm;
         }).toList();
 
-        if (catName == "SQR BAR" || catName == "Round Bar") {
+        if (catName == "Sqr Bar" || catName == "Round Bar") {
           final List<String> sheetLabels = [];
           for (var item in categoryItemsFromSheet) {
             final sizes = item['sizes'] as List? ?? [];
@@ -360,7 +360,7 @@ class InventoryProvider extends ChangeNotifier {
           }
 
           if (bestMatch != null) {
-            if (catName == "SQR BAR" || catName == "Round Bar") {
+            if (catName == "Sqr Bar" || catName == "Round Bar") {
               debugPrint(
                   "DEBUG: [SampleRate-V3] SUCCESS: Matched '$reqSize' -> '$matchedLabel'");
             }
@@ -378,7 +378,7 @@ class InventoryProvider extends ChangeNotifier {
             bestMatches[catName]![normReq] =
                 SampleRateSize(matchedLabel!, sd, weight);
           } else {
-            if (catName == "SQR BAR" || catName == "Round Bar") {
+            if (catName == "Sqr Bar" || catName == "Round Bar") {
               debugPrint(
                   "DEBUG: [SampleRate-V3] FAILED to match '$reqSize' for $catName");
             }

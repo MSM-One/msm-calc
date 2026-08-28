@@ -147,6 +147,12 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
           ? e.itemName
           : (e.category.isNotEmpty ? e.category : 'Other');
       final String categoryGroup = DataRepository.canonicalizeCategory(rawCat);
+      if (['Binding Wire', 'Nails', 'Barbed Wire', 'Heavy Structure ISMB']
+              .contains(categoryGroup) &&
+          e.inQty == 0 &&
+          e.outQty == 0) {
+        continue;
+      }
       categoryMap.putIfAbsent(categoryGroup, () => []);
 
       double weight = lookupSizeWeight(e.size);

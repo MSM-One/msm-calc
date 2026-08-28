@@ -87,7 +87,7 @@ class _MasterSizeManagementScreenState
         'MS Pipe',
         'MS Angle',
         'MS Channel',
-        'SQR BAR',
+        'Sqr Bar',
         'Flats',
         'Round Bar',
       ];

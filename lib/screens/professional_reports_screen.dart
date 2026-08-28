@@ -350,13 +350,19 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
       final erpData = await DataRepository.getERPStockAsync(null);
       final locations = erpData['locations'] as List<dynamic>? ?? [];
 
+      final rpcStockEntries = await DataRepository.fetchStockMovementEntries(
+        startDate: _startDate,
+        endDate: _endDate,
+        location: _locationFilter,
+      );
+
       final txList = await DataRepository.fetchStockMovement(
         startDate: _startDate,
         endDate: _endDate,
         location: _locationFilter,
       );
 
-      _processData(txList, locations);
+      _processData(txList, locations, rpcStockEntries);
     } catch (e) {
       debugPrint("[REPORT ERROR] $e");
     } finally {
@@ -368,7 +374,8 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
     }
   }
 
-  void _processData(List<StockTransaction> txs, List<dynamic> locations) {
+  void _processData(List<StockTransaction> txs, List<dynamic> locations,
+      [List<StockMovementEntry>? rpcStockEntries]) {
     if (!mounted) return;
     try {
       debugPrint('[DesktopReports] selectedLocation=$_locationFilter');
@@ -394,7 +401,13 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
 
       debugPrint('[DesktopReports] filtered transactions=${visibleTxs.length}');
 
-      _calculateStockMovement(visibleTxs, locations);
+      if (rpcStockEntries != null && rpcStockEntries.isNotEmpty) {
+        _stockReport = rpcStockEntries;
+        _groupedReport =
+            ReportCalculators.groupStocksByCategoryAndItem(_stockReport);
+      } else {
+        _calculateStockMovement(visibleTxs, locations);
+      }
 
       try {
         _deadStockReport = ReportCalculators.calculateDeadStock(
@@ -2371,7 +2384,7 @@ class _StockMovementTab extends StatelessWidget {
           ),
           children: [
             const Divider(height: 1),
-            // Header Row: Item | Inward | Outward | Balance
+            // Header Row: Item | Opening | Inward | Outward | Closing
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
               color: Colors.grey.shade50,
@@ -2388,7 +2401,19 @@ class _StockMovementTab extends StatelessWidget {
                     ),
                   ),
                   SizedBox(
-                    width: 100,
+                    width: 90,
+                    child: Text(
+                      "Opening",
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: textGrey),
+                    ),
+                  ),
+                  SizedBox(width: 12),
+                  SizedBox(
+                    width: 90,
                     child: Text(
                       "Inward",
                       textAlign: TextAlign.right,
@@ -2398,9 +2423,9 @@ class _StockMovementTab extends StatelessWidget {
                           color: textGrey),
                     ),
                   ),
-                  SizedBox(width: 16),
+                  SizedBox(width: 12),
                   SizedBox(
-                    width: 100,
+                    width: 90,
                     child: Text(
                       "Outward",
                       textAlign: TextAlign.right,
@@ -2410,11 +2435,11 @@ class _StockMovementTab extends StatelessWidget {
                           color: textGrey),
                     ),
                   ),
-                  SizedBox(width: 16),
+                  SizedBox(width: 12),
                   SizedBox(
-                    width: 100,
+                    width: 95,
                     child: Text(
-                      "Balance",
+                      "Closing",
                       textAlign: TextAlign.right,
                       style: TextStyle(
                           fontSize: 12,
@@ -2458,21 +2483,28 @@ class _StockMovementTab extends StatelessWidget {
                   fontSize: 13, fontWeight: FontWeight.w600, color: textDark),
             ),
           ),
-          _buildSizeMetric(formatNumber(size.inQty), Colors.green.shade600),
-          const SizedBox(width: 16),
-          _buildSizeMetric(formatNumber(size.outQty), Colors.red.shade600),
-          const SizedBox(width: 16),
+          _buildSizeMetric(formatNumber(size.opening), const Color(0xFF64748B),
+              width: 90),
+          const SizedBox(width: 12),
+          _buildSizeMetric(formatNumber(size.inQty), Colors.green.shade600,
+              width: 90),
+          const SizedBox(width: 12),
+          _buildSizeMetric(formatNumber(size.outQty), Colors.red.shade600,
+              width: 90),
+          const SizedBox(width: 12),
           _buildSizeMetric(formatNumber(size.closing),
               size.closing < 0 ? Colors.red : textDark,
-              isBold: true),
+              isBold: true,
+              width: 95),
         ],
       ),
     );
   }
 
-  Widget _buildSizeMetric(String value, Color color, {bool isBold = false}) {
+  Widget _buildSizeMetric(String value, Color color,
+      {bool isBold = false, double width = 100}) {
     return SizedBox(
-      width: 100,
+      width: width,
       child: Text(
         value,
         textAlign: TextAlign.right,
@@ -2683,56 +2715,52 @@ class _StockMovementTab extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  const Icon(Icons.arrow_downward_rounded,
-                      color: Colors.green, size: 16),
-                  const SizedBox(width: 4),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text("INWARD",
-                          style: TextStyle(
-                              fontSize: 9,
-                              color: textGrey,
-                              fontWeight: FontWeight.bold)),
-                      Text("${formatNumber(size.inQty)} MT",
-                          style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.green)),
-                    ],
-                  ),
-                ],
+              Expanded(
+                child: _buildMobileMiniMetric(
+                    "OPENING", formatNumber(size.opening), const Color(0xFF64748B)),
               ),
-              Row(
-                children: [
-                  const Icon(Icons.arrow_upward_rounded,
-                      color: Colors.red, size: 16),
-                  const SizedBox(width: 4),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text("OUTWARD",
-                          style: TextStyle(
-                              fontSize: 9,
-                              color: textGrey,
-                              fontWeight: FontWeight.bold)),
-                      Text("${formatNumber(size.outQty)} MT",
-                          style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.red)),
-                    ],
-                  ),
-                ],
+              Expanded(
+                child: _buildMobileMiniMetric(
+                    "INWARD", formatNumber(size.inQty), Colors.green.shade700),
+              ),
+              Expanded(
+                child: _buildMobileMiniMetric(
+                    "OUTWARD", formatNumber(size.outQty), Colors.red.shade700),
+              ),
+              Expanded(
+                child: _buildMobileMiniMetric(
+                    "CLOSING", formatNumber(size.closing), isNegative ? Colors.red : textDark),
               ),
             ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildMobileMiniMetric(String label, String value, Color color) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 9,
+            color: textGrey,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          "$value MT",
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
+      ],
     );
   }
 
@@ -4247,8 +4275,45 @@ class ReportCalculators {
     final filterEnd = DateTime(end.year, end.month, end.day, 23, 59, 59, 999);
 
     Map<String, Map<String, StockMovementEntry>> map = {};
+
+    // 1. Pre-populate map from active inventory list to preserve all catalog items (including 0-movement items like MS Structure ISMC)
+    for (final v in DataRepository.inventoryListNotifier.value) {
+      if (locationFilter != 'ALL' &&
+          v.location.toUpperCase() != locationFilter.toUpperCase()) {
+        continue;
+      }
+      final String catName = DataRepository.canonicalizeCategory(v.category);
+      if (['Binding Wire', 'Nails', 'Barbed Wire', 'Heavy Structure ISMB']
+              .contains(catName) &&
+          v.currentStockMT == 0) {
+        continue;
+      }
+      final String key =
+          "${catName.toUpperCase()}_${v.itemName.toUpperCase()}";
+      map.putIfAbsent(
+          key,
+          () => {
+                v.itemName: StockMovementEntry(
+                  category: catName,
+                  item: v.itemName,
+                  sizes: [],
+                )
+              });
+      var entry = map[key]![v.itemName]!;
+      if (!entry.sizes.any((s) => s.label == v.size)) {
+        entry.sizes.add(StockSizeMovement(
+          label: v.size,
+          opening: 0,
+          inQty: 0,
+          outQty: 0,
+          closing: 0,
+        ));
+      }
+    }
+
     for (var tx in allTxs) {
       if (tx.isReversed) continue;
+      if (tx.txnId.startsWith('IN_V_')) continue;
 
       final String txLoc = tx.location.trim().toUpperCase();
       final String? toLoc = tx.toLocation?.trim().toUpperCase();
@@ -4280,6 +4345,12 @@ class ReportCalculators {
               ? tx.category
               : tx.itemName;
       final String catName = DataRepository.canonicalizeCategory(rawCat);
+
+      if (['Binding Wire', 'Nails', 'Barbed Wire', 'Heavy Structure ISMB']
+          .contains(catName)) {
+        continue;
+      }
+
       final String key =
           "${catName.toUpperCase()}_${tx.itemName.toUpperCase()}";
       if (!map.containsKey(key)) {
@@ -4308,24 +4379,26 @@ class ReportCalculators {
         if (isTransferIn) isAdd = true;
         if (isTransferOut) isSub = true;
       } else if (txType == 'TRANSFER') {
-        // Internal transfer between locations when locationFilter is ALL
-        // Net company stock does not change
         isAdd = false;
         isSub = false;
-      } else if (['IN', 'PURCHASE', 'RETURN', 'OPENING', 'ADJUSTMENT']
+      } else if (['IN', 'RETURN', 'OPENING', 'OPENING_STOCK', 'ADJUSTMENT']
           .contains(txType)) {
         if (txType == 'ADJUSTMENT' && tx.qty < 0) {
           isSub = true;
         } else {
           isAdd = true;
         }
-      } else if (['OUT', 'RESERVE'].contains(txType)) {
+      } else if (['OUT', 'OUTWARD', 'SALE', 'RESERVE'].contains(txType)) {
         isSub = true;
       }
 
+      final bool isOpeningTxn = txType == 'OPENING' ||
+          txType == 'OPENING_STOCK' ||
+          tx.txnId.startsWith('OPENING-');
+
       final double qty = tx.qty.abs();
 
-      if (txDate.isBefore(filterStart)) {
+      if (txDate.isBefore(filterStart) || isOpeningTxn) {
         if (isAdd) sizeEntry.opening += qty;
         if (isSub) sizeEntry.opening -= qty;
       } else if (txDate.isAfter(filterEnd)) {
@@ -4340,7 +4413,15 @@ class ReportCalculators {
     }
 
     List<StockMovementEntry> list = [];
-    map.forEach((cat, items) => list.addAll(items.values));
+    map.forEach((cat, items) {
+      for (var entry in items.values) {
+        entry.sizes.removeWhere((s) =>
+            s.opening == 0 && s.inQty == 0 && s.outQty == 0 && s.closing == 0);
+        if (entry.sizes.isNotEmpty) {
+          list.add(entry);
+        }
+      }
+    });
     list.sort((a, b) => SortingUtils.compareCategories(a.item, b.item));
     for (var entry in list) {
       entry.sizes.sort((a, b) => SortingUtils.compareSizes(a.label, b.label));
@@ -4476,6 +4557,16 @@ class ReportCalculators {
     Map<String, DailyMovementEntry> map = {};
     for (var tx in allTxs) {
       if (tx.isReversed) continue;
+      if (tx.txnId.startsWith('IN_V_')) continue;
+
+      final typeUpper = tx.type.trim().toUpperCase();
+      if (typeUpper == 'PURCHASE') continue;
+      if (typeUpper == 'OPENING' ||
+          typeUpper == 'OPENING_STOCK' ||
+          tx.txnId.startsWith('OPENING-')) {
+        continue;
+      }
+
       final txDate = tx.dateTime;
       if (txDate.isAfter(start.subtract(const Duration(milliseconds: 1))) &&
           txDate.isBefore(end.add(const Duration(milliseconds: 1)))) {
@@ -4485,6 +4576,12 @@ class ReportCalculators {
                 : tx.itemName;
         final String canonicalCat =
             DataRepository.canonicalizeCategory(rawCat);
+
+        if (['Binding Wire', 'Nails', 'Barbed Wire', 'Heavy Structure ISMB']
+            .contains(canonicalCat)) {
+          continue;
+        }
+
         final String key =
             "${canonicalCat.toUpperCase()}_${tx.itemName.toUpperCase()}_${tx.sizeLabel.toUpperCase()}";
         map.putIfAbsent(
@@ -4497,22 +4594,16 @@ class ReportCalculators {
                   outQty: 0,
                 ));
         var entry = map[key]!;
-        final String typeUpper = tx.type.trim().toUpperCase();
-        // Physical inward arrivals: strictly IN, OPENING, RETURN, ADJUSTMENT (exclusively exclude PURCHASE)
-        if (typeUpper != 'PURCHASE') {
-          if (typeUpper == 'IN' ||
-              typeUpper == 'INWARD' ||
-              typeUpper == 'OPENING' ||
-              typeUpper == 'OPENING_STOCK' ||
-              typeUpper == 'RETURN' ||
-              typeUpper == 'ADJUSTMENT') {
-            entry.inQty += tx.qty.abs();
-          } else if (typeUpper == 'OUT' ||
-              typeUpper == 'OUTWARD' ||
-              typeUpper == 'SALE' ||
-              typeUpper == 'RESERVE') {
-            entry.outQty += tx.qty.abs();
-          }
+        if (typeUpper == 'IN' ||
+            typeUpper == 'INWARD' ||
+            typeUpper == 'RETURN' ||
+            typeUpper == 'ADJUSTMENT') {
+          entry.inQty += tx.qty.abs();
+        } else if (typeUpper == 'OUT' ||
+            typeUpper == 'OUTWARD' ||
+            typeUpper == 'SALE' ||
+            typeUpper == 'RESERVE') {
+          entry.outQty += tx.qty.abs();
         }
       }
     }

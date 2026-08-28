@@ -345,6 +345,15 @@ class _StockLedgerScreenState extends State<StockLedgerScreen> {
       final double outward = parseDouble(item['outward']);
       final double closing = opening + inward - outward;
 
+      if (['Binding Wire', 'Nails', 'Barbed Wire', 'Heavy Structure ISMB']
+              .contains(cat) &&
+          opening == 0 &&
+          inward == 0 &&
+          outward == 0 &&
+          closing == 0) {
+        continue;
+      }
+
       // Filter by Search Query
       if (widget.searchQuery.isNotEmpty) {
         final query = widget.searchQuery.toLowerCase();

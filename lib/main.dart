@@ -2596,12 +2596,15 @@ class DOConstants {
     "MS Pipe",
     "MS Angle",
     "MS Channel",
-    "Binding Wire",
-    "Nails",
+    "Flats",
+    "ERW Pipe",
     "Sqr Bar",
     "Round Bar",
-    "Flats",
-    "HR Pipe"
+    "HR Pipe",
+    "GATE Channel",
+    "MS Structure ISMC",
+    "Binding Wire",
+    "Nails"
   ];
 
   // ✅ FULL DATA FROM YOUR HTML (Included for offline fallback)

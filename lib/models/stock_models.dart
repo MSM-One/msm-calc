@@ -24,7 +24,7 @@ String detectCategory(String itemName) {
   if (name.contains("GATE")) return "GATE Channel";
   if (name.contains("CHANNEL")) return "MS Channel";
   if (name.contains("FLAT")) return "Flats";
-  if (name.contains("SQUARE") || name.contains("SQR")) return "SQR BAR";
+  if (name.contains("SQUARE") || name.contains("SQR")) return "Sqr Bar";
   if (name.contains("ROUND")) return "Round Bar";
   if (name.contains("NAIL")) return "Nails";
   if (name.contains("BINDING")) return "Binding Wire";
@@ -68,10 +68,10 @@ class ItemVariant {
             : (itemName.trim().isNotEmpty
                 ? detectCategory(itemName)
                 : 'General')),
-        _currentStockMT = currentStockMT < 0 ? 0.0 : currentStockMT;
+        _currentStockMT = currentStockMT;
 
   double get currentStockMT => _currentStockMT;
-  set currentStockMT(double val) => _currentStockMT = val < 0 ? 0.0 : val;
+  set currentStockMT(double val) => _currentStockMT = val;
 
   double get availableStockMT {
     final diff = currentStockMT - reservedStockMT;

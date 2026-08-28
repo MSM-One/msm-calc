@@ -35,14 +35,27 @@ class ExcelReportService {
 
     // Data
     for (var e in entries) {
-      sheet.appendRow([
-        TextCellValue(e.itemName),
-        TextCellValue(e.size),
-        DoubleCellValue(e.opening),
-        DoubleCellValue(e.inQty),
-        DoubleCellValue(e.outQty),
-        DoubleCellValue(e.closing),
-      ]);
+      if (e.sizes.isNotEmpty) {
+        for (var s in e.sizes) {
+          sheet.appendRow([
+            TextCellValue(e.itemName),
+            TextCellValue(s.label),
+            DoubleCellValue(s.opening),
+            DoubleCellValue(s.inQty),
+            DoubleCellValue(s.outQty),
+            DoubleCellValue(s.closing),
+          ]);
+        }
+      } else {
+        sheet.appendRow([
+          TextCellValue(e.itemName),
+          TextCellValue(e.size),
+          DoubleCellValue(e.opening),
+          DoubleCellValue(e.inQty),
+          DoubleCellValue(e.outQty),
+          DoubleCellValue(e.closing),
+        ]);
+      }
     }
 
     return excel.encode();

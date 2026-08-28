@@ -8,7 +8,7 @@ class SortingUtils {
     "MS Channel",
     "Binding Wire",
     "Nails",
-    "SQR BAR",
+    "Sqr Bar",
     "Round Bar",
     "Flats",
     "MS Structure ISMC",
