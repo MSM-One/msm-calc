@@ -1,0 +1,2280 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../models/user_session_notifier.dart';
+import '../widgets/m_loader.dart';
+import '../constants/app_colors.dart';
+import '../services/data_repository.dart';
+import '../widgets/global_view_wrapper.dart';
+import '../models/stock_models.dart';
+import '../main.dart';
+import 'quick_rate_calculator_screen.dart';
+import 'manage_users_screen.dart';
+import 'calculator_screen.dart';
+import 'sauda_booking_screen.dart';
+import 'sauda_report_screen.dart'; // Contains Sauda Report and VendorPurchaseReportScreen
+import 'professional_reports_screen.dart';
+import 'sales_document_center_screen.dart';
+import 'main_inventory_shell.dart';
+import 'master_size_management_screen.dart';
+import 'dealer_stock_share_screen.dart';
+import '../models/stock_role.dart';
+import '../widgets/screen_gate.dart';
+
+import '../widgets/dashboard_sliver_header.dart';
+import '../services/auth_service.dart';
+import '../services/app_update_service.dart';
+
+class DashboardScreen extends StatefulWidget {
+  const DashboardScreen({super.key});
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen>
+    with WidgetsBindingObserver {
+  final GoogleSignIn _googleSignIn = AuthService.googleSignIn;
+  GoogleSignInAccount? _currentUser;
+  String _displayName = "";
+  String _email = "";
+  String _phoneNumber = "";
+  bool _isLoading = true;
+  bool _isSyncing = false;
+  bool _hasLoggedHeroMetrics = false;
+  bool _hasLoggedDistributionMetrics = false;
+
+  Timer? _permissionPollTimer;
+
+  final String _selectedTab = 'Overview';
+  static const Color appRed = Color(0xFFD41F2A);
+  final GlobalKey<ManageUsersScreenState> _manageUsersKey = GlobalKey();
+
+  String _effectiveDisplayName() {
+    if (_displayName.isNotEmpty) return _displayName;
+    if (_currentUser?.displayName != null &&
+        _currentUser!.displayName!.isNotEmpty) {
+      return _currentUser!.displayName!;
+    }
+    if (_email.isNotEmpty) {
+      final prefix = _email.split('@')[0];
+      if (prefix.isNotEmpty) {
+        return prefix[0].toUpperCase() + prefix.substring(1);
+      }
+    }
+    return "User";
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _checkAccess();
+    _permissionPollTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshCurrentUserData(),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          AppUpdateService.checkForUpdates(context);
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _permissionPollTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshCurrentUserData();
+    }
+  }
+
+  Future<void> _refreshCurrentUserData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('user_email');
+      if (email == null || email.isEmpty) return;
+
+      final previousSnapshot = UserSessionNotifier.instance.value;
+      await DataRepository.syncCurrentUser(email);
+
+      if (!mounted) return;
+      final changed = UserSessionNotifier.refreshFromSession();
+      if (!changed) return;
+      if (mounted) setState(() {});
+      final newSnapshot = UserSessionNotifier.instance.value;
+
+      final screenMap = {
+        'Sauda Book Only': 'Sauda Book',
+        'Quotation Only': 'Quotation',
+        'Netrate Calc Only': 'Netrate Calc',
+        'Stock Inventory Only': 'Stock Inventory',
+      };
+
+      for (final entry in screenMap.entries) {
+        final hadAccess = previousSnapshot.canAccess(entry.key);
+        final hasAccess = newSnapshot.canAccess(entry.key);
+        if (hadAccess && !hasAccess) {
+          appNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  '🔒 Your access permissions have been updated by an Administrator.',
+                  style: TextStyle(color: Colors.white),
+                ),
+                backgroundColor: Colors.red.shade700,
+                duration: const Duration(seconds: 5),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+          return;
+        }
+      }
+    } catch (e) {
+      debugPrint('Permission sync error: $e');
+    }
+  }
+
+  Future<void> _checkAccess() async {
+    final prefs = await SharedPreferences.getInstance();
+    final email = prefs.getString('user_email') ?? "";
+    if (email.isEmpty) {
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (context) => const LoginScreen()));
+      }
+    } else {
+      setState(() {
+        _email = email;
+        _displayName = prefs.getString('user_display_name') ?? "";
+        _phoneNumber = prefs.getString('user_phone_number') ?? "";
+        _isLoading = false;
+      });
+      _refreshCurrentUserData();
+      if (mounted) {
+        DataRepository.syncSheetData(context);
+        DataRepository.syncERPStock(context);
+      }
+      _loadCurrentUser();
+    }
+  }
+
+  Future<void> _saveProfileData(String name, String phone) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_display_name', name);
+    await prefs.setString('user_phone_number', phone);
+    setState(() {
+      _displayName = name;
+      _phoneNumber = phone;
+    });
+  }
+
+  void _loadCurrentUser() {
+    _googleSignIn.onCurrentUserChanged.listen((GoogleSignInAccount? account) {
+      if (mounted) setState(() => _currentUser = account);
+    });
+    _googleSignIn.signInSilently();
+  }
+
+  Future<void> _handleSync() async {
+    setState(() {
+      _isSyncing = true;
+      _hasLoggedHeroMetrics = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Syncing latest data..."),
+        duration: Duration(seconds: 1)));
+
+    try {
+      await DataRepository.syncSheetData(context, force: true);
+      if (!mounted) return;
+      await DataRepository.refreshAllStockData(forceRefresh: true);
+      if (!mounted) return;
+      await DataRepository.syncERPStock(context, force: true);
+
+      if (_selectedTab == 'Users' && _manageUsersKey.currentState != null) {
+        await _manageUsersKey.currentState!.loadUsers();
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("✅ Data Updated Successfully!"),
+            backgroundColor: Colors.green));
+      }
+    } finally {
+      if (mounted) setState(() => _isSyncing = false);
+    }
+  }
+
+  Future<void> _handleLogout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    try {
+      await _googleSignIn.signOut();
+      await _googleSignIn.disconnect();
+    } catch (e) {
+      debugPrint("Logout Error: $e");
+    }
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+          (Route<dynamic> route) => false);
+    }
+  }
+
+  void _showProfile() async {
+    String initialName = _displayName;
+    if (initialName.isEmpty) {
+      initialName = _currentUser?.displayName ?? "";
+      if (initialName.isEmpty && _email.isNotEmpty) {
+        initialName = _email.split('@')[0];
+        if (initialName.isNotEmpty) {
+          initialName = initialName[0].toUpperCase() + initialName.substring(1);
+        }
+      }
+      if (initialName.isEmpty) initialName = "User";
+    }
+    String initialPhone = _phoneNumber;
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
+      builder: (context) {
+        return StatefulBuilder(builder: (context, setModalState) {
+          return _ProfileBottomSheetContent(
+            initialName: initialName,
+            initialPhone: initialPhone,
+            email: _email,
+            photoUrl: _currentUser?.photoUrl,
+            onSave: (newName, newPhone) async {
+              final nav = Navigator.of(context);
+              final messenger = ScaffoldMessenger.of(context);
+              await _saveProfileData(newName, newPhone);
+              if (!mounted) return;
+              nav.pop();
+              messenger.showSnackBar(const SnackBar(
+                  content: Text("✅ Profile Updated"),
+                  backgroundColor: Colors.green));
+            },
+            onLogout: () {
+              Navigator.pop(context);
+              _handleLogout();
+            },
+          );
+        });
+      },
+    );
+  }
+
+  void _showContact() {
+    const String supportNumber = "7391000346";
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(25),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Center(
+              child: Text(
+                "Need Help?",
+                style: TextStyle(
+                    fontSize: 24, fontWeight: FontWeight.bold, color: textDark),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Center(
+              child: Text(
+                "Connect with us directly via Call or WhatsApp.",
+                style: TextStyle(color: textGrey, fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 30),
+            Material(
+              color: whatsappGreen,
+              borderRadius: BorderRadius.circular(15),
+              elevation: 4,
+              shadowColor: whatsappGreen.withValues(alpha: 0.4),
+              child: InkWell(
+                onTap: () async {
+                  var url = Uri.parse(
+                      "https://wa.me/91$supportNumber?text=Hello%20Metaroll,%20I%20need%20assistance.");
+                  if (!await launchUrl(url,
+                      mode: LaunchMode.externalApplication)) {
+                    throw 'Could not launch WhatsApp';
+                  }
+                  if (context.mounted) Navigator.pop(context);
+                },
+                borderRadius: BorderRadius.circular(15),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.chat_bubble, color: Colors.white, size: 28),
+                      SizedBox(width: 12),
+                      Text(
+                        "Chat on WhatsApp",
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold),
+                      )
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 15),
+            InkWell(
+              onTap: () async {
+                final url = Uri.parse("tel:+91$supportNumber");
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url);
+                }
+                if (context.mounted) Navigator.pop(context);
+              },
+              borderRadius: BorderRadius.circular(15),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(color: Colors.blue.shade100),
+                ),
+                child: const Column(
+                  children: [
+                    Icon(Icons.call, color: Colors.blue, size: 28),
+                    SizedBox(height: 5),
+                    Text(
+                      "Call Now",
+                      style: TextStyle(
+                          color: Colors.blue,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16),
+                    ),
+                    Text("+91 $supportNumber",
+                        style: TextStyle(color: Colors.blue, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 30),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+          backgroundColor: Color(0xFFFFF8F8),
+          body: Center(child: MLoader(size: 80, color: msmRed)));
+    }
+
+    return GlobalViewWrapper(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isDesktop = constraints.maxWidth >= 900;
+          final isMobile = constraints.maxWidth < 600;
+
+          if (isMobile) {
+            final mq = MediaQuery.of(context);
+            return MediaQuery(
+              data: mq.copyWith(
+                textScaler:
+                    TextScaler.linear(mq.textScaler.scale(1.0).clamp(1.0, 1.2)),
+              ),
+              child: Scaffold(
+                backgroundColor: const Color(0xFFF8F9FB),
+                body: _buildMobileLayout(),
+              ),
+            );
+          }
+
+          // Desktop/Tablet Layout (Unchanged)
+          Widget rootContent = Scaffold(
+            backgroundColor: const Color(0xFFFFF8F8),
+            body: Container(
+              decoration: const BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment.topLeft,
+                  radius: 1.5,
+                  colors: [
+                    Color(0x15FF2B45),
+                    Color(0xFFFFF8F8),
+                  ],
+                ),
+              ),
+              child: SafeArea(
+                child: RefreshIndicator(
+                  onRefresh: _handleSync,
+                  color: msmRed,
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding:
+                        EdgeInsets.fromLTRB(24, 24, 24, isDesktop ? 24 : 32),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildHeroHeader(isMobile),
+                        const SizedBox(height: 24),
+                        _buildStatCards(isDesktop, isMobile),
+                        const SizedBox(height: 24),
+                        _buildStockDistribution(isMobile),
+                        const SizedBox(height: 24),
+                        _buildQuickActionsGrid(isDesktop, isMobile),
+                        const SizedBox(height: 48),
+                        const Center(
+                          child: Text(
+                            "MSM Inventory · Crafted with depth and precision",
+                            style: TextStyle(
+                              color: Color(0xFF6B5E5E),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+          return rootContent;
+        },
+      ),
+    );
+  }
+
+  Widget _buildMobileLayout() {
+    return RefreshIndicator(
+      onRefresh: _handleSync,
+      edgeOffset: MediaQuery.of(context).padding.top +
+          88, // Start below the collapsed header
+      color: appRed,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          DashboardSliverHeader(
+            userName: _effectiveDisplayName(),
+            companyName: "MSM One",
+            isSyncing: _isSyncing,
+            onRefresh: _handleSync,
+            onProfileTap: _showProfile,
+            onLogout: _handleLogout,
+          ),
+          SliverSafeArea(
+            top: false,
+            bottom: true,
+            sliver: SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  _buildMobileActionsGrid(),
+                  const SizedBox(height: 28),
+                  const Text(
+                    "Support & Help",
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1F1A1A),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildMobileSupportCard(),
+                  const SizedBox(height: 20),
+                ]),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // _buildMobileHeader is now replaced by DashboardHeader widget
+
+  Widget _buildMobileActionsGrid() {
+    return ValueListenableBuilder<PermissionSnapshot>(
+      valueListenable: UserSessionNotifier.instance,
+      builder: (context, snap, _) {
+        final actions = [
+          if (snap.canAccessQuotation)
+            _MobileActionData(
+              title: "Quotation",
+              icon: Icons.description_rounded,
+              color: appRed,
+              onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => ScreenGate(
+                            canAccess: (s) => s.canAccessQuotation,
+                            screenName: "Quotation",
+                            child:
+                                const CalculatorScreen(isQuotationMode: true),
+                          ))),
+            ),
+          if (snap.canAccessCalculator)
+            _MobileActionData(
+              title: "Netrate Calc",
+              icon: Icons.calculate_outlined,
+              color: appRed,
+              onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => ScreenGate(
+                            canAccess: (s) => s.canAccessCalculator,
+                            screenName: "Netrate Calc",
+                            child:
+                                const CalculatorScreen(isQuotationMode: false),
+                          ))),
+            ),
+          if (snap.canAccessSaudaBooking)
+            _MobileActionData(
+              title: "Sauda Book",
+              icon: Icons.menu_book_rounded,
+              color: appRed,
+              onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => ScreenGate(
+                            canAccess: (s) => s.canAccessSaudaBooking,
+                            screenName: "Sauda Book",
+                            child: const SaudaBookingScreen(),
+                          ))),
+            ),
+          if (snap.canAccessVendorPurchaseScreen)
+            _MobileActionData(
+              title: "Vendor Purchase",
+              icon: Icons.local_shipping_outlined,
+              color: appRed,
+              onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => ScreenGate(
+                            canAccess: (s) => s.canAccessVendorPurchaseScreen,
+                            screenName: "Vendor Purchase",
+                            child: const VendorPurchaseReportScreen(),
+                          ))),
+            ),
+          if (snap.canAccessStockInventory)
+            _MobileActionData(
+              title: "Inventory In & Out",
+              icon: Icons.inventory_2_rounded,
+              color: appRed,
+              onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => ScreenGate(
+                            canAccess: (s) => s.canAccessStockInventory,
+                            screenName: "Inventory In & Out",
+                            child: const MainInventoryShell(),
+                          ))),
+            ),
+          if (snap.canAccessStockInventory)
+            _MobileActionData(
+              title: "Stock Sheet",
+              icon: Icons.share_rounded,
+              color: appRed,
+              onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => ScreenGate(
+                            canAccess: (s) => s.canAccessStockInventory,
+                            screenName: "Stock Sheet",
+                            child: const DealerStockShareScreen(),
+                          ))),
+            ),
+          if (snap.canAccessReports)
+            _MobileActionData(
+              title: "Reports",
+              icon: Icons.bar_chart_rounded,
+              color: appRed,
+              onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => ScreenGate(
+                            canAccess: (s) => s.canAccessReports,
+                            screenName: "Reports",
+                            child: const ProfessionalReportsScreen(),
+                          ))),
+            ),
+          if (snap.canAccessSampleRate)
+            _MobileActionData(
+              title: "Sample Rate",
+              icon: Icons.bolt_rounded,
+              color: appRed,
+              onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => ScreenGate(
+                            canAccess: (s) => s.canAccessSampleRate,
+                            screenName: "Sample Rate",
+                            child: const SampleRateCalcScreen(),
+                          ))),
+            ),
+          if (snap.role == StockRole.ADMIN || snap.canAccessUsers)
+            _MobileActionData(
+              title: "Users",
+              icon: Icons.people_rounded,
+              color: appRed,
+              onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => ScreenGate(
+                            canAccess: (s) =>
+                                s.role == StockRole.ADMIN || s.canAccessUsers,
+                            screenName: "Users",
+                            child: const ManageUsersScreen(),
+                          ))),
+            ),
+          if (snap.role == StockRole.ADMIN)
+            _MobileActionData(
+              title: "Sales Document Center",
+              icon: Icons.assignment_turned_in_outlined,
+              color: const Color(0xFF1A237E),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => ScreenGate(
+                          canAccess: (s) => s.role == StockRole.ADMIN,
+                          screenName: "Sales Document Center",
+                          child: const SalesDocumentCenterScreen(),
+                        )),
+              ),
+            ),
+          if (snap.canAccessMasterSize)
+            _MobileActionData(
+              title: "Master Size",
+              icon: Icons.rule_rounded,
+              color: appRed,
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => ScreenGate(
+                          canAccess: (s) => s.canAccessMasterSize,
+                          screenName: "Master Size",
+                          child: const MasterSizeManagementScreen(),
+                        )),
+              ),
+            ),
+        ];
+
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final double textScale =
+                MediaQuery.of(context).textScaler.scale(1.0);
+            final double cardWidth = (constraints.maxWidth - 16) / 2;
+            final double estimatedCardHeight =
+                28 + 44 + 10 + (12 * textScale * 1.4 * 2) + 28;
+            final double ratio =
+                (cardWidth / estimatedCardHeight).clamp(0.85, 1.35);
+            return GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: ratio,
+              ),
+              itemCount: actions.length,
+              itemBuilder: (context, i) => _buildMobileActionCard(actions[i]),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildMobileActionCard(_MobileActionData data) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0), width: 1.0),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: data.onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12.0, vertical: 16.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(data.icon, color: data.color, size: 26),
+                ),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: Text(
+                    data.title,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: textDark,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13.5,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileSupportCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE2E8F0), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _showContact,
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE0F2FE),
+                    borderRadius: BorderRadius.circular(12),
+                    border:
+                        Border.all(color: const Color(0xFFBAE6FD), width: 1),
+                  ),
+                  child: const Icon(Icons.support_agent_rounded,
+                      color: Color(0xFF0284C7), size: 22),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Contact Support",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: Color(0xFF1E293B),
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        "Need assistance? We are here to help.",
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_ios_rounded,
+                    size: 12, color: Color(0xFF94A3B8)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- 2. HERO HEADER (Desktop/Tablet) ---
+  Widget _buildHeroHeader(bool isMobile) {
+    return StreamBuilder<List<ItemVariant>>(
+      stream: DataRepository.getSupabaseStockStream(),
+      builder: (context, snapshot) {
+        final inventory = snapshot.data ?? [];
+        final currentStock =
+            inventory.fold(0.0, (sum, item) => sum + item.netStockMt);
+        final factoryStock = inventory
+            .where((item) => item.location == 'FACTORY')
+            .fold(0.0, (sum, item) => sum + item.currentStockMT);
+        final txns = DataRepository.allTransactionsNotifier.value;
+        final isDataSyncing =
+            snapshot.connectionState == ConnectionState.waiting;
+
+        // --- Metric 1: Stock vs Yesterday ---
+        final now = DateTime.now();
+        final todayStart = DateTime(now.year, now.month, now.day);
+        double todayIn = 0;
+        double todayOut = 0;
+
+        for (final tx in txns) {
+          if (tx.isReversed) continue;
+          if (!tx.dateTime.isBefore(todayStart)) {
+            if (['IN', 'RETURN', 'ADJUSTMENT', 'OPENING'].contains(tx.type)) {
+              todayIn += tx.qtyMT;
+            } else if (['OUT', 'RESERVE'].contains(tx.type)) {
+              todayOut += tx.qtyMT;
+            }
+          }
+        }
+
+        final todayNetMovement = todayIn - todayOut;
+        final yesterdayStock = currentStock - todayNetMovement;
+
+        String trendValue = "—";
+        String trendLabel = "no previous data";
+        IconData trendIcon = Icons.trending_flat;
+
+        if (yesterdayStock > 0) {
+          final diff = currentStock - yesterdayStock;
+          final pct = (diff / yesterdayStock) * 100;
+          trendValue = "${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(1)}%";
+          trendLabel = "vs. yesterday";
+          trendIcon = pct >= 0
+              ? Icons.trending_up_rounded
+              : Icons.trending_down_rounded;
+        }
+
+        // --- Metric 2: Items need attention ---
+        int attentionCount = 0;
+        for (final v in inventory) {
+          bool needsAttention = false;
+          if (v.currentStockMT <= 0) {
+            needsAttention = true;
+          } else if (v.currentStockMT < v.minStock) {
+            needsAttention = true;
+          } else if (v.itemName.trim().isEmpty || v.size.trim().isEmpty) {
+            needsAttention = true;
+          } else if (v.currentStockMT.isNaN || v.currentStockMT.isInfinite) {
+            needsAttention = true;
+          }
+          if (needsAttention) attentionCount++;
+        }
+
+        String attentionValue = "$attentionCount items";
+        String attentionLabel =
+            attentionCount == 0 ? "all clear" : "need attention";
+
+        // --- Metric 3: Factory 1 Share ---
+        String factoryValue = "Factory 1 —";
+        String factoryLabel = "data unavailable";
+        if (currentStock > 0) {
+          final share = (factoryStock / currentStock) * 100;
+          factoryValue = "Factory 1 ${share.toStringAsFixed(0)}%";
+          factoryLabel = "of total stock";
+        }
+
+        // --- Badge Status ---
+        String badgeText = "Live Inventory";
+        Color badgeDotColor = Colors.greenAccent;
+        if (isDataSyncing && currentStock == 0) {
+          badgeText = "Loading inventory";
+          badgeDotColor = Colors.orangeAccent;
+        } else if (!isDataSyncing && currentStock == 0 && txns.isEmpty) {
+          badgeText = "Inventory unavailable";
+          badgeDotColor = Colors.redAccent;
+        }
+
+        // --- One-time Log ---
+        if (!_hasLoggedHeroMetrics &&
+            !isDataSyncing &&
+            (currentStock > 0 || txns.isNotEmpty)) {
+          _hasLoggedHeroMetrics = true;
+          debugPrint(
+              "DEBUG: [Dashboard Hero Metrics] Trend: $trendValue, Attention: $attentionValue, Factory: $factoryValue, Total: ${currentStock.toStringAsFixed(2)} MT");
+        }
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(40),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                msmRed,
+                msmRed.withValues(alpha: 0.8),
+                const Color(0xFFD32F2F),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(32),
+            boxShadow: [
+              BoxShadow(
+                color: msmRed.withValues(alpha: 0.3),
+                blurRadius: 30,
+                offset: const Offset(0, 15),
+              ),
+            ],
+          ),
+          child: Stack(
+            children: [
+              Positioned(
+                right: -30,
+                top: -30,
+                child: Icon(
+                  Icons.dashboard_rounded,
+                  size: 200,
+                  color: Colors.white.withValues(alpha: 0.05),
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.circle, color: badgeDotColor, size: 8),
+                            const SizedBox(width: 6),
+                            Text(
+                              badgeText,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          GestureDetector(
+                            onTap: _showProfile,
+                            child: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 1.5,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.12),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                _effectiveDisplayName().isNotEmpty
+                                    ? _effectiveDisplayName()[0].toUpperCase()
+                                    : "U",
+                                style: const TextStyle(
+                                  color: Color(0xFFDC2626),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  Text(
+                    "Welcome back,",
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.8),
+                        fontSize: 16),
+                  ),
+                  const SizedBox(height: 4),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      "${_effectiveDisplayName()} 👋",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 36,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -1,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    "Here’s what’s happening across your yards today.",
+                    style: TextStyle(color: Colors.white, fontSize: 14),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 32),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      _buildGlassChip(trendIcon, trendValue, trendLabel),
+                      _buildGlassChip(Icons.warning_amber_rounded,
+                          attentionValue, attentionLabel),
+                      _buildGlassChip(
+                          Icons.insights_rounded, factoryValue, factoryLabel),
+                    ],
+                  )
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildGlassChip(IconData icon, String value, String subtext) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 18),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  value,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  subtext,
+                  style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.8), fontSize: 9),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  // --- 3. STAT CARDS ---
+  Widget _buildStatCards(bool isDesktop, bool isMobile) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double width = constraints.maxWidth;
+        final bool isWrap = width < 600; // Consistent mobile threshold
+
+        final today = DateTime.now();
+        final todayStart = DateTime(today.year, today.month, today.day);
+
+        final cards = [
+          StreamBuilder<List<ItemVariant>>(
+            stream: DataRepository.getSupabaseStockStream(),
+            builder: (context, snapshot) {
+              final total = (snapshot.data ?? [])
+                  .fold(0.0, (sum, item) => sum + item.netStockMt);
+              return _buildStatCard(
+                title: "Total Stock",
+                value: "${total.toStringAsFixed(1)} MT",
+                icon: Icons.inventory_2_rounded,
+                isPrimary: true,
+              );
+            },
+          ),
+          ValueListenableBuilder<List<StockTransaction>>(
+            valueListenable: DataRepository.allTransactionsNotifier,
+            builder: (context, txns, _) {
+              final todayCount =
+                  txns.where((t) => !t.dateTime.isBefore(todayStart)).length;
+              return _buildStatCard(
+                title: "Activity",
+                value: "$todayCount Txns",
+                icon: Icons.swap_horiz,
+              );
+            },
+          ),
+          ValueListenableBuilder<double>(
+            valueListenable: DataRepository.todayOutNotifier,
+            builder: (context, val, _) => _buildStatCard(
+              title: "Out Today",
+              value: "${val.toStringAsFixed(2)} MT",
+              icon: Icons.output_rounded,
+            ),
+          ),
+        ];
+
+        if (isWrap) {
+          return Column(
+            children: [
+              SizedBox(width: double.infinity, child: cards[0]),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(child: cards[1]),
+                  const SizedBox(width: 16),
+                  Expanded(child: cards[2]),
+                ],
+              ),
+            ],
+          );
+        } else {
+          return Row(
+            children: [
+              Expanded(child: cards[0]),
+              const SizedBox(width: 16),
+              Expanded(child: cards[1]),
+              const SizedBox(width: 16),
+              Expanded(child: cards[2]),
+            ],
+          );
+        }
+      },
+    );
+  }
+
+  Widget _buildStatCard({
+    required String title,
+    required String value,
+    String? trend,
+    required IconData icon,
+    bool isPrimary = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isPrimary ? const Color(0xFFFF2B45) : Colors.white,
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [
+          BoxShadow(
+            color:
+                isPrimary ? const Color(0x408B0000) : const Color(0x0F8B0000),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          if (isPrimary)
+            const Positioned(
+              right: -30,
+              bottom: -30,
+              child: Icon(Icons.inventory_2_rounded,
+                  size: 80, color: Color(0x20FFFFFF)),
+            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        color: isPrimary
+                            ? Colors.white.withValues(alpha: 0.9)
+                            : const Color(0xFF6B5E5E),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  if (trend != null && trend.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isPrimary
+                            ? Colors.white.withValues(alpha: 0.2)
+                            : const Color(0xFFFFF3F3),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        trend,
+                        style: TextStyle(
+                          color: isPrimary
+                              ? Colors.white
+                              : const Color(0xFFFF2B45),
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    )
+                ],
+              ),
+              const SizedBox(height: 20),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        value,
+                        style: TextStyle(
+                          color: isPrimary
+                              ? Colors.white
+                              : const Color(0xFF1F1A1A),
+                          fontSize: 26,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -1,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: isPrimary
+                          ? Colors.white.withValues(alpha: 0.2)
+                          : const Color(0xFFFFF8F8),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      icon,
+                      color: isPrimary ? Colors.white : const Color(0xFFFF2B45),
+                      size: 20,
+                    ),
+                  )
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- 4. STOCK DISTRIBUTION ---
+  Widget _buildStockDistribution(bool isMobile) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        DataRepository.yardStockNotifier,
+        DataRepository.factoryStockNotifier,
+        DataRepository.totalStockNotifier,
+        DataRepository.allTransactionsNotifier,
+        DataRepository.isSyncing,
+      ]),
+      builder: (context, _) {
+        final yardCurrent = DataRepository.yardStockNotifier.value;
+        final factoryCurrent = DataRepository.factoryStockNotifier.value;
+        final totalStock = DataRepository.totalStockNotifier.value;
+        final txns = DataRepository.allTransactionsNotifier.value;
+        final isDataSyncing = DataRepository.isSyncing.value;
+
+        // Helper to calculate weekly trend
+        String getTrend(double current, String targetLoc) {
+          final now = DateTime.now();
+          final sevenDaysAgo = now.subtract(const Duration(days: 7));
+          double net = 0;
+
+          for (final tx in txns) {
+            if (tx.isReversed) continue;
+            final loc = StockUtils.normalizeLocation(tx.location);
+            final toLoc = tx.toLocation != null
+                ? StockUtils.normalizeLocation(tx.toLocation!)
+                : null;
+
+            if (tx.dateTime.isAfter(sevenDaysAgo)) {
+              if (loc == targetLoc) {
+                if (['IN', 'RETURN', 'ADJUSTMENT', 'OPENING']
+                    .contains(tx.type)) {
+                  net += tx.qtyMT;
+                } else if (['OUT', 'RESERVE'].contains(tx.type)) {
+                  net -= tx.qtyMT;
+                } else if (tx.type == 'TRANSFER') {
+                  net -= tx.qtyMT;
+                }
+              }
+              if (toLoc == targetLoc && tx.type == 'TRANSFER') {
+                net += tx.qtyMT;
+              }
+            }
+          }
+          final prev = current - net;
+          if (prev <= 0 || (current == 0 && net == 0)) return "— this week";
+          final pct = ((current - prev) / prev) * 100;
+          return "${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(1)}% this week";
+        }
+
+        final yardTrend = getTrend(yardCurrent, 'YARD');
+        final factoryTrend = getTrend(factoryCurrent, 'FACTORY');
+
+        // One-time Log
+        if (!_hasLoggedDistributionMetrics &&
+            !isDataSyncing &&
+            (totalStock > 0 || txns.isNotEmpty)) {
+          _hasLoggedDistributionMetrics = true;
+          debugPrint("DEBUG: [Dashboard Distribution Share] "
+              "Yard: ${yardCurrent.toStringAsFixed(1)} MT (${totalStock > 0 ? ((yardCurrent / totalStock) * 100).toStringAsFixed(1) : 0}%), "
+              "Factory: ${factoryCurrent.toStringAsFixed(1)} MT (${totalStock > 0 ? ((factoryCurrent / totalStock) * 100).toStringAsFixed(1) : 0}%), "
+              "Total: ${totalStock.toStringAsFixed(1)} MT");
+        }
+
+        return Container(
+          padding: EdgeInsets.all(isMobile ? 20 : 24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(32),
+            boxShadow: const [
+              BoxShadow(
+                  color: Color(0x0F8B0000),
+                  blurRadius: 20,
+                  offset: Offset(0, 10)),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("Stock Distribution",
+                            style: TextStyle(
+                                color: Color(0xFF1F1A1A),
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold)),
+                        SizedBox(height: 4),
+                        Text("Yard vs. Factory",
+                            style: TextStyle(
+                                color: Color(0xFF6B5E5E), fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF3F3),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Text("Today",
+                        style: TextStyle(
+                            color: Color(0xFFFF2B45),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11)),
+                  )
+                ],
+              ),
+              const SizedBox(height: 24),
+              if (isMobile)
+                Column(
+                  children: [
+                    _buildDistPanel("Yard Stock", Icons.warehouse_rounded,
+                        yardTrend, yardCurrent, totalStock),
+                    const SizedBox(height: 16),
+                    _buildDistPanel("Factory Stock", Icons.factory_rounded,
+                        factoryTrend, factoryCurrent, totalStock),
+                  ],
+                )
+              else
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildDistPanel(
+                          "Yard Stock",
+                          Icons.warehouse_rounded,
+                          yardTrend,
+                          yardCurrent,
+                          totalStock),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _buildDistPanel(
+                          "Factory Stock",
+                          Icons.factory_rounded,
+                          factoryTrend,
+                          factoryCurrent,
+                          totalStock),
+                    ),
+                  ],
+                )
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDistPanel(
+      String title, IconData icon, String trend, double current, double total) {
+    double pct = total > 0 ? (current / total) : 0.0;
+    double clampedPct = pct.clamp(0.0, 1.0);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8F8),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white, width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: const Color(0xFFFF2B45), size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1F1A1A),
+                      fontSize: 15),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            trend,
+            style: const TextStyle(color: Color(0xFF6B5E5E), fontSize: 11),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                      total > 0 ? "${(pct * 100).toStringAsFixed(1)}%" : "—",
+                      style: const TextStyle(
+                          color: Color(0xFFFF2B45),
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text("${current.toStringAsFixed(0)} MT",
+                      style: const TextStyle(
+                          color: Color(0xFF1F1A1A),
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: clampedPct,
+              backgroundColor: Colors.white,
+              valueColor:
+                  const AlwaysStoppedAnimation<Color>(Color(0xFFFF2B45)),
+              minHeight: 8,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            total > 0 ? "of total stock" : "no stock data",
+            style: const TextStyle(
+                color: Color(0xFF6B5E5E),
+                fontSize: 11,
+                fontWeight: FontWeight.w500),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- 7. QUICK ACTIONS GRID ---
+  Widget _buildQuickActionsGrid(bool isDesktop, bool isMobile) {
+    return Container(
+      padding: EdgeInsets.all(isMobile ? 24 : 32),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0x0F8B0000), blurRadius: 20, offset: Offset(0, 10)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text("Quick Actions",
+              style: TextStyle(
+                  color: const Color(0xFF1F1A1A),
+                  fontSize: isMobile ? 20 : 24,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          const Text("Tap to launch a workflow",
+              style: TextStyle(color: Color(0xFF6B5E5E), fontSize: 13)),
+          const SizedBox(height: 24),
+          ValueListenableBuilder<PermissionSnapshot>(
+              valueListenable: UserSessionNotifier.instance,
+              builder: (context, snap, _) {
+                final actions = [
+                  if (snap.canAccessStockInventory)
+                    _ActionTileData(
+                      label: "Inventory In & Out",
+                      icon: Icons.add_box_rounded,
+                      isPrimary: true,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => ScreenGate(
+                                    canAccess: (s) => s.canAccessStockInventory,
+                                    screenName: "Inventory In & Out",
+                                    child: const MainInventoryShell(),
+                                  ))),
+                    ),
+                  if (snap.canAccessReports)
+                    _ActionTileData(
+                      label: "Reports",
+                      icon: Icons.insert_chart_outlined,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => ScreenGate(
+                                    canAccess: (s) => s.canAccessReports,
+                                    screenName: "Reports",
+                                    child: const ProfessionalReportsScreen(),
+                                  ))),
+                    ),
+                  if (snap.canAccessCalculator)
+                    _ActionTileData(
+                      label: "Netrate Calc",
+                      icon: Icons.calculate_outlined,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => ScreenGate(
+                                    canAccess: (s) => s.canAccessCalculator,
+                                    screenName: "Netrate Calc",
+                                    child: const CalculatorScreen(
+                                        isQuotationMode: false),
+                                  ))),
+                    ),
+                  if (snap.canAccessSaudaBooking)
+                    _ActionTileData(
+                      label: "Sauda Book",
+                      icon: Icons.menu_book_rounded,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => ScreenGate(
+                                    canAccess: (s) => s.canAccessSaudaBooking,
+                                    screenName: "Sauda Book",
+                                    child: const SaudaBookingScreen(),
+                                  ))),
+                    ),
+                  if (snap.canAccessVendorPurchaseScreen)
+                    _ActionTileData(
+                      label: "Vendor Purchase",
+                      icon: Icons.local_shipping_outlined,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => ScreenGate(
+                                    canAccess: (s) =>
+                                        s.canAccessVendorPurchaseScreen,
+                                    screenName: "Vendor Purchase",
+                                    child: const VendorPurchaseReportScreen(),
+                                  ))),
+                    ),
+                  if (snap.canAccessStockInventory)
+                    _ActionTileData(
+                      label: "Stock Sheet",
+                      icon: Icons.share_rounded,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => ScreenGate(
+                                    canAccess: (s) => s.canAccessStockInventory,
+                                    screenName: "Stock Sheet",
+                                    child: const DealerStockShareScreen(),
+                                  ))),
+                    ),
+                  if (snap.canAccessSampleRate)
+                    _ActionTileData(
+                      label: "Sample Rate",
+                      icon: Icons.bolt_rounded,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => ScreenGate(
+                                    canAccess: (s) => s.canAccessSampleRate,
+                                    screenName: "Sample Rate",
+                                    child: const SampleRateCalcScreen(),
+                                  ))),
+                    ),
+                  if (snap.canAccessQuotation)
+                    _ActionTileData(
+                      label: "Quotation",
+                      icon: Icons.description_rounded,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => ScreenGate(
+                                    canAccess: (s) => s.canAccessQuotation,
+                                    screenName: "Quotation",
+                                    child: const CalculatorScreen(
+                                        isQuotationMode: true),
+                                  ))),
+                    ),
+                  if (snap.role == StockRole.ADMIN || snap.canAccessUsers)
+                    _ActionTileData(
+                      label: "Users",
+                      icon: Icons.people_rounded,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => ScreenGate(
+                                    canAccess: (s) =>
+                                        s.role == StockRole.ADMIN ||
+                                        s.canAccessUsers,
+                                    screenName: "Users",
+                                    child: const ManageUsersScreen(),
+                                  ))),
+                    ),
+                  if (snap.role == StockRole.ADMIN)
+                    _ActionTileData(
+                      label: "Sales Document Center",
+                      icon: Icons.assignment_turned_in_outlined,
+                      accentColor:
+                          const Color(0xFF1A237E), // Deep Indigo / Navy
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => ScreenGate(
+                                  canAccess: (s) => s.role == StockRole.ADMIN,
+                                  screenName: "Sales Document Center",
+                                  child: const SalesDocumentCenterScreen(),
+                                )),
+                      ),
+                    ),
+                  if (snap.canAccessMasterSize)
+                    _ActionTileData(
+                      label: "Master Size",
+                      icon: Icons.rule_rounded,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => ScreenGate(
+                                  canAccess: (s) => s.canAccessMasterSize,
+                                  screenName: "Master Size",
+                                  child: const MasterSizeManagementScreen(),
+                                )),
+                      ),
+                    ),
+                ];
+
+                if (kDebugMode) {
+                  debugPrint(
+                      "DEBUG: [Dashboard] Rebuilding desktop actions grid. Count: ${actions.length}");
+                }
+
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: isDesktop ? 4 : 2,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: isDesktop ? 1.4 : (isMobile ? 1.05 : 1.2),
+                  ),
+                  itemCount: actions.length,
+                  itemBuilder: (context, i) {
+                    return _ActionTile(data: actions[i]);
+                  },
+                );
+              }),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionTileData {
+  final String label;
+  final IconData icon;
+  final bool isPrimary;
+  final Color? accentColor;
+  final VoidCallback onTap;
+
+  _ActionTileData({
+    required this.label,
+    required this.icon,
+    this.isPrimary = false,
+    this.accentColor,
+    required this.onTap,
+  });
+}
+
+class _ActionTile extends StatefulWidget {
+  final _ActionTileData data;
+  const _ActionTile({required this.data});
+
+  @override
+  _ActionTileState createState() => _ActionTileState();
+}
+
+class _ActionTileState extends State<_ActionTile> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool p = widget.data.isPrimary;
+    final Color? ac = widget.data.accentColor;
+    final bool useWhiteText = ac != null || p;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.data.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          transform: _hover
+              ? Matrix4.translationValues(0.0, -4.0, 0.0)
+              : Matrix4.identity(),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color:
+                ac ?? (p ? const Color(0xFFFF2B45) : const Color(0xFFFFF8F8)),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+                color: useWhiteText ? Colors.transparent : Colors.white,
+                width: useWhiteText ? 0 : 2),
+            boxShadow: _hover
+                ? const [
+                    BoxShadow(
+                      color: Color(0x308B0000),
+                      blurRadius: 16,
+                      offset: Offset(0, 8),
+                    )
+                  ]
+                : const [],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: useWhiteText
+                        ? Colors.white.withValues(alpha: 0.2)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Icon(widget.data.icon,
+                        color: useWhiteText
+                            ? Colors.white
+                            : const Color(0xFFFF2B45)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                widget.data.label,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: useWhiteText ? Colors.white : const Color(0xFF1F1A1A),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileBottomSheetContent extends StatefulWidget {
+  final String initialName;
+  final String initialPhone;
+  final String email;
+  final String? photoUrl;
+  final Future<void> Function(String, String) onSave;
+  final VoidCallback onLogout;
+
+  const _ProfileBottomSheetContent({
+    required this.initialName,
+    required this.initialPhone,
+    required this.email,
+    this.photoUrl,
+    required this.onSave,
+    required this.onLogout,
+  });
+
+  @override
+  _ProfileBottomSheetContentState createState() =>
+      _ProfileBottomSheetContentState();
+}
+
+class _ProfileBottomSheetContentState
+    extends State<_ProfileBottomSheetContent> {
+  late TextEditingController _nameController;
+  late TextEditingController _phoneController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName);
+    _phoneController = TextEditingController(text: widget.initialPhone);
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const crimsonColor = Color(0xFFEF1C24);
+    const darkCrimson = Color(0xFFB80910);
+    const textDarkColor = Color(0xFF0F172A);
+    const textMutedColor = Color(0xFF64748B);
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        left: 24,
+        right: 24,
+        top: 12,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Drag Handle
+          Center(
+            child: Container(
+              width: 44,
+              height: 5,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(3),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Header Row with Title & Close Icon
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const SizedBox(width: 36),
+              const Text(
+                "Profile Settings",
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: textDarkColor,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close_rounded,
+                      size: 18, color: textMutedColor),
+                ),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+
+          // Stylized Avatar & Camera Badge
+          Stack(
+            alignment: Alignment.bottomRight,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(3),
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: [crimsonColor, darkCrimson],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                  child: widget.photoUrl != null
+                      ? CircleAvatar(
+                          radius: 40,
+                          backgroundImage: NetworkImage(widget.photoUrl!),
+                        )
+                      : CircleAvatar(
+                          radius: 40,
+                          backgroundColor: crimsonColor.withValues(alpha: 0.1),
+                          child: Text(
+                            widget.initialName.isNotEmpty
+                                ? widget.initialName[0].toUpperCase()
+                                : "U",
+                            style: const TextStyle(
+                              color: crimsonColor,
+                              fontSize: 30,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+              // Camera / Edit Badge
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [crimsonColor, darkCrimson],
+                  ),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2.5),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x30000000),
+                      blurRadius: 6,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.camera_alt_rounded,
+                  color: Colors.white,
+                  size: 14,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            widget.initialName.isNotEmpty ? widget.initialName : "User Profile",
+            style: const TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.bold,
+              color: textDarkColor,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            widget.email,
+            style: const TextStyle(
+              fontSize: 13,
+              color: textMutedColor,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // Active Status Pill
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF10B981),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Text(
+                  "Metaroll SteelMart User",
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF475569),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Inputs Section
+          TextField(
+            controller: _nameController,
+            style: const TextStyle(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w600,
+              color: textDarkColor,
+            ),
+            decoration: InputDecoration(
+              labelText: "Display Name",
+              labelStyle: const TextStyle(color: textMutedColor, fontSize: 13),
+              hintText: "Enter your full name",
+              prefixIcon: const Icon(Icons.person_outline_rounded,
+                  color: Color(0xFF64748B), size: 20),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: crimsonColor, width: 2),
+              ),
+              filled: true,
+              fillColor: const Color(0xFFF8FAFC),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _phoneController,
+            style: const TextStyle(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w600,
+              color: textDarkColor,
+            ),
+            decoration: InputDecoration(
+              labelText: "Phone Number",
+              labelStyle: const TextStyle(color: textMutedColor, fontSize: 13),
+              hintText: "+91 98765 43210",
+              prefixIcon: const Icon(Icons.phone_outlined,
+                  color: Color(0xFF64748B), size: 20),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: crimsonColor, width: 2),
+              ),
+              filled: true,
+              fillColor: const Color(0xFFF8FAFC),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            ),
+            keyboardType: TextInputType.phone,
+          ),
+          const SizedBox(height: 24),
+
+          // Save Changes button
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: const LinearGradient(
+                  colors: [crimsonColor, darkCrimson],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x3DEF1C24),
+                    blurRadius: 12,
+                    offset: Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  shadowColor: Colors.transparent,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                onPressed: () =>
+                    widget.onSave(_nameController.text, _phoneController.text),
+                icon: const Icon(Icons.check_circle_rounded,
+                    color: Colors.white, size: 20),
+                label: const Text(
+                  "Save Changes",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15.5,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Modern Logout button
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                backgroundColor: const Color(0xFFFEF2F2),
+                side: const BorderSide(color: Color(0xFFFECACA), width: 1),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                foregroundColor: const Color(0xFFDC2626),
+              ),
+              onPressed: widget.onLogout,
+              icon: const Icon(Icons.logout_rounded, size: 18),
+              label: const Text(
+                "Sign Out",
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                  color: Color(0xFFDC2626),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _MobileActionData {
+  final String title;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  _MobileActionData({
+    required this.title,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+}

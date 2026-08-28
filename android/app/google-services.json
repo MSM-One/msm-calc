@@ -1,0 +1,92 @@
+{
+  "project_info": {
+    "project_number": "638712845942",
+    "project_id": "msm-one",
+    "storage_bucket": "msm-one.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:638712845942:android:a04ff850fdad2adc023157",
+        "android_client_info": {
+          "package_name": "com.example.msm_calc"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "638712845942-r36e8pb915lprp8tml22jl0ujjue2jv4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.msm_calc",
+            "certificate_hash": "b72873fafe8e55e172cb3dde384d742f3fdb827c"
+          }
+        },
+        {
+          "client_id": "638712845942-5akbi3qrsveo7ptm18u99her8jll9fgh.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyATEztuxVKY8g4bCyLatjZHqy_eJcNK6_w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "638712845942-5akbi3qrsveo7ptm18u99her8jll9fgh.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:638712845942:android:4ba0a174c7da4087023157",
+        "android_client_info": {
+          "package_name": "com.metaroll.steelmart"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "638712845942-dtfmopcf0skqeo3hdgiiqio43vo8sgt4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.metaroll.steelmart",
+            "certificate_hash": "1361a205ff72382c9bf3f572d0e72b12260c9bc9"
+          }
+        },
+        {
+          "client_id": "638712845942-qooak87rsqetc82hp6rhr6mus6o6ha6f.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.metaroll.steelmart",
+            "certificate_hash": "b72873fafe8e55e172cb3dde384d742f3fdb827c"
+          }
+        },
+        {
+          "client_id": "638712845942-5akbi3qrsveo7ptm18u99her8jll9fgh.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyATEztuxVKY8g4bCyLatjZHqy_eJcNK6_w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "638712845942-5akbi3qrsveo7ptm18u99her8jll9fgh.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
