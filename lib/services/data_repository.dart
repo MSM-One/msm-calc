@@ -16,8 +16,9 @@ import '../models/user_session_notifier.dart';
 import '../models/report_models.dart';
 import '../utils/sorting_utils.dart';
 import '../utils/formatters.dart';
-
-
+import '../utils/steel_helper.dart';
+import '../utils/item_order_util.dart';
+import '../utils/sauda_rate_calculator.dart';
 
 class DataRepository {
   static const String _boxName = 'msm_cache_box';
@@ -26,6 +27,11 @@ class DataRepository {
   static final DataRepository instance = DataRepository._internal();
   DataRepository._internal();
   factory DataRepository() => instance;
+
+  // Cached Global Charges
+  static GlobalCharges _cachedCharges = const GlobalCharges();
+  GlobalCharges get globalCharges => _cachedCharges;
+  static GlobalCharges get currentCharges => _cachedCharges;
 
   // Global Sync Indicator
   static final ValueNotifier<bool> isSyncing = ValueNotifier<bool>(false);
@@ -143,7 +149,7 @@ class DataRepository {
       final sizeRows = await SupabaseService.client
           .from('item_sizes')
           .select(
-              'id, material_id, size_label, unit_weight_kg, size_difference, current_stock_in')
+              'id, material_id, size_label, unit_weight_kg, size_difference')
           .order('id')
           .limit(10000);
       final List<Map<String, dynamic>> allSizesList = [];
@@ -156,8 +162,6 @@ class DataRepository {
         updateGlobalSizeWeightCache(label, weight);
         final sd =
             double.tryParse(row['size_difference']?.toString() ?? '0') ?? 0.0;
-        final stockIn =
-            double.tryParse(row['current_stock_in']?.toString() ?? '0') ?? 0.0;
         final matName =
             matId != null ? (materialIdToNameMap[matId] ?? '') : '';
         if (id != null) {
@@ -176,8 +180,6 @@ class DataRepository {
           'weight': weight,
           'size_difference': sd,
           'sd': sd,
-          'current_stock_in': stockIn,
-          'stock': stockIn,
         });
       }
       itemSizesNotifier.value = allSizesList;
@@ -302,6 +304,19 @@ class DataRepository {
       }
     }
 
+    // ── Load cached global charges ─────────────────────────────────────────
+    final cachedCharges = _box.get('global_charges', defaultValue: null);
+    if (cachedCharges != null) {
+      try {
+        _cachedCharges = GlobalCharges.fromMap(jsonDecode(cachedCharges));
+      } catch (e) {
+        debugPrint('Charges cache parsing error: $e');
+      }
+    }
+
+    // ── Fetch live global charges from Supabase ───────────────────────────
+    fetchGlobalCharges();
+
     // ── Load user session from SharedPreferences ──────────────────────────
     final prefs = await SharedPreferences.getInstance();
     final savedUserJson = prefs.getString('currentUser');
@@ -330,6 +345,9 @@ class DataRepository {
       totalStockNotifier.value = cachedTotal;
       debugPrint("[DataRepository] Loaded cached total stock: $cachedTotal MT");
     }
+
+    // Trigger authoritative refresh from v_current_stock on startup
+    refreshAllStockData(forceRefresh: true);
 
     // Set up debounced real-time sync stream listener from SupabaseRealtimeService
     SupabaseRealtimeService.instance.syncStream.listen((event) {
@@ -445,7 +463,7 @@ class DataRepository {
       final sizeResponse = await SupabaseService.client
           .from('item_sizes')
           .select(
-              'id, material_id, size_label, unit_weight_kg, size_difference, current_stock_in')
+              'id, material_id, size_label, unit_weight_kg, size_difference')
           .order('id')
           .limit(10000);
 
@@ -470,8 +488,6 @@ class DataRepository {
         updateGlobalSizeWeightCache(label, weight);
         final sd =
             double.tryParse(row['size_difference']?.toString() ?? '0') ?? 0.0;
-        final stockIn =
-            double.tryParse(row['current_stock_in']?.toString() ?? '0') ?? 0.0;
         final matName = materialIdToNameMap[matId] ?? '';
         if (id != null) sizeIdToLabelMap[id] = label;
 
@@ -488,8 +504,6 @@ class DataRepository {
           'weight': weight,
           'size_difference': sd,
           'sd': sd,
-          'current_stock_in': stockIn,
-          'stock': stockIn,
         };
 
         allSizesList.add(sizeMap);
@@ -504,11 +518,15 @@ class DataRepository {
         if (id == null) continue;
         final name = row['item_name']?.toString() ?? '';
         final sizes = sizesByMatId[id] ?? [];
+        sizes.sort((a, b) => SortingUtils.compareSizes(
+            a['label']?.toString() ?? '', b['label']?.toString() ?? ''));
         itemsList.add({
           'name': name,
           'sizes': sizes,
         });
       }
+      itemsList.sort((a, b) =>
+          ItemOrderUtil.compare(a['name']?.toString(), b['name']?.toString()));
 
       // ── 2. Fetch live pricing config from global_charges ────────────────
       Map<String, dynamic> meta = {
@@ -522,6 +540,11 @@ class DataRepository {
             .eq('id', 'singleton')
             .maybeSingle();
         if (chargesRow != null) {
+          _cachedCharges = GlobalCharges.fromMap(chargesRow);
+          if (_box.isOpen) {
+            await _box.put('global_charges', jsonEncode(_cachedCharges.toMap()));
+          }
+
           // DB stores percentage (e.g. 18.00); convert to fraction (0.18) for the calculator
           final double gstPct =
               (chargesRow['gst_rate'] as num?)?.toDouble() ?? 18.0;
@@ -584,6 +607,73 @@ class DataRepository {
       {bool forceRefresh = false}) async {
     await syncSheetData(context, force: forceRefresh);
     return sheetDataNotifier.value;
+  }
+
+  /// Fetches the latest global pricing charges from Supabase
+  static Future<GlobalCharges> fetchGlobalCharges() async {
+    try {
+      final res = await SupabaseService.client
+          .from('global_charges')
+          .select('gst_rate, lc_rate, nc_discount')
+          .eq('id', 'singleton')
+          .maybeSingle();
+      if (res != null) {
+        _cachedCharges = GlobalCharges.fromMap(res);
+        if (_box.isOpen) {
+          await _box.put('global_charges', jsonEncode(_cachedCharges.toMap()));
+        }
+        debugPrint(
+            '[DataRepository] fetchGlobalCharges: live charges loaded: GST=${_cachedCharges.gstRate}% LC=₹${_cachedCharges.lcRate} NC=₹${_cachedCharges.ncDiscount}');
+      }
+    } catch (e) {
+      debugPrint('[DataRepository] fetchGlobalCharges error: $e');
+    }
+    return _cachedCharges;
+  }
+
+  /// Look up Size Difference (SD) for a specific item category and size label
+  static double getSizeSD(String? item, String? sizeLabel) {
+    if (item == null || sizeLabel == null || sizeLabel.isEmpty) return 0.0;
+    final cleanItem = item.trim().toLowerCase();
+    final normSearch = SteelHelper.normalizeSizeText(sizeLabel);
+    final sizes = itemSizesNotifier.value;
+
+    // 1. Exact match with normalized size label
+    for (final s in sizes) {
+      final sLabel = (s['size_label'] ?? s['label'] ?? '').toString();
+      final cat = (s['material_name'] ?? s['category'] ?? s['item_name'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (cat.isEmpty || cat == cleanItem) {
+        if (SteelHelper.normalizeSizeText(sLabel) == normSearch) {
+          final sdVal = s['size_difference'] ?? s['sd'];
+          if (sdVal != null) {
+            return (sdVal as num).toDouble();
+          }
+        }
+      }
+    }
+
+    // 2. Prefix / substring match if unit weight was appended to label
+    for (final s in sizes) {
+      final sLabel = (s['size_label'] ?? s['label'] ?? '').toString();
+      final cat = (s['material_name'] ?? s['category'] ?? s['item_name'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (cat.isEmpty || cat == cleanItem) {
+        final normS = SteelHelper.normalizeSizeText(sLabel);
+        if (normS.isNotEmpty &&
+            (normSearch.startsWith(normS) || normS.startsWith(normSearch))) {
+          final sdVal = s['size_difference'] ?? s['sd'];
+          if (sdVal != null) {
+            return (sdVal as num).toDouble();
+          }
+        }
+      }
+    }
+    return 0.0;
   }
 
   /// Admin-only: persist new GST %, Loading Charge, and NC Discount to Supabase,
@@ -673,42 +763,34 @@ class DataRepository {
     try {
       var query = SupabaseService.client.from('v_current_stock').select('*');
       if (locationFilter != 'ALL') {
-        query = query.eq('location', locationFilter);
+        query = query.eq('location', locationFilter.toUpperCase());
       }
       final response = await query.limit(10000);
-      return List<Map<String, dynamic>>.from(response as List);
+      final list = List<Map<String, dynamic>>.from(response as List);
+      list.sort((a, b) {
+        final catA = a['item_name']?.toString() ?? '';
+        final catB = b['item_name']?.toString() ?? '';
+        final catComp = ItemOrderUtil.compare(catA, catB);
+        if (catComp != 0) return catComp;
+        final sizeA = a['size_label']?.toString() ?? '';
+        final sizeB = b['size_label']?.toString() ?? '';
+        return SortingUtils.compareSizes(sizeA, sizeB);
+      });
+      return list;
     } catch (e) {
       debugPrint('[DataRepository] Error fetching current stock: $e');
       return [];
     }
   }
 
-  /// Fetches stock chart records for dealer sharing:
-  /// Attempts 'v_dealer_stock_chart' first; falls back to 'v_current_stock' (net_stock_mt > 0)
+  /// Fetches stock chart records for dealer sharing directly from 'v_current_stock'
   /// enriched with size_difference and unit_weight_kg from item_sizes table.
   static Future<List<Map<String, dynamic>>> fetchDealerStockChart(
       [String locationFilter = 'ALL']) async {
     try {
       await ensureMasterLookupData();
 
-      // Try v_dealer_stock_chart view first
-      try {
-        var query = SupabaseService.client
-            .from('v_dealer_stock_chart')
-            .select('*')
-            .gt('net_stock_mt', 0);
-        if (locationFilter != 'ALL') {
-          query = query.eq('location', locationFilter.toUpperCase());
-        }
-        final response = await query.limit(10000);
-        if ((response as List).isNotEmpty) {
-          return List<Map<String, dynamic>>.from(response);
-        }
-      } catch (_) {
-        // Fall back to v_current_stock + item_sizes lookup
-      }
-
-      // Fetch v_current_stock records
+      // Fetch v_current_stock records directly
       final stockRows = await fetchCurrentStock(locationFilter);
 
       // Fetch item_sizes for size_difference & unit_weight_kg mapping
@@ -767,6 +849,16 @@ class DataRepository {
           'location': location,
         });
       }
+
+      result.sort((a, b) {
+        final catA = a['category_name']?.toString() ?? a['item_name']?.toString() ?? '';
+        final catB = b['category_name']?.toString() ?? b['item_name']?.toString() ?? '';
+        final catComp = ItemOrderUtil.compare(catA, catB);
+        if (catComp != 0) return catComp;
+        final sizeA = a['size_label']?.toString() ?? '';
+        final sizeB = b['size_label']?.toString() ?? '';
+        return SortingUtils.compareSizes(sizeA, sizeB);
+      });
 
       return result;
     } catch (e) {
@@ -1069,7 +1161,7 @@ class DataRepository {
       isSyncing.value = true;
       await ensureMasterLookupData();
 
-      // 1. Authoritative Current Stock from v_current_stock view with direct item_sizes fallback
+      // 1. Authoritative Current Stock from v_current_stock view
       final stockRows = await fetchCurrentStock('ALL');
       List<ItemVariant> list = [];
       if (stockRows.isNotEmpty) {
@@ -1092,30 +1184,6 @@ class DataRepository {
             })
             .where((v) => v.currentStockMT != 0)
             .toList();
-      } else {
-        // Fallback: Direct lookup from item_sizes table
-        try {
-          final sizeRows = await SupabaseService.client
-              .from('item_sizes')
-              .select('id, material_id, size_label, current_stock_in, materials(item_name)')
-              .limit(10000);
-          for (final row in sizeRows) {
-            final itemName = resolveItemName(row);
-            final sizeLabel = row['size_label']?.toString() ?? '';
-            final stockIn = _parseDouble(row['current_stock_in']);
-            if (stockIn != 0) {
-              list.add(ItemVariant(
-                itemName: itemName,
-                category: canonicalizeCategory(itemName),
-                size: sizeLabel,
-                currentStockMT: stockIn,
-                location: 'YARD',
-              ));
-            }
-          }
-        } catch (fallbackErr) {
-          debugPrint('[DataRepository] Direct item_sizes fallback error: $fallbackErr');
-        }
       }
 
       list.sort((a, b) {
@@ -1151,6 +1219,7 @@ class DataRepository {
         final txnId = row['txn_id']?.toString() ?? '';
         return txnType != 'PURCHASE' &&
             type != 'PURCHASE' &&
+            !txnId.startsWith('S-17') &&
             !txnId.startsWith('IN_V_');
       }).map((row) {
         final itemName = resolveItemName(row);
@@ -1233,6 +1302,13 @@ class DataRepository {
           'totalQty': totalQty,
           'variants': formattedVariants,
         });
+      });
+
+      itemsList.sort((a, b) {
+        int catComp = ItemOrderUtil.compare(
+            a['category']?.toString(), b['category']?.toString());
+        if (catComp != 0) return catComp;
+        return a['itemName'].toString().compareTo(b['itemName'].toString());
       });
 
       formattedLocations.add({
@@ -1475,6 +1551,7 @@ class DataRepository {
               final txnId = row['txn_id']?.toString() ?? '';
               return txnType != 'PURCHASE' &&
                   type != 'PURCHASE' &&
+                  !txnId.startsWith('S-17') &&
                   !txnId.startsWith('IN_V_');
             })
             .map((row) {
@@ -1651,6 +1728,7 @@ class DataRepository {
       final txnType = row['txn_type']?.toString().toUpperCase() ?? '';
       final type = row['type']?.toString().toUpperCase() ?? '';
       return !isReversed &&
+          !txnId.startsWith('S-17') &&
           !txnId.startsWith('IN_V_') &&
           txnType != 'PURCHASE' &&
           type != 'PURCHASE';
@@ -1735,6 +1813,7 @@ class DataRepository {
 
     for (var tx in transactions) {
       if (tx.isReversed) continue;
+      if (tx.txnId.startsWith('S-17')) continue;
       if (tx.txnId.startsWith('IN_V_')) continue;
 
       final String txLoc = tx.location.trim().toUpperCase();

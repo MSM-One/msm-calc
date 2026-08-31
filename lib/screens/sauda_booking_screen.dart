@@ -14,6 +14,9 @@ import '../core/app_permissions.dart';
 import '../services/access_guard.dart';
 import '../widgets/responsive_size_picker.dart';
 import '../widgets/motion_toast.dart';
+import '../models/delivery_order_model.dart';
+import '../services/delivery_order_print_service.dart';
+import '../widgets/delivery_order_dialog.dart';
 
 class SaudaBookingScreen extends StatefulWidget {
   const SaudaBookingScreen({super.key});
@@ -28,6 +31,7 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
   final TextEditingController remarksCtrl = TextEditingController();
   final TextEditingController _dateCtrl = TextEditingController();
   DateTime bookingDate = DateTime.now();
+  String _documentTitle = 'SAUDA BOOK / DELIVERY ORDER';
   List<SaudaItem> items = [];
 
   @override
@@ -70,6 +74,8 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
       firmNameCtrl.text = prefs.getString('sauda_firm') ?? "";
       vehicleCtrl.text = prefs.getString('sauda_vehicle') ?? "";
       remarksCtrl.text = prefs.getString('sauda_remarks') ?? "";
+      _documentTitle = prefs.getString('sauda_document_title') ??
+          'SAUDA BOOK / DELIVERY ORDER';
     });
   }
 
@@ -78,6 +84,7 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
     await prefs.setString('sauda_firm', firmNameCtrl.text);
     await prefs.setString('sauda_vehicle', vehicleCtrl.text);
     await prefs.setString('sauda_remarks', remarksCtrl.text);
+    await prefs.setString('sauda_document_title', _documentTitle);
   }
 
   void addItem() {
@@ -171,6 +178,131 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
     return msg.toString();
   }
 
+  DeliveryOrderDataModel _buildDeliveryOrderModel() {
+    final String dateStr = DateFormat('yyyy-MM-dd').format(bookingDate);
+    final String safeLorry = vehicleCtrl.text.trim().replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+    final String autoPoNo = "DO-${DateFormat('yyyyMMdd').format(bookingDate)}-${safeLorry.isNotEmpty ? safeLorry : '01'}";
+
+    // Detect overall bill type
+    String detectedBillType = "BILL";
+    for (var item in items) {
+      if (item.orderType != null && item.orderType!.toUpperCase() == "NC") {
+        detectedBillType = "NC";
+        break;
+      }
+    }
+
+    final List<DeliveryOrderItemModel> deliveryItems = [];
+
+    for (var item in items) {
+      if (item.itemType == null) continue;
+      final List<DeliveryOrderSizeModel> sizeModels = [];
+
+      if (item.manualMode) {
+        if (item.manualQty > 0) {
+          sizeModels.add(
+            DeliveryOrderSizeModel(
+              size: "Manual Quantity",
+              qty: item.manualQty,
+              rate: item.rate > 0 ? item.rate : item.basicRate,
+              bd: "${item.manualQty.toStringAsFixed(3)} MT",
+              nos: 1,
+              unitWeight: 0,
+            ),
+          );
+        }
+      } else {
+        for (var s in item.sizes) {
+          if (s.size.isEmpty && s.total <= 0 && s.nos <= 0) continue;
+          double qty = s.total;
+          double nos = s.nos;
+          double weight = s.weight;
+          if (weight <= 0) {
+            weight = SteelHelper.extractWeightKg(s.size, category: item.itemType);
+          }
+          String bdStr = "";
+          if (item.isPiecesItem()) {
+            bdStr = "${nos.toStringAsFixed(0)} Pcs";
+          } else {
+            String nosUnit = (item.itemType == "Binding Wire")
+                ? "Bundles"
+                : (item.itemType == "Nails")
+                    ? "Bags"
+                    : "Pcs";
+            bdStr = "${nos.toStringAsFixed(0)} $nosUnit x ${weight.toStringAsFixed(2)} kg = ${qty.toStringAsFixed(3)} MT";
+          }
+
+          sizeModels.add(
+            DeliveryOrderSizeModel(
+              size: s.sizeDescriptionLabel(item.itemType),
+              qty: qty,
+              rate: item.rate > 0 ? item.rate : item.basicRate,
+              bd: bdStr,
+              nos: nos,
+              unitWeight: weight,
+            ),
+          );
+        }
+      }
+
+      if (sizeModels.isNotEmpty || item.getTotalQty() > 0) {
+        String itemRateType = "";
+        if (item.orderType != null && item.orderType!.isNotEmpty) {
+          if (item.rateType != null && item.rateType!.isNotEmpty) {
+            itemRateType = "${item.orderType} | ${item.rateType}";
+          } else {
+            itemRateType = item.orderType!;
+          }
+        } else if (item.rateType != null && item.rateType!.isNotEmpty) {
+          itemRateType = item.rateType!;
+        } else {
+          itemRateType = detectedBillType;
+        }
+
+        deliveryItems.add(
+          DeliveryOrderItemModel(
+            item: item.itemType!,
+            saudaRate: item.rate > 0 ? item.rate : (item.basicRate > 0 ? item.basicRate : "-"),
+            rateType: itemRateType,
+            balanceQty: item.getTotalQty(),
+            sizes: sizeModels,
+          ),
+        );
+      }
+    }
+
+    return DeliveryOrderDataModel(
+      documentTitle: _documentTitle,
+      poNo: autoPoNo,
+      poDate: dateStr,
+      dealerName: firmNameCtrl.text.trim(),
+      billingName: firmNameCtrl.text.trim(),
+      billingAddress: "",
+      consigneeName: firmNameCtrl.text.trim(),
+      dispatchAddress: "",
+      orderDate: dateStr,
+      billType: detectedBillType,
+      ob: "",
+      freight: "To Pay",
+      lorryNo: vehicleCtrl.text.trim().toUpperCase(),
+      note: remarksCtrl.text.trim(),
+      signedBy: "",
+      approvedBy: "For METAROLL STEEL MART",
+      items: deliveryItems,
+    );
+  }
+
+  void _showDeliveryOrderPrintDialog() {
+    if (firmNameCtrl.text.trim().isEmpty) {
+      MotionToast.show(context, "Please enter Firm Name before printing",
+          isError: true);
+      return;
+    }
+    _saveData();
+    final model = _buildDeliveryOrderModel();
+    DeliveryOrderPrintDialog.show(context, model: model);
+  }
+
   void _showPreviewDialog(bool forDetails) {
     if (firmNameCtrl.text.isEmpty) {
       MotionToast.show(context, "Please enter Firm Name", isError: true);
@@ -233,10 +365,10 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
                                     shape: RoundedRectangleBorder(
                                         borderRadius:
                                             BorderRadius.circular(30))),
-                                icon: const Icon(Icons.copy, size: 20),
+                                icon: const Icon(Icons.copy, size: 18),
                                 label: const Text("Copy",
                                     style: TextStyle(
-                                        fontSize: 16,
+                                        fontSize: 14,
                                         fontWeight: FontWeight.w500)),
                                 onPressed: () {
                                   Clipboard.setData(
@@ -244,7 +376,7 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
                                   MotionToast.show(
                                       context, "Copied to clipboard!");
                                 })),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 8),
                         Expanded(
                             child: ElevatedButton.icon(
                                 style: ElevatedButton.styleFrom(
@@ -256,15 +388,36 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
                                         borderRadius:
                                             BorderRadius.circular(30)),
                                     elevation: 0),
-                                icon: const Icon(Icons.share, size: 20),
+                                icon: const Icon(Icons.share, size: 18),
                                 label: const Text("Share",
                                     style: TextStyle(
-                                        fontSize: 16,
+                                        fontSize: 14,
                                         fontWeight: FontWeight.bold)),
                                 onPressed: () {
                                   Navigator.pop(context);
                                   safeShare(context, message);
-                                }))
+                                })),
+                        const SizedBox(width: 8),
+                        Expanded(
+                            child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: msmRed,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 14),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(30)),
+                                    elevation: 0),
+                                icon: const Icon(Icons.print_rounded, size: 18),
+                                label: const Text("Print",
+                                    style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold)),
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                  _showDeliveryOrderPrintDialog();
+                                })),
                       ]),
                       const SizedBox(height: 8),
                       Center(
@@ -376,39 +529,32 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
                                   child: _buildBasicDetailsFields(isMobile)),
                               const SizedBox(
                                   height: 20), // Consistent vertical spacing
-                              Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    _buildSectionTitle("Items & Rates"),
-                                    if (!isMobile)
-                                      TextButton.icon(
-                                          onPressed: addItem,
-                                          icon: const Icon(
-                                              Icons.add_circle_outline,
-                                              size: 20),
-                                          label: const Text("Add Item"),
-                                          style: TextButton.styleFrom(
-                                              foregroundColor: msmRed))
-                                  ]),
+                              _buildSectionTitle("Items & Rates"),
                               const SizedBox(
                                   height: 4), // Reduced gap above cards
                               ...items.asMap().entries.map(
                                   (e) => _buildSaudaItemCard(e.value, e.key)),
-                              if (isMobile)
-                                Padding(
-                                  padding:
-                                      const EdgeInsets.only(top: 12, bottom: 8),
-                                  child: _buildMobileAddItemButton(),
-                                ),
-                              const SizedBox(height: 16),
+                              Padding(
+                                padding:
+                                    const EdgeInsets.only(top: 8, bottom: 12),
+                                child: _buildAddItemButton(),
+                              ),
+                              const SizedBox(height: 8),
                               _buildSectionCard(
                                   title: "Other Details",
-                                  child: TextField(
-                                      controller: remarksCtrl,
-                                      maxLines: 4,
-                                      decoration: msmInputDeco("Remarks"),
-                                      onChanged: (_) => _saveData())),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      _buildDocumentTitleSelector(),
+                                      const SizedBox(height: 12),
+                                      TextField(
+                                          controller: remarksCtrl,
+                                          maxLines: 3,
+                                          decoration: msmInputDeco("Remarks"),
+                                          onChanged: (_) => _saveData()),
+                                    ],
+                                  )),
                             ],
                           ),
                         ),
@@ -462,6 +608,10 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
               ],
             ),
             actions: [
+              IconButton(
+                  icon: const Icon(Icons.print_rounded, color: Colors.white),
+                  tooltip: "Print Delivery Order",
+                  onPressed: _showDeliveryOrderPrintDialog),
               IconButton(
                   icon: const Icon(Icons.refresh, color: Colors.white),
                   onPressed: _resetForm),
@@ -683,30 +833,46 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
 
   Widget _buildSidebarFooter() {
     return Container(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
             color: Colors.grey[50],
             borderRadius:
                 const BorderRadius.vertical(bottom: Radius.circular(24))),
-        child: ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: msmRed,
-                foregroundColor: Colors.white,
-                minimumSize: const Size(double.infinity, 56),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
-                elevation: 4,
-                shadowColor: msmRed.withValues(alpha: 0.4)),
-            icon: const Icon(Icons.share_outlined),
-            label: const Text("Share Order Details",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            onPressed: () => _showPreviewDialog(true)));
+        child: Column(
+          children: [
+            ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: msmRed,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(double.infinity, 50),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
+                    elevation: 3,
+                    shadowColor: msmRed.withValues(alpha: 0.3)),
+                icon: const Icon(Icons.print_rounded, size: 20),
+                label: const Text("Print Delivery Order",
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                onPressed: _showDeliveryOrderPrintDialog),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: textDark,
+                    side: BorderSide(color: Colors.grey.shade300),
+                    minimumSize: const Size(double.infinity, 44),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14))),
+                icon: const Icon(Icons.share_outlined, size: 18),
+                label: const Text("Share Order Text",
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                onPressed: () => _showPreviewDialog(true)),
+          ],
+        ));
   }
 
   Widget _buildMobileFooter() {
     return Container(
       padding: EdgeInsets.fromLTRB(
-          20, 12, 20, 12 + MediaQuery.of(context).padding.bottom),
+          16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
@@ -721,48 +887,116 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
       ),
       child: Row(children: [
         Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
                 color: msmRed.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(12)),
+                borderRadius: BorderRadius.circular(10)),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               const Text("Total Qty",
-                  style: TextStyle(fontSize: 10, color: textGrey)),
+                  style: TextStyle(fontSize: 9, color: textGrey)),
               Text("${getTotalEffectiveQty().toStringAsFixed(3)} MT",
                   style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.bold, color: msmRed))
+                      fontSize: 12, fontWeight: FontWeight.bold, color: msmRed))
             ])),
-        const SizedBox(width: 12),
+        const SizedBox(width: 8),
         Expanded(
-            child: ElevatedButton(
+            child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: textDark,
+                  side: BorderSide(color: Colors.grey.shade300),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                icon: const Icon(Icons.share_rounded, size: 16),
+                onPressed: () => _showPreviewDialog(true),
+                label: const Text("Share",
+                    style:
+                        TextStyle(fontSize: 13, fontWeight: FontWeight.w600)))),
+        const SizedBox(width: 8),
+        Expanded(
+            flex: 2,
+            child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: msmRed,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16)),
+                      borderRadius: BorderRadius.circular(14)),
                   elevation: 0,
                 ),
-                onPressed: () => _showPreviewDialog(true),
-                child: const Text("Share Details",
+                icon: const Icon(Icons.print_rounded, size: 18),
+                onPressed: _showDeliveryOrderPrintDialog,
+                label: const Text("Print Order",
                     style:
-                        TextStyle(fontSize: 15, fontWeight: FontWeight.bold)))),
+                        TextStyle(fontSize: 14, fontWeight: FontWeight.bold)))),
       ]),
     );
   }
 
-  Widget _buildMobileAddItemButton() {
+  Widget _buildDocumentTitleSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          "Document Title for Print",
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: textDark,
+          ),
+        ),
+        const SizedBox(height: 6),
+        DropdownButtonFormField<String>(
+          value: _documentTitle,
+          decoration: msmInputDeco("Print Title"),
+          dropdownColor: Colors.white,
+          items: const [
+            DropdownMenuItem(
+              value: 'SAUDA BOOK / DELIVERY ORDER',
+              child: Text(
+                'SAUDA BOOK / DELIVERY ORDER (Default)',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
+            DropdownMenuItem(
+              value: 'DELIVERY ORDER',
+              child: Text(
+                'DELIVERY ORDER',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
+            DropdownMenuItem(
+              value: 'SAUDA BOOK',
+              child: Text(
+                'SAUDA BOOK',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+          onChanged: (val) {
+            if (val != null) {
+              setState(() => _documentTitle = val);
+              _saveData();
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAddItemButton() {
     return Padding(
       padding: EdgeInsets.zero,
       child: OutlinedButton.icon(
         onPressed: addItem,
         icon: const Icon(Icons.add_circle_outline, size: 20, color: msmRed),
-        label: const Text("Add New Item to Order",
+        label: const Text("+ Add Item",
             style: TextStyle(
                 color: msmRed, fontWeight: FontWeight.bold, fontSize: 14)),
         style: OutlinedButton.styleFrom(
-          minimumSize: const Size(double.infinity, 54),
-          side: BorderSide(color: msmRed.withValues(alpha: 0.25), width: 1.5),
+          minimumSize: const Size(double.infinity, 52),
+          side: BorderSide(color: msmRed.withValues(alpha: 0.3), width: 1.5),
           backgroundColor: msmRed.withValues(alpha: 0.04),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),

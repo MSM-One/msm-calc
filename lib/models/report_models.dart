@@ -58,15 +58,19 @@ class DailyMovementEntry {
   final String category;
   final String itemName;
   final String size;
+  double openingQty;
   double inQty;
   double outQty;
+  double closingQty;
 
   DailyMovementEntry({
     required this.category,
     required this.itemName,
     required this.size,
+    this.openingQty = 0.0,
     required this.inQty,
     required this.outQty,
+    this.closingQty = 0.0,
   });
 
   double get netQty => inQty - outQty;

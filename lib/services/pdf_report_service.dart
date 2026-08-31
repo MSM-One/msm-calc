@@ -947,43 +947,52 @@ class PdfReportService {
 
           if (selectedMode == 'Summary') {
             // Group by Category uniquely
-            Map<String, double> summaryMap = {};
+            Map<String, Map<String, double>> summaryMap = {};
             for (var e in entries) {
               final String rawCat = e.itemName.isNotEmpty
                   ? e.itemName
                   : (e.category.isNotEmpty ? e.category : 'Other');
               final String categoryGroup =
                   DataRepository.canonicalizeCategory(rawCat);
-              final double qty = isNetQty
-                  ? (e.inQty - e.outQty)
-                  : isOutward
-                      ? e.outQty.abs()
-                      : e.inQty.abs();
-              final bool include =
-                  isNetQty ? (e.inQty > 0 || e.outQty > 0) : (qty > 0);
-              if (include) {
-                summaryMap[categoryGroup] =
-                    (summaryMap[categoryGroup] ?? 0.0) + qty;
-              }
+              summaryMap.putIfAbsent(categoryGroup, () => {
+                'open': 0.0,
+                'in': 0.0,
+                'out': 0.0,
+                'closing': 0.0,
+              });
+              summaryMap[categoryGroup]!['open'] =
+                  (summaryMap[categoryGroup]!['open'] ?? 0.0) + e.openingQty;
+              summaryMap[categoryGroup]!['in'] =
+                  (summaryMap[categoryGroup]!['in'] ?? 0.0) + e.inQty;
+              summaryMap[categoryGroup]!['out'] =
+                  (summaryMap[categoryGroup]!['out'] ?? 0.0) + e.outQty;
+              summaryMap[categoryGroup]!['closing'] =
+                  (summaryMap[categoryGroup]!['closing'] ?? 0.0) + e.closingQty;
             }
             final summaryCategories = summaryMap.entries.toList()
               ..sort((a, b) => SortingUtils.compareCategories(a.key, b.key));
 
-            final double grandTotal = summaryCategories.fold(
-                0.0, (sum, entry) => sum + entry.value);
-            final String formattedGrandTotal = isNetQty
-                ? "${grandTotal < 0 ? '-' : ''}${grandTotal.abs().toStringAsFixed(3)} MT"
-                : "${grandTotal.abs().toStringAsFixed(3)} MT";
+            final double grandOpen = summaryCategories.fold(
+                0.0, (sum, entry) => sum + (entry.value['open'] ?? 0.0));
+            final double grandIn = summaryCategories.fold(
+                0.0, (sum, entry) => sum + (entry.value['in'] ?? 0.0));
+            final double grandOut = summaryCategories.fold(
+                0.0, (sum, entry) => sum + (entry.value['out'] ?? 0.0));
+            final double grandClosing = summaryCategories.fold(
+                0.0, (sum, entry) => sum + (entry.value['closing'] ?? 0.0));
 
             content.add(
               pw.Center(
                 child: pw.Table(
-                  tableWidth: pw.TableWidth.min,
+                  tableWidth: pw.TableWidth.max,
                   border:
                       pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
                   columnWidths: const {
-                    0: pw.IntrinsicColumnWidth(), // Item Category
-                    1: pw.IntrinsicColumnWidth(), // Total Quantity
+                    0: pw.FlexColumnWidth(3), // Item Category
+                    1: pw.FlexColumnWidth(2), // Opening Stock (MT)
+                    2: pw.FlexColumnWidth(2), // Inward (MT)
+                    3: pw.FlexColumnWidth(2), // Outward (MT)
+                    4: pw.FlexColumnWidth(2), // Closing Stock (MT)
                   },
                   children: [
                     pw.TableRow(
@@ -991,14 +1000,14 @@ class PdfReportService {
                       children: [
                         buildSummaryCell('Item Category',
                             isHeader: true, align: pw.TextAlign.left),
-                        buildSummaryCell(
-                            isNetQty
-                                ? 'Net Quantity (MT)'
-                                : (isOutward
-                                    ? 'Outward Quantity (MT)'
-                                    : 'Inward Quantity (MT)'),
-                            isHeader: true,
-                            align: pw.TextAlign.right),
+                        buildSummaryCell('Opening Stock (MT)',
+                            isHeader: true, align: pw.TextAlign.right),
+                        buildSummaryCell('Inward (MT)',
+                            isHeader: true, align: pw.TextAlign.right),
+                        buildSummaryCell('Outward (MT)',
+                            isHeader: true, align: pw.TextAlign.right),
+                        buildSummaryCell('Closing Stock (MT)',
+                            isHeader: true, align: pw.TextAlign.right),
                       ],
                     ),
                     ...summaryCategories.asMap().entries.map((entry) {
@@ -1006,16 +1015,25 @@ class PdfReportService {
                       final item = entry.value;
                       final rowBg =
                           idx % 2 == 1 ? PdfColors.grey50 : PdfColors.white;
-                      final double val = item.value;
-                      final String formattedVal = isNetQty
-                          ? "${val < 0 ? '-' : ''}${val.abs().toStringAsFixed(3)} MT"
-                          : "${val.abs().toStringAsFixed(3)} MT";
+                      final openVal = item.value['open'] ?? 0.0;
+                      final inVal = item.value['in'] ?? 0.0;
+                      final outVal = item.value['out'] ?? 0.0;
+                      final closeVal = item.value['closing'] ?? (openVal + inVal - outVal);
+
                       return pw.TableRow(
                         decoration: pw.BoxDecoration(color: rowBg),
                         children: [
                           buildSummaryCell(item.key.toUpperCase(),
                               align: pw.TextAlign.left),
-                          buildSummaryCell(formattedVal,
+                          buildSummaryCell(openVal.toStringAsFixed(3),
+                              align: pw.TextAlign.right),
+                          buildSummaryCell(
+                              inVal > 0 ? "+${inVal.toStringAsFixed(3)}" : "—",
+                              align: pw.TextAlign.right),
+                          buildSummaryCell(
+                              outVal > 0 ? "-${outVal.toStringAsFixed(3)}" : "—",
+                              align: pw.TextAlign.right),
+                          buildSummaryCell(closeVal.toStringAsFixed(3),
                               align: pw.TextAlign.right, isBold: true),
                         ],
                       );
@@ -1028,7 +1046,13 @@ class PdfReportService {
                       children: [
                         buildSummaryCell('TOTAL',
                             align: pw.TextAlign.left, isBold: true),
-                        buildSummaryCell(formattedGrandTotal,
+                        buildSummaryCell(grandOpen.toStringAsFixed(3),
+                            align: pw.TextAlign.right, isBold: true),
+                        buildSummaryCell(grandIn.toStringAsFixed(3),
+                            align: pw.TextAlign.right, isBold: true),
+                        buildSummaryCell(grandOut.toStringAsFixed(3),
+                            align: pw.TextAlign.right, isBold: true),
+                        buildSummaryCell("${grandClosing.toStringAsFixed(3)} MT",
                             align: pw.TextAlign.right, isBold: true),
                       ],
                     ),
@@ -1057,18 +1081,21 @@ class PdfReportService {
               catEntries
                   .sort((a, b) => SortingUtils.compareSizes(a.size, b.size));
 
+              double catOpen = 0;
               double catIn = 0;
               double catOut = 0;
+              double catClosing = 0;
               for (var e in catEntries) {
+                catOpen += e.openingQty;
                 catIn += e.inQty.abs();
                 catOut += e.outQty.abs();
+                catClosing += e.closingQty;
               }
-              final double catNet = (catIn - catOut).abs();
 
               content.add(
                 pw.Center(
                   child: pw.SizedBox(
-                    width: 290,
+                    width: 500,
                     child: pw.Container(
                       width: double.infinity,
                       padding: const pw.EdgeInsets.symmetric(
@@ -1076,7 +1103,7 @@ class PdfReportService {
                       decoration:
                           const pw.BoxDecoration(color: PdfColors.grey200),
                       child: pw.Text(
-                          '${cat.toUpperCase()} | Total: ${catNet.toStringAsFixed(3)} MT',
+                          '${cat.toUpperCase()} | Closing: ${catClosing.toStringAsFixed(3)} MT',
                           style: pw.TextStyle(
                               fontWeight: pw.FontWeight.bold,
                               fontSize: 10,
@@ -1096,9 +1123,13 @@ class PdfReportService {
                   children: [
                     buildSummaryCell('Size Description',
                         isHeader: true, align: pw.TextAlign.left),
+                    buildSummaryCell('Opening (MT)',
+                        isHeader: true, align: pw.TextAlign.right),
                     buildSummaryCell('Inward (MT)',
                         isHeader: true, align: pw.TextAlign.right),
                     buildSummaryCell('Outward (MT)',
+                        isHeader: true, align: pw.TextAlign.right),
+                    buildSummaryCell('Closing (MT)',
                         isHeader: true, align: pw.TextAlign.right),
                   ],
                 ),
@@ -1125,16 +1156,20 @@ class PdfReportService {
                     decoration: pw.BoxDecoration(color: rowBg),
                     children: [
                       buildSummaryCell(sizeDesc, align: pw.TextAlign.left),
+                      buildSummaryCell(e.openingQty.toStringAsFixed(3),
+                          align: pw.TextAlign.right),
                       buildSummaryCell(
                           e.inQty.abs() > 0
-                              ? e.inQty.abs().toStringAsFixed(3)
+                              ? "+${e.inQty.abs().toStringAsFixed(3)}"
                               : '-',
                           align: pw.TextAlign.right),
                       buildSummaryCell(
                           e.outQty.abs() > 0
-                              ? e.outQty.abs().toStringAsFixed(3)
+                              ? "-${e.outQty.abs().toStringAsFixed(3)}"
                               : '-',
                           align: pw.TextAlign.right),
+                      buildSummaryCell(e.closingQty.toStringAsFixed(3),
+                          align: pw.TextAlign.right, isBold: true),
                     ],
                   ),
                 );
@@ -1149,9 +1184,13 @@ class PdfReportService {
                   children: [
                     buildSummaryCell('CATEGORY TOTAL',
                         align: pw.TextAlign.left, isBold: true),
+                    buildSummaryCell(catOpen.toStringAsFixed(3),
+                        align: pw.TextAlign.right, isBold: true),
                     buildSummaryCell(catIn.toStringAsFixed(3),
                         align: pw.TextAlign.right, isBold: true),
                     buildSummaryCell(catOut.toStringAsFixed(3),
+                        align: pw.TextAlign.right, isBold: true),
+                    buildSummaryCell(catClosing.toStringAsFixed(3),
                         align: pw.TextAlign.right, isBold: true),
                   ],
                 ),
@@ -1160,17 +1199,16 @@ class PdfReportService {
               content.add(
                 pw.Center(
                   child: pw.SizedBox(
-                    width: 290,
+                    width: 500,
                     child: pw.Table(
                       border: pw.TableBorder.all(
                           color: PdfColors.grey200, width: 0.5),
                       columnWidths: const {
-                        0: pw.FixedColumnWidth(
-                            150), // Size Description + Suffix (Compact fit)
-                        1: pw.FixedColumnWidth(
-                            70), // Inward (MT) (Pulled tight)
-                        2: pw.FixedColumnWidth(
-                            70), // Outward (MT) (Pulled tight)
+                        0: pw.FlexColumnWidth(3), // Size Description
+                        1: pw.FlexColumnWidth(2), // Opening (MT)
+                        2: pw.FlexColumnWidth(2), // Inward (MT)
+                        3: pw.FlexColumnWidth(2), // Outward (MT)
+                        4: pw.FlexColumnWidth(2), // Closing (MT)
                       },
                       children: tableRows,
                     ),
@@ -3549,6 +3587,20 @@ class PdfReportService {
     final df = DateFormat('dd MMM yyyy HH:mm');
     final dfShort = DateFormat('dd MMM yyyy');
 
+    // Fetch true SKU opening balances from backend RPC if date range is provided
+    Map<String, Map<String, dynamic>> skuOpeningMap = {};
+    if (startDate != null && endDate != null) {
+      try {
+        skuOpeningMap = await DataRepository.fetchStockLedgerDataFromRpc(
+          startDate: startDate,
+          endDate: endDate,
+          selectedLocation: 'ALL',
+        );
+      } catch (e) {
+        debugPrint('[generateStockLedgerReport] Error fetching opening map: $e');
+      }
+    }
+
     // 1. Group transactions by Category, and within category group by Item & Size variant
     final Map<String, List<StockTransaction>> groupedByCat = {};
     for (var tx in transactions) {
@@ -3592,7 +3644,13 @@ class PdfReportService {
       for (var variantKey in variantMap.keys) {
         final variantTxs = variantMap[variantKey]!
           ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
-        double runningStock = 0.0;
+        
+        final double initialVariantOpen = skuOpeningMap[variantKey]?['opening'] is num
+            ? (skuOpeningMap[variantKey]!['opening'] as num).toDouble()
+            : (double.tryParse(skuOpeningMap[variantKey]?['opening']?.toString() ?? '') ?? 0.0);
+        
+        double runningStock = initialVariantOpen;
+        catTotalOpen += initialVariantOpen;
 
         for (var txn in variantTxs) {
           double opening = runningStock;
@@ -3614,10 +3672,8 @@ class PdfReportService {
           double closing = opening + inward - outward;
           runningStock = closing;
 
-          catTotalOpen += opening;
           catTotalIn += inward;
           catTotalOut += outward;
-          catTotalClosing += closing;
 
           // Handle size label formatting
           final String sizeLabel = txn.size;
@@ -3640,6 +3696,8 @@ class PdfReportService {
           });
         }
       }
+
+      catTotalClosing = catTotalOpen + catTotalIn - catTotalOut;
 
       // Sort category rows chronologically (or by date descending)
       rows.sort((a, b) =>

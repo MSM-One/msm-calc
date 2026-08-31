@@ -1,25 +1,7 @@
-class SortingUtils {
-  static const List<String> categoryPriority = [
-    "MS Pipe",
-    "ERW Pipe",
-    "HR Pipe",
-    "CR Pipe",
-    "MS Angle",
-    "MS Channel",
-    "Binding Wire",
-    "Nails",
-    "Sqr Bar",
-    "Round Bar",
-    "Flats",
-    "MS Structure ISMC",
-    "Heavy Structure ISMB",
-    "Barbed Wire",
-    "GATE Channel",
-  ];
+import 'item_order_util.dart';
 
-  /// Normalized versions of the priority list for fast lookup
-  static final List<String> _normalizedPriority =
-      categoryPriority.map((e) => normalizeCategoryName(e)).toList();
+class SortingUtils {
+  static const List<String> categoryPriority = ItemOrderUtil.canonicalSequence;
 
   /// Normalizes a category name: trim, lowercase, and collapse multiple spaces.
   static String normalizeCategoryName(String name) {
@@ -36,36 +18,7 @@ class SortingUtils {
     if (a == null) return 1;
     if (b == null) return -1;
 
-    final String normA = normalizeCategoryName(a);
-    final String normB = normalizeCategoryName(b);
-    if (normA == normB) return 0;
-
-    // Check dynamic master order provider if available
-    if (dynamicMasterOrderProvider != null) {
-      final masterList = dynamicMasterOrderProvider!();
-      final normMaster = masterList.map((e) => normalizeCategoryName(e)).toList();
-      final idxA = normMaster.indexOf(normA);
-      final idxB = normMaster.indexOf(normB);
-      if (idxA != -1 && idxB != -1) {
-        return idxA.compareTo(idxB);
-      }
-      if (idxA != -1) return -1;
-      if (idxB != -1) return 1;
-    }
-
-    int indexA = _normalizedPriority.indexOf(normA);
-    int indexB = _normalizedPriority.indexOf(normB);
-
-    // If both are in the priority list, sort by their position in that list
-    if (indexA != -1 && indexB != -1) {
-      return indexA.compareTo(indexB);
-    }
-    // Priority items come first
-    if (indexA != -1) return -1;
-    if (indexB != -1) return 1;
-
-    // Both are outside the priority list, sort alphabetically
-    return normA.compareTo(normB);
+    return ItemOrderUtil.compare(a, b);
   }
 
   static List<double> extractNumericalComponents(String sizeStr) {

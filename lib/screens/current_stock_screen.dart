@@ -209,22 +209,12 @@ class _CurrentStockScreenState extends State<CurrentStockScreen> {
     return false;
   }
 
-  void _showFilterSheet() {
-    if (_erpData.isEmpty || !_erpData.containsKey('locations')) return;
-    final Set<String> categories = {};
-
-    List locs = _erpData['locations'] as List? ?? [];
-    for (var l in locs) {
-      if (l is Map && l['items'] is List) {
-        for (var item in (l['items'] as List)) {
-          if (item is Map &&
-              item['category'] != null &&
-              item['category'].toString().isNotEmpty) {
-            categories.add(item['category'].toString());
-          }
-        }
-      }
-    }
+  void _showFilterSheet(List<ItemVariant> list) {
+    final Set<String> categories = list
+        .where((e) => e.location.toUpperCase() == _activeLocation.toUpperCase())
+        .map((e) => e.category)
+        .where((c) => c.isNotEmpty)
+        .toSet();
 
     final catList = categories.toList()
       ..sort((a, b) => SortingUtils.compareCategories(a, b));
@@ -371,8 +361,6 @@ class _CurrentStockScreenState extends State<CurrentStockScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final filteredItems = _getFilteredItems();
-
     return Scaffold(
       backgroundColor: bgLight,
       extendBodyBehindAppBar: true,
@@ -410,7 +398,7 @@ class _CurrentStockScreenState extends State<CurrentStockScreen> {
             children: [
               _buildPremiumHeader(
                   yardTotal, factoryTotal, grandTotal, activeItemsCount),
-              _buildFilterBar(),
+              _buildFilterBar(list),
               Expanded(
                 child: snapshot.connectionState == ConnectionState.waiting
                     ? ListView.builder(
@@ -427,18 +415,56 @@ class _CurrentStockScreenState extends State<CurrentStockScreen> {
   }
 
   Widget _buildListContent(List<ItemVariant> list) {
-    final displayItems = list.where((item) {
+    List<ItemVariant> displayItems = list.where((item) {
       if (item.location.toUpperCase() != _activeLocation.toUpperCase()) {
+        return false;
+      }
+      if (_selectedCategories.isNotEmpty &&
+          !_selectedCategories.contains(item.category)) {
         return false;
       }
       if (_searchQuery.isNotEmpty) {
         final query = _searchQuery.toLowerCase();
         final matchName = item.itemName.toLowerCase().contains(query);
         final matchSize = item.sizeLabel.toLowerCase().contains(query);
-        if (!matchName && !matchSize) return false;
+        final matchCat = item.category.toLowerCase().contains(query);
+        if (!matchName && !matchSize && !matchCat) return false;
       }
       return true;
     }).toList();
+
+    if (_sortBy == "Qty High → Low") {
+      displayItems.sort((a, b) => b.netStockMt.compareTo(a.netStockMt));
+    } else if (_sortBy == "Qty Low → High") {
+      displayItems.sort((a, b) => a.netStockMt.compareTo(b.netStockMt));
+    } else if (_sortBy == "Name A-Z") {
+      displayItems.sort((a, b) {
+        int catComp = SortingUtils.compareCategories(a.category, b.category);
+        if (catComp != 0) return catComp;
+        return a.itemName.toLowerCase().compareTo(b.itemName.toLowerCase());
+      });
+    } else if (_sortBy == "Name Z-A") {
+      displayItems.sort((a, b) {
+        int catComp = SortingUtils.compareCategories(b.category, a.category);
+        if (catComp != 0) return catComp;
+        return b.itemName.toLowerCase().compareTo(a.itemName.toLowerCase());
+      });
+    } else if (_sortBy == "Category") {
+      displayItems.sort((a, b) {
+        int catComp = SortingUtils.compareCategories(a.category, b.category);
+        if (catComp != 0) return catComp;
+        return a.itemName.toLowerCase().compareTo(b.itemName.toLowerCase());
+      });
+    } else if (_sortBy == "Low Stock First") {
+      displayItems.sort((a, b) {
+        bool aLow = a.netStockMt <= a.minStock;
+        bool bLow = b.netStockMt <= b.minStock;
+        if (aLow == bLow) {
+          return b.netStockMt.compareTo(a.netStockMt);
+        }
+        return aLow ? -1 : 1;
+      });
+    }
 
     if (displayItems.isEmpty) {
       return _buildEmptyState();
@@ -473,7 +499,7 @@ class _CurrentStockScreenState extends State<CurrentStockScreen> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  "${itemVariant.netStockMt.toStringAsFixed(2)} MT",
+                  "${itemVariant.netStockMt.toStringAsFixed(3)} MT",
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
@@ -578,14 +604,14 @@ class _CurrentStockScreenState extends State<CurrentStockScreen> {
               Expanded(
                   child: _buildSummaryCard(
                       "Yard",
-                      "${yard.toStringAsFixed(2)} MT",
+                      "${yard.toStringAsFixed(3)} MT",
                       Icons.warehouse_rounded,
                       Colors.white)),
               const SizedBox(width: 12),
               Expanded(
                   child: _buildSummaryCard(
                       "Factory",
-                      "${factory.toStringAsFixed(2)} MT",
+                      "${factory.toStringAsFixed(3)} MT",
                       Icons.factory_rounded,
                       Colors.white)),
             ],
@@ -596,7 +622,7 @@ class _CurrentStockScreenState extends State<CurrentStockScreen> {
               Expanded(
                   child: _buildSummaryCard(
                       "Grand Total",
-                      "${total.toStringAsFixed(2)} MT",
+                      "${total.toStringAsFixed(3)} MT",
                       Icons.functions_rounded,
                       Colors.white)),
               const SizedBox(width: 12),
@@ -660,7 +686,7 @@ class _CurrentStockScreenState extends State<CurrentStockScreen> {
     );
   }
 
-  Widget _buildFilterBar() {
+  Widget _buildFilterBar(List<ItemVariant> list) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -680,7 +706,7 @@ class _CurrentStockScreenState extends State<CurrentStockScreen> {
                 ? "Categories"
                 : "${_selectedCategories.length} Selected",
             icon: Icons.filter_list_rounded,
-            onTap: _showFilterSheet,
+            onTap: () => _showFilterSheet(list),
             isActive: _selectedCategories.isNotEmpty,
           ),
           const Spacer(),

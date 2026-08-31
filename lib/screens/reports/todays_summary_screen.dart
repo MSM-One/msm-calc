@@ -124,21 +124,22 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
     final bool isDesktop = width >= 1025;
 
     // 1. Calculate Grand Totals across all transactions for KPI strip
+    double grandOpening = 0.0;
     double grandInward = 0.0;
     double grandOutward = 0.0;
+    double grandClosing = 0.0;
     final Set<String> activeCategoriesSet = {};
 
     for (var e in widget.filteredDailyMovement) {
+      grandOpening += e.openingQty;
       grandInward += e.inQty;
       grandOutward += e.outQty;
-      if (e.inQty > 0 || e.outQty > 0) {
-        final rawCat = e.itemName.isNotEmpty
-            ? e.itemName
-            : (e.category.isNotEmpty ? e.category : 'Other');
-        activeCategoriesSet.add(DataRepository.canonicalizeCategory(rawCat));
-      }
+      grandClosing += e.closingQty;
+      final rawCat = e.itemName.isNotEmpty
+          ? e.itemName
+          : (e.category.isNotEmpty ? e.category : 'Other');
+      activeCategoriesSet.add(DataRepository.canonicalizeCategory(rawCat));
     }
-    final double grandNet = grandInward - grandOutward;
 
     // 2. Group items by Category for table & views
     final Map<String, List<Map<String, dynamic>>> categoryMap = {};
@@ -147,12 +148,6 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
           ? e.itemName
           : (e.category.isNotEmpty ? e.category : 'Other');
       final String categoryGroup = DataRepository.canonicalizeCategory(rawCat);
-      if (['Binding Wire', 'Nails', 'Barbed Wire', 'Heavy Structure ISMB']
-              .contains(categoryGroup) &&
-          e.inQty == 0 &&
-          e.outQty == 0) {
-        continue;
-      }
       categoryMap.putIfAbsent(categoryGroup, () => []);
 
       double weight = lookupSizeWeight(e.size);
@@ -163,8 +158,10 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
       categoryMap[categoryGroup]!.add({
         'size_label': e.size,
         'weight': weight > 0 ? weight : null,
+        'opening_qty': e.openingQty,
         'in_qty': e.inQty,
         'out_qty': e.outQty,
+        'closing_qty': e.closingQty,
         'net_qty': e.inQty - e.outQty,
       });
     }
@@ -175,31 +172,25 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
       items.sort((a, b) => SortingUtils.compareSizes(
           a['size_label'] as String, b['size_label'] as String));
 
+      final double totalOpen =
+          items.fold(0.0, (sum, it) => sum + (it['opening_qty'] as double? ?? 0.0));
       final double totalIn =
-          items.fold(0.0, (sum, it) => sum + (it['in_qty'] as double));
+          items.fold(0.0, (sum, it) => sum + (it['in_qty'] as double? ?? 0.0));
       final double totalOut =
-          items.fold(0.0, (sum, it) => sum + (it['out_qty'] as double));
+          items.fold(0.0, (sum, it) => sum + (it['out_qty'] as double? ?? 0.0));
+      final double totalClosing =
+          items.fold(0.0, (sum, it) => sum + (it['closing_qty'] as double? ?? 0.0));
       final double totalNet = totalIn - totalOut;
 
-      // Filter category by selected flow mode
-      bool includeCategory = true;
-      if (_selectedFlow == 'Inward') {
-        includeCategory = totalIn > 0;
-      } else if (_selectedFlow == 'Outward') {
-        includeCategory = totalOut > 0;
-      } else if (_selectedFlow == 'Net Qty') {
-        includeCategory = totalIn > 0 || totalOut > 0;
-      }
-
-      if (includeCategory) {
-        processedCategories.add({
-          'name': categoryName,
-          'in_qty': totalIn,
-          'out_qty': totalOut,
-          'net_qty': totalNet,
-          'items': items,
-        });
-      }
+      processedCategories.add({
+        'name': categoryName,
+        'opening_qty': totalOpen,
+        'in_qty': totalIn,
+        'out_qty': totalOut,
+        'closing_qty': totalClosing,
+        'net_qty': totalNet,
+        'items': items,
+      });
     });
 
     processedCategories.sort((a, b) => SortingUtils.compareCategories(
@@ -207,9 +198,10 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
 
     if (isDesktop) {
       return _buildDesktopEnterpriseView(
+        grandOpening: grandOpening,
         grandInward: grandInward,
         grandOutward: grandOutward,
-        grandNet: grandNet,
+        grandClosing: grandClosing,
         activeCategoriesCount: activeCategoriesSet.length,
         categories: processedCategories,
       );
@@ -228,9 +220,10 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
   // DESKTOP ENTERPRISE VIEW (KPI STRIP + MATERIAL 3 DATA TABLE)
   // ===========================================================================
   Widget _buildDesktopEnterpriseView({
+    required double grandOpening,
     required double grandInward,
     required double grandOutward,
-    required double grandNet,
+    required double grandClosing,
     required int activeCategoriesCount,
     required List<Map<String, dynamic>> categories,
   }) {
@@ -241,9 +234,10 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
         children: [
           // 1. Top KPI Metrics Strip (4 Cards)
           _buildKpiMetricsStrip(
+            opening: grandOpening,
             inward: grandInward,
             outward: grandOutward,
-            net: grandNet,
+            closing: grandClosing,
             activeCount: activeCategoriesCount,
           ),
           const SizedBox(height: 24),
@@ -256,9 +250,10 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
   }
 
   Widget _buildKpiMetricsStrip({
+    required double opening,
     required double inward,
     required double outward,
-    required double net,
+    required double closing,
     required int activeCount,
   }) {
     return LayoutBuilder(builder: (context, constraints) {
@@ -268,6 +263,16 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
         spacing: 16,
         runSpacing: 16,
         children: [
+          _buildKpiCard(
+            width: cardWidth.clamp(220.0, 380.0),
+            title: "Total Opening Stock",
+            value: "${opening.toStringAsFixed(3)} MT",
+            badgeText: "Opening Balance",
+            badgeColor: const Color(0xFF475569),
+            badgeBg: const Color(0xFFF1F5F9),
+            icon: Icons.inventory_2_outlined,
+            accentColor: const Color(0xFF475569),
+          ),
           _buildKpiCard(
             width: cardWidth.clamp(220.0, 380.0),
             title: "Total Inward Movement",
@@ -290,26 +295,13 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
           ),
           _buildKpiCard(
             width: cardWidth.clamp(220.0, 380.0),
-            title: "Net Movement Balance",
-            value: "${net >= 0 ? '+' : ''}${net.toStringAsFixed(3)} MT",
-            badgeText: net >= 0 ? "Net Surplus" : "Net Deficit",
-            badgeColor:
-                net >= 0 ? const Color(0xFF2563EB) : const Color(0xFFDC2626),
-            badgeBg:
-                net >= 0 ? const Color(0xFFDBEAFE) : const Color(0xFFFEE2E2),
-            icon: Icons.balance_rounded,
-            accentColor:
-                net >= 0 ? const Color(0xFF2563EB) : const Color(0xFFDC2626),
-          ),
-          _buildKpiCard(
-            width: cardWidth.clamp(220.0, 380.0),
-            title: "Active Materials & Sizes",
-            value: "$activeCount Categories",
-            badgeText: "Live Transactions",
-            badgeColor: const Color(0xFF475569),
-            badgeBg: const Color(0xFFF1F5F9),
-            icon: Icons.layers_rounded,
-            accentColor: const Color(0xFF475569),
+            title: "Total Closing Stock",
+            value: "${closing.toStringAsFixed(3)} MT",
+            badgeText: "Current Balance",
+            badgeColor: const Color(0xFFC81E1E),
+            badgeBg: const Color(0xFFFEE2E2),
+            icon: Icons.account_balance_wallet_rounded,
+            accentColor: const Color(0xFFC81E1E),
           ),
         ],
       );
@@ -427,12 +419,14 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
       );
     }
 
+    final double grandOpen = categories.fold(
+        0.0, (sum, cat) => sum + (cat['opening_qty'] as double? ?? 0.0));
     final double grandIn = categories.fold(
         0.0, (sum, cat) => sum + (cat['in_qty'] as double? ?? 0.0));
     final double grandOut = categories.fold(
         0.0, (sum, cat) => sum + (cat['out_qty'] as double? ?? 0.0));
-    final double grandNet = categories.fold(
-        0.0, (sum, cat) => sum + (cat['net_qty'] as double? ?? 0.0));
+    final double grandClosing = categories.fold(
+        0.0, (sum, cat) => sum + (cat['closing_qty'] as double? ?? 0.0));
 
     return Container(
       decoration: BoxDecoration(
@@ -461,9 +455,9 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
               ),
               border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
             ),
-            child: Row(
+            child: const Row(
               children: [
-                const SizedBox(
+                SizedBox(
                   width: 40,
                   child: Text(
                     "#",
@@ -474,7 +468,7 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                     ),
                   ),
                 ),
-                const Expanded(
+                Expanded(
                   flex: 3,
                   child: Text(
                     "CATEGORY / MATERIAL",
@@ -487,52 +481,59 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                   ),
                 ),
                 SizedBox(
-                  width: 140,
+                  width: 130,
+                  child: Text(
+                    "OPENING (MT)",
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: textGrey,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 130,
                   child: Text(
                     "INWARD (MT)",
                     textAlign: TextAlign.right,
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
-                      color: _selectedFlow == 'Inward'
-                          ? const Color(0xFF16A34A)
-                          : textGrey,
+                      color: Color(0xFF16A34A),
                       letterSpacing: 0.5,
                     ),
                   ),
                 ),
                 SizedBox(
-                  width: 140,
+                  width: 130,
                   child: Text(
                     "OUTWARD (MT)",
                     textAlign: TextAlign.right,
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
-                      color: _selectedFlow == 'Outward'
-                          ? const Color(0xFFDC2626)
-                          : textGrey,
+                      color: Color(0xFFDC2626),
                       letterSpacing: 0.5,
                     ),
                   ),
                 ),
                 SizedBox(
-                  width: 150,
+                  width: 140,
                   child: Text(
-                    "NET QTY (MT)",
+                    "CLOSING (MT)",
                     textAlign: TextAlign.right,
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
-                      color: _selectedFlow == 'Net Qty'
-                          ? const Color(0xFF2563EB)
-                          : textGrey,
+                      color: msmRed,
                       letterSpacing: 0.5,
                     ),
                   ),
                 ),
-                const SizedBox(
-                  width: 140,
+                SizedBox(
+                  width: 130,
                   child: Center(
                     child: Text(
                       "FLOW STATUS",
@@ -545,8 +546,8 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                     ),
                   ),
                 ),
-                const SizedBox(
-                  width: 90,
+                SizedBox(
+                  width: 70,
                   child: Center(
                     child: Text(
                       "DETAILS",
@@ -573,8 +574,10 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
             itemBuilder: (context, index) {
               final cat = categories[index];
               final String catName = (cat['name'] as String? ?? '').toUpperCase();
+              final double openQty = cat['opening_qty'] as double? ?? 0.0;
               final double inQty = cat['in_qty'] as double? ?? 0.0;
               final double outQty = cat['out_qty'] as double? ?? 0.0;
+              final double closingQty = cat['closing_qty'] as double? ?? 0.0;
               final double netQty = cat['net_qty'] as double? ?? 0.0;
               final List items = cat['items'] as List? ?? [];
               final bool isExpanded = _expandedCategories.contains(cat['name']);
@@ -583,8 +586,10 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                 index: index + 1,
                 categoryName: catName,
                 rawCategoryName: cat['name'] as String,
+                openQty: openQty,
                 inQty: inQty,
                 outQty: outQty,
+                closingQty: closingQty,
                 netQty: netQty,
                 items: items,
                 isExpanded: isExpanded,
@@ -629,7 +634,20 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                   ),
                 ),
                 SizedBox(
-                  width: 140,
+                  width: 130,
+                  child: Text(
+                    "${grandOpen.toStringAsFixed(3)} MT",
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                      color: textDark,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 130,
                   child: Text(
                     "${grandIn.toStringAsFixed(3)} MT",
                     textAlign: TextAlign.right,
@@ -642,7 +660,7 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                   ),
                 ),
                 SizedBox(
-                  width: 140,
+                  width: 130,
                   child: Text(
                     "${grandOut.toStringAsFixed(3)} MT",
                     textAlign: TextAlign.right,
@@ -655,45 +673,20 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                   ),
                 ),
                 SizedBox(
-                  width: 150,
+                  width: 140,
                   child: Text(
-                    "${grandNet >= 0 ? '+' : ''}${grandNet.toStringAsFixed(3)} MT",
+                    "${grandClosing.toStringAsFixed(3)} MT",
                     textAlign: TextAlign.right,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w900,
-                      color: grandNet >= 0
-                          ? const Color(0xFF2563EB)
-                          : const Color(0xFFDC2626),
+                      color: msmRed,
                       fontFamily: 'monospace',
                     ),
                   ),
                 ),
-                SizedBox(
-                  width: 140,
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: _getFlowBgColor(grandNet),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: _getFlowColor(grandNet).withValues(alpha: 0.3),
-                        ),
-                      ),
-                      child: Text(
-                        grandNet >= 0 ? "SURPLUS" : "DEFICIT",
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w900,
-                          color: _getFlowColor(grandNet),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 90),
+                const SizedBox(width: 130),
+                const SizedBox(width: 70),
               ],
             ),
           ),
@@ -707,16 +700,8 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
   // ===========================================================================
   Widget _buildMobileSummaryView(
       double paddingValue, List<Map<String, dynamic>> categories) {
-    final double grandTotalMt = categories.fold(0.0, (sum, cat) {
-      final inQty = cat['in_qty'] as double? ?? 0.0;
-      final outQty = cat['out_qty'] as double? ?? 0.0;
-      final qty = _selectedFlow == 'Inward'
-          ? inQty
-          : _selectedFlow == 'Outward'
-              ? outQty
-              : (inQty - outQty);
-      return sum + qty;
-    });
+    final double grandClosingMt = categories.fold(
+        0.0, (sum, cat) => sum + (cat['closing_qty'] as double? ?? 0.0));
 
     return ListView.builder(
       padding: EdgeInsets.only(
@@ -740,7 +725,7 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text(
-                  'TOTAL',
+                  'TOTAL CLOSING',
                   style: TextStyle(
                     fontWeight: FontWeight.w900,
                     fontSize: 14.5,
@@ -752,18 +737,18 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                   decoration: BoxDecoration(
-                    color: _getFlowBgColor(grandTotalMt),
+                    color: const Color(0xFFFEE2E2),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: _getFlowColor(grandTotalMt).withValues(alpha: 0.4),
+                      color: msmRed.withValues(alpha: 0.4),
                     ),
                   ),
                   child: Text(
-                    "${_formatSignedNumber(grandTotalMt)} MT",
-                    style: TextStyle(
+                    "${grandClosingMt.toStringAsFixed(3)} MT",
+                    style: const TextStyle(
                       fontWeight: FontWeight.w900,
                       fontSize: 13.5,
-                      color: _getFlowColor(grandTotalMt),
+                      color: msmRed,
                     ),
                   ),
                 ),
@@ -774,13 +759,10 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
 
         final cat = categories[index];
         final String catName = (cat['name'] as String? ?? '').toUpperCase();
-        final inQty = cat['in_qty'] as double? ?? 0.0;
-        final outQty = cat['out_qty'] as double? ?? 0.0;
-        final double displayQty = _selectedFlow == 'Inward'
-            ? inQty
-            : _selectedFlow == 'Outward'
-                ? outQty
-                : (inQty - outQty);
+        final double openQty = cat['opening_qty'] as double? ?? 0.0;
+        final double inQty = cat['in_qty'] as double? ?? 0.0;
+        final double outQty = cat['out_qty'] as double? ?? 0.0;
+        final double closingQty = cat['closing_qty'] as double? ?? 0.0;
 
         return Container(
           margin: const EdgeInsets.only(bottom: 12),
@@ -797,33 +779,65 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
               ),
             ],
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                catName,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14.5,
-                  color: textDark,
-                  letterSpacing: -0.2,
-                ),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                decoration: BoxDecoration(
-                  color: _getFlowBgColor(displayQty),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  "${_formatSignedNumber(displayQty)} MT",
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 13,
-                    color: _getFlowColor(displayQty),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    catName,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14.5,
+                      color: textDark,
+                      letterSpacing: -0.2,
+                    ),
                   ),
-                ),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEE2E2),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      "${closingQty.toStringAsFixed(3)} MT",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                        color: msmRed,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    "Open: ${openQty.toStringAsFixed(3)}",
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.w600),
+                  ),
+                  Text(
+                    "In: +${inQty.toStringAsFixed(3)}",
+                    style: const TextStyle(
+                        fontSize: 11.5,
+                        color: Color(0xFF16A34A),
+                        fontWeight: FontWeight.w700),
+                  ),
+                  Text(
+                    "Out: -${outQty.toStringAsFixed(3)}",
+                    style: const TextStyle(
+                        fontSize: 11.5,
+                        color: Color(0xFFDC2626),
+                        fontWeight: FontWeight.w700),
+                  ),
+                ],
               ),
             ],
           ),
@@ -1042,8 +1056,10 @@ class _EnterpriseTableRow extends StatefulWidget {
   final int index;
   final String categoryName;
   final String rawCategoryName;
+  final double openQty;
   final double inQty;
   final double outQty;
+  final double closingQty;
   final double netQty;
   final List items;
   final bool isExpanded;
@@ -1054,8 +1070,10 @@ class _EnterpriseTableRow extends StatefulWidget {
     required this.index,
     required this.categoryName,
     required this.rawCategoryName,
+    required this.openQty,
     required this.inQty,
     required this.outQty,
+    required this.closingQty,
     required this.netQty,
     required this.items,
     required this.isExpanded,
@@ -1161,7 +1179,20 @@ class _EnterpriseTableRowState extends State<_EnterpriseTableRow> {
                       ),
                     ),
                     SizedBox(
-                      width: 140,
+                      width: 130,
+                      child: Text(
+                        "${widget.openQty.toStringAsFixed(3)} MT",
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.grey.shade800,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 130,
                       child: Text(
                         widget.inQty > 0
                             ? "+${widget.inQty.toStringAsFixed(3)} MT"
@@ -1178,7 +1209,7 @@ class _EnterpriseTableRowState extends State<_EnterpriseTableRow> {
                       ),
                     ),
                     SizedBox(
-                      width: 140,
+                      width: 130,
                       child: Text(
                         widget.outQty > 0
                             ? "-${widget.outQty.toStringAsFixed(3)} MT"
@@ -1195,24 +1226,20 @@ class _EnterpriseTableRowState extends State<_EnterpriseTableRow> {
                       ),
                     ),
                     SizedBox(
-                      width: 150,
+                      width: 140,
                       child: Text(
-                        "${widget.netQty >= 0 ? '+' : ''}${widget.netQty.toStringAsFixed(3)} MT",
+                        "${widget.closingQty.toStringAsFixed(3)} MT",
                         textAlign: TextAlign.right,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w900,
-                          color: widget.netQty > 0
-                              ? const Color(0xFF2563EB)
-                              : (widget.netQty < 0
-                                  ? const Color(0xFFDC2626)
-                                  : Colors.grey.shade600),
+                          color: msmRed,
                           fontFamily: 'monospace',
                         ),
                       ),
                     ),
                     SizedBox(
-                      width: 140,
+                      width: 130,
                       child: Center(
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -1235,7 +1262,7 @@ class _EnterpriseTableRowState extends State<_EnterpriseTableRow> {
                       ),
                     ),
                     SizedBox(
-                      width: 90,
+                      width: 70,
                       child: Center(
                         child: IconButton(
                           icon: Icon(
@@ -1325,6 +1352,17 @@ class _EnterpriseTableRowState extends State<_EnterpriseTableRow> {
                           Expanded(
                             flex: 2,
                             child: Text(
+                              "OPENING (MT)",
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF5B21B6)),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: Text(
                               "INWARD (MT)",
                               textAlign: TextAlign.right,
                               style: TextStyle(
@@ -1347,7 +1385,7 @@ class _EnterpriseTableRowState extends State<_EnterpriseTableRow> {
                           Expanded(
                             flex: 2,
                             child: Text(
-                              "NET MT",
+                              "CLOSING (MT)",
                               textAlign: TextAlign.right,
                               style: TextStyle(
                                   fontSize: 11,
@@ -1372,9 +1410,10 @@ class _EnterpriseTableRowState extends State<_EnterpriseTableRow> {
                         final double w = parsedW != null && parsedW > 0
                             ? parsedW
                             : lookupSizeWeight(sizeLabel);
+                        final double openM = it['opening_qty'] as double? ?? 0.0;
                         final double inM = it['in_qty'] as double? ?? 0.0;
                         final double outM = it['out_qty'] as double? ?? 0.0;
-                        final double netM = inM - outM;
+                        final double closeM = it['closing_qty'] as double? ?? (openM + inM - outM);
 
                         return Container(
                           padding: const EdgeInsets.symmetric(
@@ -1404,6 +1443,19 @@ class _EnterpriseTableRowState extends State<_EnterpriseTableRow> {
                                     fontSize: 12.5,
                                     fontWeight: FontWeight.w600,
                                     color: Colors.grey.shade700,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                flex: 2,
+                                child: Text(
+                                  "${openM.toStringAsFixed(3)}",
+                                  textAlign: TextAlign.right,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.grey.shade800,
                                     fontFamily: 'monospace',
                                   ),
                                 ),
@@ -1445,16 +1497,12 @@ class _EnterpriseTableRowState extends State<_EnterpriseTableRow> {
                               Expanded(
                                 flex: 2,
                                 child: Text(
-                                  "${netM >= 0 ? '+' : ''}${netM.toStringAsFixed(3)}",
+                                  "${closeM.toStringAsFixed(3)}",
                                   textAlign: TextAlign.right,
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 12.5,
                                     fontWeight: FontWeight.w800,
-                                    color: netM > 0
-                                        ? const Color(0xFF2563EB)
-                                        : (netM < 0
-                                            ? const Color(0xFFDC2626)
-                                            : Colors.grey.shade600),
+                                    color: msmRed,
                                     fontFamily: 'monospace',
                                   ),
                                 ),

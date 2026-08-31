@@ -80,9 +80,17 @@ class InventoryProvider extends ChangeNotifier {
     "MS Pipe",
     "MS Angle",
     "MS Channel",
+    "Binding Wire",
+    "Nails",
     "Sqr Bar",
-    "Flats",
     "Round Bar",
+    "Flats",
+    "HR Pipe",
+    "MS Structure ISMC",
+    "Heavy Structure ISMB",
+    "Barbed Wire",
+    "GATE Channel",
+    "ERW Pipe",
   ];
 
   static const Map<String, List<String>> _sampleRateAliases = {

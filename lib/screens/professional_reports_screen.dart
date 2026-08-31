@@ -386,6 +386,7 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
         final typeUpper = tx.type.trim().toUpperCase();
         return !tx.isReversed &&
             typeUpper != 'PURCHASE' &&
+            !tx.txnId.startsWith('S-17') &&
             !tx.txnId.startsWith('IN_V_');
       }).toList();
 
@@ -419,7 +420,7 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
 
       try {
         _dailyMovementReport = ReportCalculators.calculateDailyMovement(
-            visibleTxs, DateTimeRange(start: _startDate, end: _endDate));
+            visibleTxs, DateTimeRange(start: _startDate, end: _endDate), _stockReport);
       } catch (e) {
         debugPrint("[REPORT ERROR] $e");
         _dailyMovementReport = [];
@@ -4313,6 +4314,7 @@ class ReportCalculators {
 
     for (var tx in allTxs) {
       if (tx.isReversed) continue;
+      if (tx.txnId.startsWith('S-17')) continue;
       if (tx.txnId.startsWith('IN_V_')) continue;
 
       final String txLoc = tx.location.trim().toUpperCase();
@@ -4542,7 +4544,8 @@ class ReportCalculators {
 
   static List<DailyMovementEntry> calculateDailyMovement(
       List<StockTransaction> allTxs,
-      [DateTimeRange? dateRange]) {
+      [DateTimeRange? dateRange,
+      List<StockMovementEntry>? stockReport]) {
     final DateTime start = dateRange != null
         ? DateTime(
             dateRange.start.year, dateRange.start.month, dateRange.start.day)
@@ -4555,55 +4558,76 @@ class ReportCalculators {
             DateTime.now().day, 23, 59, 59, 999);
 
     Map<String, DailyMovementEntry> map = {};
-    for (var tx in allTxs) {
-      if (tx.isReversed) continue;
-      if (tx.txnId.startsWith('IN_V_')) continue;
 
-      final typeUpper = tx.type.trim().toUpperCase();
-      if (typeUpper == 'PURCHASE') continue;
-      if (typeUpper == 'OPENING' ||
-          typeUpper == 'OPENING_STOCK' ||
-          tx.txnId.startsWith('OPENING-')) {
-        continue;
-      }
-
-      final txDate = tx.dateTime;
-      if (txDate.isAfter(start.subtract(const Duration(milliseconds: 1))) &&
-          txDate.isBefore(end.add(const Duration(milliseconds: 1)))) {
-        final String rawCat =
-            (tx.category.trim().isNotEmpty && tx.category != "General")
-                ? tx.category
-                : tx.itemName;
+    // 1. If stockReport is provided, pre-populate all categories and sizes
+    if (stockReport != null && stockReport.isNotEmpty) {
+      for (var entry in stockReport) {
         final String canonicalCat =
-            DataRepository.canonicalizeCategory(rawCat);
+            DataRepository.canonicalizeCategory(entry.category);
+        for (var s in entry.sizes) {
+          final String key =
+              "${canonicalCat.toUpperCase()}_${entry.item.toUpperCase()}_${s.label.toUpperCase()}";
+          map[key] = DailyMovementEntry(
+            category: canonicalCat,
+            itemName: entry.item,
+            size: s.label,
+            openingQty: s.opening,
+            inQty: s.inQty,
+            outQty: s.outQty,
+            closingQty: s.closing,
+          );
+        }
+      }
+    } else {
+      for (var tx in allTxs) {
+        if (tx.isReversed) continue;
+        if (tx.txnId.startsWith('S-17')) continue;
+        if (tx.txnId.startsWith('IN_V_')) continue;
 
-        if (['Binding Wire', 'Nails', 'Barbed Wire', 'Heavy Structure ISMB']
-            .contains(canonicalCat)) {
+        final typeUpper = tx.type.trim().toUpperCase();
+        if (typeUpper == 'PURCHASE') continue;
+        if (typeUpper == 'OPENING' ||
+            typeUpper == 'OPENING_STOCK' ||
+            tx.txnId.startsWith('OPENING-')) {
           continue;
         }
 
-        final String key =
-            "${canonicalCat.toUpperCase()}_${tx.itemName.toUpperCase()}_${tx.sizeLabel.toUpperCase()}";
-        map.putIfAbsent(
-            key,
-            () => DailyMovementEntry(
-                  category: canonicalCat,
-                  itemName: tx.itemName,
-                  size: tx.sizeLabel,
-                  inQty: 0,
-                  outQty: 0,
-                ));
-        var entry = map[key]!;
-        if (typeUpper == 'IN' ||
-            typeUpper == 'INWARD' ||
-            typeUpper == 'RETURN' ||
-            typeUpper == 'ADJUSTMENT') {
-          entry.inQty += tx.qty.abs();
-        } else if (typeUpper == 'OUT' ||
-            typeUpper == 'OUTWARD' ||
-            typeUpper == 'SALE' ||
-            typeUpper == 'RESERVE') {
-          entry.outQty += tx.qty.abs();
+        final txDate = tx.dateTime;
+        if (txDate.isAfter(start.subtract(const Duration(milliseconds: 1))) &&
+            txDate.isBefore(end.add(const Duration(milliseconds: 1)))) {
+          final String rawCat =
+              (tx.category.trim().isNotEmpty && tx.category != "General")
+                  ? tx.category
+                  : tx.itemName;
+          final String canonicalCat =
+              DataRepository.canonicalizeCategory(rawCat);
+
+          final String key =
+              "${canonicalCat.toUpperCase()}_${tx.itemName.toUpperCase()}_${tx.sizeLabel.toUpperCase()}";
+          map.putIfAbsent(
+              key,
+              () => DailyMovementEntry(
+                    category: canonicalCat,
+                    itemName: tx.itemName,
+                    size: tx.sizeLabel,
+                    openingQty: 0,
+                    inQty: 0,
+                    outQty: 0,
+                    closingQty: 0,
+                  ));
+          var entry = map[key]!;
+          if (typeUpper == 'IN' ||
+              typeUpper == 'INWARD' ||
+              typeUpper == 'RETURN' ||
+              typeUpper == 'ADJUSTMENT') {
+            entry.inQty += tx.qty.abs();
+          } else if (typeUpper == 'OUT' ||
+              typeUpper == 'OUTWARD' ||
+              typeUpper == 'SALE' ||
+              typeUpper == 'RESERVE') {
+            entry.outQty += tx.qty.abs();
+          }
+          entry.closingQty = entry.openingQty + entry.inQty - entry.outQty;
         }
       }
     }
