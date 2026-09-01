@@ -8,19 +8,23 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
-import '../constants/app_colors.dart';
 import '../services/data_repository.dart';
+import '../services/whatsapp_share_service.dart';
 import '../utils/file_download_helper.dart' as download_helper;
 import '../utils/formatters.dart';
+import '../utils/item_order_util.dart';
 import '../utils/sorting_utils.dart';
+import '../widgets/dealer_share/category_stock_accordion.dart';
+import '../widgets/dealer_share/dealer_share_toolbar.dart';
 import '../widgets/m_loader.dart';
 
-/// Lead Enterprise Flutter Implementation: Stock Sheet Module
-/// Streamlined location-wise stock sheet sharing workflow:
-/// 1. Location Segmented Selector ('YARD', 'FACTORY', 'ALL')
-/// 2. Combined Search & Selection Header with active counter pill
-/// 3. Clean 2-Column Accordion Cards (Category subtotals in bold black)
-/// 4. Official Metaroll Letterhead Vector PDF Export (Portrait A4)
+/// Lead Enterprise Flutter Implementation: Stock Sheet & Trade Availability Console.
+/// Streamlined location-wise trade availability and pricing workflow:
+/// 1. DEALER SHARE ACTION TOOLBAR: Location Selector, Real-time Search, WhatsApp Copy, PDF Export, Share.
+/// 2. CANONICAL CATEGORY GROUPING: 14 canonical categories strictly in order via ItemOrderUtil.
+/// 3. HIGH-DENSITY ITEM & SIZE ROWS: Multi-column grid, Unit Weight, Stock Status, Rate/SD, and Zebra striping.
+/// 4. AUDIT & DEFICIT INTEGRITY: Raw deficit balances (e.g., -0.320 MT) preserved without zero-clamping.
+/// 5. RESPONSIVE ADAPTATION: Desktop structured grid & Mobile compact tiles with bottom pinned actions.
 // -----------------------------------------------------------------------------
 // ISOLATE PARAMS & TOP-LEVEL ISOLATE PDF GENERATOR
 // -----------------------------------------------------------------------------
@@ -129,14 +133,14 @@ Future<Uint8List> _generatePdfBytesIsolate(_PdfParams params) async {
     },
   );
 
-  // ── Group & sort rows by category ──
+  // ── Group & sort rows by category in canonical order ──
   final Map<String, List<Map<String, dynamic>>> grouped = {};
   for (final row in params.selectedRows) {
     final cat = row['category_name']?.toString() ?? 'General';
     grouped.putIfAbsent(cat, () => []).add(row);
   }
   final sortedCategories = grouped.keys.toList()
-    ..sort(SortingUtils.compareCategories);
+    ..sort(ItemOrderUtil.compare);
 
   pdfDoc.addPage(
     pw.MultiPage(
@@ -163,7 +167,7 @@ Future<Uint8List> _generatePdfBytesIsolate(_PdfParams params) async {
           final List<pw.TableRow> tableRows = [];
           final String displayTitle = cleanCategoryTitle(catTitle);
 
-          // 1. Red Category Banner (Rendered ONLY ONCE at the start of the category)
+          // 1. Red Category Banner
           if (showBanner) {
             tableRows.add(
               pw.TableRow(
@@ -190,7 +194,7 @@ Future<Uint8List> _generatePdfBytesIsolate(_PdfParams params) async {
             );
           }
 
-          // 2. Dark Sub-Headers Row (Item Description / Size | Stock Quantity (MT))
+          // 2. Dark Sub-Headers Row
           tableRows.add(
             pw.TableRow(
               decoration: pw.BoxDecoration(color: darkSlate),
@@ -202,7 +206,7 @@ Future<Uint8List> _generatePdfBytesIsolate(_PdfParams params) async {
                     'Item Description / Size',
                     style: pw.TextStyle(
                       color: PdfColors.white,
-                      fontSize: 8.5,
+                      fontSize: 8,
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
@@ -210,12 +214,12 @@ Future<Uint8List> _generatePdfBytesIsolate(_PdfParams params) async {
                 pw.Container(
                   padding: const pw.EdgeInsets.symmetric(
                       horizontal: 10, vertical: 5),
-                  alignment: pw.Alignment.centerLeft,
+                  alignment: pw.Alignment.centerRight,
                   child: pw.Text(
                     'Stock Quantity (MT)',
                     style: pw.TextStyle(
                       color: PdfColors.white,
-                      fontSize: 8.5,
+                      fontSize: 8,
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
@@ -224,43 +228,43 @@ Future<Uint8List> _generatePdfBytesIsolate(_PdfParams params) async {
             ),
           );
 
-          // 3. Item Data Rows
-          for (int i = 0; i < catRows.length; i++) {
-            final row = catRows[i];
-            final catName = row['category_name']?.toString() ?? displayTitle;
+          // 3. Item Data Rows with alternating zebra striping
+          for (int r = 0; r < catRows.length; r++) {
+            final row = catRows[r];
+            final sizeLabel = row['size_label']?.toString() ?? '';
+            final double stockVal = _safeDoubleStatic(row['current_stock_mt']);
             final desc = _formatItemDescriptionStatic(
-              catName,
-              row['size_label']?.toString() ?? '',
-              row['unit_weight_kg'],
-            );
-            final stock = _safeDoubleStatic(row['current_stock_mt']);
-            final rowBg = (startIndex + i).isOdd ? zebraStripe : PdfColors.white;
+                catTitle, sizeLabel, row['unit_weight_kg']);
+            final bool isEven = r % 2 == 0;
 
             tableRows.add(
               pw.TableRow(
-                decoration: pw.BoxDecoration(color: rowBg),
+                decoration: pw.BoxDecoration(
+                  color: isEven ? zebraStripe : PdfColors.white,
+                ),
                 children: [
                   pw.Container(
                     padding: const pw.EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
+                        horizontal: 10, vertical: 4.5),
                     child: pw.Text(
                       desc,
                       style: pw.TextStyle(
-                        fontSize: 8.5,
+                        fontSize: 8,
                         color: mediumSlate,
+                        fontWeight: pw.FontWeight.bold,
                       ),
                     ),
                   ),
                   pw.Container(
                     padding: const pw.EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
-                    alignment: pw.Alignment.centerLeft,
+                        horizontal: 10, vertical: 4.5),
+                    alignment: pw.Alignment.centerRight,
                     child: pw.Text(
-                      '${stock.toStringAsFixed(3)} MT',
+                      '${stockVal.toStringAsFixed(3)} MT',
                       style: pw.TextStyle(
-                        fontSize: 8.5,
+                        fontSize: 8,
+                        color: stockVal < 0 ? metarollRed : darkSlate,
                         fontWeight: pw.FontWeight.bold,
-                        color: metarollRed,
                       ),
                     ),
                   ),
@@ -270,9 +274,11 @@ Future<Uint8List> _generatePdfBytesIsolate(_PdfParams params) async {
           }
 
           return pw.Container(
-            margin: const pw.EdgeInsets.only(bottom: 10),
+            margin: const pw.EdgeInsets.only(bottom: 12),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: gridBorder, width: 0.5),
+            ),
             child: pw.Table(
-              border: pw.TableBorder.all(color: gridBorder, width: 0.25),
               columnWidths: {
                 0: pw.FlexColumnWidth(col0Flex),
                 1: pw.FlexColumnWidth(col1Flex),
@@ -282,26 +288,58 @@ Future<Uint8List> _generatePdfBytesIsolate(_PdfParams params) async {
           );
         }
 
+        // Layout Rendering Strategy:
         if (categoryCount == 1) {
-          // ── CASE 1: STRICT SINGLE CATEGORY MODE (Option B: One Single Continuous Table) ──
           final cat = sortedCategories.first;
           final catRows = grouped[cat]!;
+          final int totalItems = catRows.length;
 
-          content.add(
-            pw.SizedBox(
-              width: double.infinity,
-              child: buildCategoryTable(
+          if (totalItems <= 14) {
+            content.add(
+              buildCategoryTable(
                 catTitle: cat,
                 catRows: catRows,
                 startIndex: 0,
-                col0Flex: 1.2, // 1.2 : 0.8 ratio brings quantity column 80% closer to item description text
-                col1Flex: 0.8,
+                col0Flex: 3.5,
+                col1Flex: 1.5,
                 showBanner: true,
               ),
-            ),
-          );
+            );
+          } else {
+            final int mid = (totalItems / 2).ceil();
+            final leftRows = catRows.sublist(0, mid);
+            final rightRows = catRows.sublist(mid);
+
+            final leftTable = buildCategoryTable(
+              catTitle: '$cat (1-$mid)',
+              catRows: leftRows,
+              startIndex: 0,
+              col0Flex: 2.2,
+              col1Flex: 1.0,
+              showBanner: true,
+            );
+
+            final rightTable = buildCategoryTable(
+              catTitle: '$cat (${mid + 1}-$totalItems)',
+              catRows: rightRows,
+              startIndex: mid,
+              col0Flex: 2.2,
+              col1Flex: 1.0,
+              showBanner: false,
+            );
+
+            content.add(
+              pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Expanded(child: leftTable),
+                  pw.SizedBox(width: 12),
+                  pw.Expanded(child: rightTable),
+                ],
+              ),
+            );
+          }
         } else {
-          // ── CASE 2: MULTI-CATEGORY MODE (Option A: 2-Column Side-by-Side Split Grid) ──
           final List<pw.Widget> allTableBlocks = [];
           const int maxItemsPerBlock = 14;
 
@@ -319,11 +357,13 @@ Future<Uint8List> _generatePdfBytesIsolate(_PdfParams params) async {
                 ),
               );
             } else {
-              // Multi-category export with >14 items: chunk into sub-blocks for 2-column grid layout
-              for (int chunkStart = 0; chunkStart < catRows.length; chunkStart += maxItemsPerBlock) {
-                final chunkEnd = (chunkStart + maxItemsPerBlock < catRows.length)
-                    ? chunkStart + maxItemsPerBlock
-                    : catRows.length;
+              for (int chunkStart = 0;
+                  chunkStart < catRows.length;
+                  chunkStart += maxItemsPerBlock) {
+                final chunkEnd =
+                    (chunkStart + maxItemsPerBlock < catRows.length)
+                        ? chunkStart + maxItemsPerBlock
+                        : catRows.length;
                 final chunkRows = catRows.sublist(chunkStart, chunkEnd);
 
                 allTableBlocks.add(
@@ -429,6 +469,10 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
           await DataRepository.fetchDealerStockChart(_activeLocation);
 
       _selectedItemKeys.clear();
+      // Select all by default for fast sharing
+      for (final row in list) {
+        _selectedItemKeys[_getItemKey(row)] = true;
+      }
 
       if (mounted) {
         setState(() {
@@ -448,34 +492,13 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
   String _getItemKey(Map<String, dynamic> row) {
     final cat = row['category_name']?.toString() ?? 'General';
     final size = row['size_label']?.toString() ?? '';
-    final loc = row['location']?.toString() ?? 'YARD';
-    return '$cat|$size|$loc';
+    return '${cat}_$size';
   }
 
-  /// Helper for safe double conversion
   double _safeDouble(dynamic val) {
-    return (val as num?)?.toDouble() ??
-        double.tryParse(val?.toString() ?? '0') ??
-        0.0;
-  }
-
-  /// Formats combined size string: Size Label + Unit Weight in kg
-  String _formatCombinedSizeString(
-      String category, String sizeLabel, dynamic rawUnitWeight) {
-    final baseDisplay = formatSizeDisplay(category, sizeLabel);
-    final int unitWtInt = (rawUnitWeight as num?)?.toInt() ??
-        int.tryParse(rawUnitWeight?.toString() ?? '0') ??
-        0;
-
-    String desc = baseDisplay;
-    if (!desc.toLowerCase().contains(category.toLowerCase())) {
-      desc = '$category $desc';
-    }
-
-    if (unitWtInt > 0 && !desc.toLowerCase().contains('kg')) {
-      return '$desc ${unitWtInt}kg';
-    }
-    return desc;
+    if (val == null) return 0.0;
+    if (val is num) return val.toDouble();
+    return double.tryParse(val.toString()) ?? 0.0;
   }
 
   // ---------------------------------------------------------------------------
@@ -483,7 +506,7 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
   // ---------------------------------------------------------------------------
   bool _isItemSelected(Map<String, dynamic> row) {
     final key = _getItemKey(row);
-    return _selectedItemKeys[key] ?? false;
+    return _selectedItemKeys[key] ?? true;
   }
 
   void _toggleItemSelection(Map<String, dynamic> row, bool? selected) {
@@ -525,7 +548,7 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
     });
   }
 
-  /// Returns selected stock rows formatted and sorted
+  /// Returns selected stock rows formatted and sorted in canonical order
   List<Map<String, dynamic>> _getSelectedStockRows() {
     final selected = _rawStockList.where((row) {
       return _isItemSelected(row);
@@ -534,7 +557,7 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
     selected.sort((a, b) {
       final catA = a['category_name']?.toString() ?? '';
       final catB = b['category_name']?.toString() ?? '';
-      final catCmp = SortingUtils.compareCategories(catA, catB);
+      final catCmp = ItemOrderUtil.compare(catA, catB);
       if (catCmp != 0) return catCmp;
 
       final sizeA = a['size_label']?.toString() ?? '';
@@ -579,6 +602,96 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
   }
 
   // ---------------------------------------------------------------------------
+  // ACTIONS: WHATSAPP COPY & SHARE
+  // ---------------------------------------------------------------------------
+  void _copyAllWhatsApp() {
+    final grouped = _getGroupedStockMap();
+    final selectedKeys = _selectedItemKeys.entries
+        .where((e) => e.value == true)
+        .map((e) => e.key)
+        .toSet();
+
+    if (selectedKeys.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select at least one item to copy.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final text = WhatsappShareService.formatFullStockBroadcast(
+      location: _activeLocation,
+      groupedStock: grouped,
+      selectedItemKeys: selectedKeys,
+    );
+
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Text('Stock sheet copied to clipboard (${selectedKeys.length} items)!'),
+          ],
+        ),
+        backgroundColor: const Color(0xFF10B981),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _copyCategoryWhatsApp(String category, List<Map<String, dynamic>> rows) {
+    final selectedKeys = _selectedItemKeys.entries
+        .where((e) => e.value == true)
+        .map((e) => e.key)
+        .toSet();
+
+    final text = WhatsappShareService.formatCategoryBroadcast(
+      category: category,
+      rows: rows,
+      location: _activeLocation,
+      selectedItemKeys: selectedKeys,
+    );
+
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Text('$category copied to clipboard!'),
+          ],
+        ),
+        backgroundColor: const Color(0xFF10B981),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _handleShare() {
+    final selectedKeys = _selectedItemKeys.entries
+        .where((e) => e.value == true)
+        .map((e) => e.key)
+        .toSet();
+
+    final grouped = _getGroupedStockMap();
+    final text = WhatsappShareService.formatFullStockBroadcast(
+      location: _activeLocation,
+      groupedStock: grouped,
+      selectedItemKeys: selectedKeys.isNotEmpty ? selectedKeys : null,
+    );
+
+    Share.share(
+      text,
+      subject: 'MSM Stock Sheet - $_activeLocation (${_dateFormat.format(DateTime.now())})',
+    );
+  }
+
+  // ---------------------------------------------------------------------------
   // EXPORT PIPELINE: VECTOR PDF WITH OFFICIAL LETTERHEAD TEMPLATE
   // ---------------------------------------------------------------------------
   Future<void> _exportAndSharePDF() async {
@@ -586,7 +699,7 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
     if (selectedRows.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please select at least one stock item to share.'),
+          content: Text('Please select at least one stock item to export.'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -668,28 +781,64 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
   Widget build(BuildContext context) {
     final selectedRows = _getSelectedStockRows();
     final double totalSelectedStockMT = _calculateTotalStock(selectedRows);
+    final groupedMap = _getGroupedStockMap();
+
+    final sortedCategories = groupedMap.keys.toList()
+      ..sort(ItemOrderUtil.compare);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         backgroundColor: Colors.white,
-        elevation: 1,
-        shadowColor: Colors.black.withValues(alpha: 0.05),
-        iconTheme: const IconThemeData(color: kMetarollGray),
-        title: const Text(
-          'Stock Sheet',
-          style: TextStyle(
-            color: kMetarollGray,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
+        elevation: 0,
+        surfaceTintColor: Colors.white,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(color: const Color(0xFFE2E8F0), height: 1),
+        ),
+        iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF2F2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.share_rounded, size: 18, color: Color(0xFFDC2626)),
+            ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Stock Sheet & Trade Availability',
+                  style: TextStyle(
+                    color: Color(0xFF0F172A),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+                Text(
+                  'Location: $_activeLocation · Total Selected: ${totalSelectedStockMT.toStringAsFixed(3)} MT',
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh_rounded, color: kMetarollGray),
+            icon: const Icon(Icons.refresh_rounded, color: Color(0xFF64748B)),
             tooltip: 'Refresh Stock Data',
             onPressed: _loadData,
           ),
+          const SizedBox(width: 8),
         ],
       ),
       body: _isLoading
@@ -702,584 +851,254 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
                   Text(
                     'Loading Stock Sheet...',
                     style: TextStyle(
-                      color: kMetarollGray,
+                      color: Color(0xFF0F172A),
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                 ],
               ),
             )
-          : Stack(
-              children: [
-                Column(
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                final bool isDesktop = constraints.maxWidth >= 900;
+
+                return Stack(
                   children: [
-                    // 1. LOCATION SEGMENTED CONTROL BAR
-                    _buildLocationSegmentedControl(),
+                    SingleChildScrollView(
+                      padding: EdgeInsets.fromLTRB(
+                        isDesktop ? 20 : 12,
+                        16,
+                        isDesktop ? 20 : 12,
+                        isDesktop ? 24 : 90,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 1. DEALER SHARE ACTION TOOLBAR
+                          DealerShareToolbar(
+                            activeLocation: _activeLocation,
+                            onLocationChanged: (loc) {
+                              if (_activeLocation != loc) {
+                                setState(() => _activeLocation = loc);
+                                _loadData();
+                              }
+                            },
+                            searchController: _searchCtrl,
+                            searchQuery: _searchQuery,
+                            onSearchChanged: (q) =>
+                                setState(() => _searchQuery = q.trim()),
+                            onClearSearch: () {
+                              _searchCtrl.clear();
+                              setState(() => _searchQuery = '');
+                            },
+                            selectedCount: selectedRows.length,
+                            totalCount: _rawStockList.length,
+                            totalSelectedStockMT: totalSelectedStockMT,
+                            onToggleSelectAll: () {
+                              final bool isAll = _rawStockList.isNotEmpty &&
+                                  selectedRows.length == _rawStockList.length;
+                              _selectAllGlobal(!isAll);
+                            },
+                            onCopyWhatsApp: _copyAllWhatsApp,
+                            onExportPdf: _exportAndSharePDF,
+                            onShare: _handleShare,
+                            isExporting: _isExporting,
+                          ),
+                          const SizedBox(height: 16),
 
-                    // 2. COMBINED SEARCH BAR & SELECTION HEADER WITH COUNTER PILL
-                    _buildSearchAndSelectionHeader(
-                        selectedRows.length, totalSelectedStockMT),
+                          // 2. EMPTY STATE OR CANONICAL ACCORDION LIST
+                          if (sortedCategories.isEmpty)
+                            _buildEmptyState()
+                          else
+                            ...sortedCategories.map((cat) {
+                              final categoryRows = groupedMap[cat]!;
+                              final bool? catSelection =
+                                  _getCategorySelectionState(cat, categoryRows);
+                              final bool isExpanded =
+                                  _expandedCategories[cat] ?? true;
 
-                    // 3. CLEAN CATEGORY ACCORDION CARDS WITH 2-COLUMN LIST
-                    Expanded(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
-                        child: _buildAccordionCategoryList(),
+                              return CategoryStockAccordion(
+                                categoryName: cat,
+                                items: categoryRows,
+                                isExpanded: isExpanded,
+                                onToggleExpand: () {
+                                  setState(() {
+                                    _expandedCategories[cat] = !isExpanded;
+                                  });
+                                },
+                                categorySelectionState: catSelection,
+                                onToggleCategorySelection: (val) =>
+                                    _toggleCategorySelection(categoryRows, val),
+                                isItemSelected: _isItemSelected,
+                                onToggleItemSelection: _toggleItemSelection,
+                                onCopyCategoryWhatsApp: () =>
+                                    _copyCategoryWhatsApp(cat, categoryRows),
+                              );
+                            }),
+                        ],
                       ),
                     ),
+
+                    // 3. MOBILE PINNED BOTTOM ACTION BAR
+                    if (!isDesktop)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: _buildMobileBottomBar(
+                            selectedRows.length, totalSelectedStockMT),
+                      ),
+
+                    // 4. EXPORT LOADING OVERLAY DIALOG
+                    if (_isExporting) _buildExportOverlay(),
                   ],
-                ),
-
-                // 4. STREAMLINED BOTTOM ACTION BAR ([Export PDF Document])
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: _buildBottomActionBar(),
-                ),
-
-                // Export Loading Overlay Dialog
-                if (_isExporting)
-                  Container(
-                    color: Colors.black.withValues(alpha: 0.4),
-                    child: Center(
-                      child: AlertDialog(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        backgroundColor: Colors.white,
-                        surfaceTintColor: Colors.white,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 24, vertical: 20),
-                        content: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            CircularProgressIndicator(
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                  Color(0xFFE11D48)),
-                              strokeWidth: 3,
-                            ),
-                            SizedBox(width: 18),
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Preparing PDF...',
-                                  style: TextStyle(
-                                    fontSize: 14.5,
-                                    fontWeight: FontWeight.bold,
-                                    color: kMetarollGray,
-                                  ),
-                                ),
-                                SizedBox(height: 3),
-                                Text(
-                                  'Formatting selected stock sheet',
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+                );
+              },
             ),
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // STEP 1 WIDGET: LOCATION SEGMENTED CONTROL
-  // ---------------------------------------------------------------------------
-  Widget _buildLocationSegmentedControl() {
+  // ── EMPTY STATE ──
+  Widget _buildEmptyState() {
     return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF1F5F9),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            _buildLocationSegmentTile(
-                'YARD', 'Yard Stock', Icons.warehouse_rounded),
-            const SizedBox(width: 4),
-            _buildLocationSegmentTile(
-                'FACTORY', 'Factory Stock', Icons.factory_rounded),
-            const SizedBox(width: 4),
-            _buildLocationSegmentTile(
-                'ALL', 'All Locations', Icons.public_rounded),
-          ],
-        ),
+      padding: const EdgeInsets.all(32),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
-    );
-  }
-
-  Widget _buildLocationSegmentTile(
-      String code, String label, IconData iconData) {
-    final bool isSelected = _activeLocation == code;
-    return Expanded(
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            if (_activeLocation != code) {
-              setState(() {
-                _activeLocation = code;
-              });
-              _loadData();
-            }
-          },
-          borderRadius: BorderRadius.circular(9),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeInOut,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: isSelected ? Colors.white : Colors.transparent,
-              borderRadius: BorderRadius.circular(9),
-              boxShadow: isSelected
-                  ? [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.06),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ]
-                  : null,
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  iconData,
-                  size: 15,
-                  color: isSelected ? kMetarollRed : const Color(0xFF64748B),
-                ),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight:
-                          isSelected ? FontWeight.bold : FontWeight.w600,
-                      color: isSelected ? kMetarollRed : const Color(0xFF64748B),
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // STEP 2 WIDGET: SELECTION & SEARCH HEADER
-  // ---------------------------------------------------------------------------
-  Widget _buildSearchAndSelectionHeader(
-      int selectedCount, double totalSelectedStock) {
-    final bool isAllSelected = _rawStockList.isNotEmpty &&
-        selectedCount == _rawStockList.length;
-
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Container(
-              height: 42,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: TextField(
-                controller: _searchCtrl,
-                style: const TextStyle(fontSize: 13, color: kMetarollGray),
-                decoration: InputDecoration(
-                  hintText: 'Search category or size...',
-                  hintStyle:
-                      const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
-                  prefixIcon:
-                      const Icon(Icons.search_rounded, size: 18, color: Color(0xFF94A3B8)),
-                  suffixIcon: _searchQuery.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.cancel_rounded, size: 16, color: Color(0xFF94A3B8)),
-                          onPressed: () {
-                            _searchCtrl.clear();
-                            setState(() => _searchQuery = '');
-                          },
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                ),
-                onChanged: (val) {
-                  setState(() => _searchQuery = val.trim());
-                },
-              ),
+          const Icon(Icons.search_off_rounded, size: 48, color: Color(0xFF94A3B8)),
+          const SizedBox(height: 12),
+          const Text(
+            'No matching stock items found',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF0F172A),
             ),
           ),
-          const SizedBox(width: 10),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () => _selectAllGlobal(!isAllSelected),
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                height: 42,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: isAllSelected
-                      ? const Color(0xFFFEF2F2)
-                      : kMetarollRed.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isAllSelected
-                        ? const Color(0xFFFCA5A5)
-                        : kMetarollRed.withValues(alpha: 0.2),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      isAllSelected
-                          ? Icons.deselect_rounded
-                          : Icons.select_all_rounded,
-                      size: 16,
-                      color: kMetarollRed,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      isAllSelected ? 'Deselect All' : 'Select All',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: kMetarollRed,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          const SizedBox(height: 4),
+          Text(
+            _searchQuery.isNotEmpty
+                ? 'Try adjusting your search query or location filter.'
+                : 'No active stock items registered for location "$_activeLocation".',
+            style: const TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // STEP 3 WIDGET: CLEAN CATEGORY ACCORDION CARDS WITH 2-COLUMN LIST
-  // ---------------------------------------------------------------------------
-  Widget _buildAccordionCategoryList() {
-    final groupedMap = _getGroupedStockMap();
-
-    if (groupedMap.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(24),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
-        ),
-        child: const Text(
-          'No items found matching the selected location & search query.',
-          style: TextStyle(color: Colors.grey, fontSize: 13),
-        ),
-      );
-    }
-
-    final sortedCategories = groupedMap.keys.toList()
-      ..sort(SortingUtils.compareCategories);
-
-    return Column(
-      children: sortedCategories.map((cat) {
-        final categoryRows = groupedMap[cat]!;
-        final bool? catSelection =
-            _getCategorySelectionState(cat, categoryRows);
-        final bool isExpanded =
-            _expandedCategories[cat] ?? _searchQuery.isNotEmpty;
-        final double catStockMT = _calculateTotalStock(categoryRows);
-
-        final int catSelectedCount =
-            categoryRows.where((r) => _isItemSelected(r)).length;
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: catSelection == true
-                  ? kMetarollRed
-                  : const Color(0xFFE2E8F0),
-              width: catSelection == true ? 1.5 : 1.0,
+  // ── MOBILE PINNED BOTTOM ACTION BAR ──
+  Widget _buildMobileBottomBar(int selectedCount, double totalSelectedMT) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: const Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, -3),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+      child: SafeArea(
+        child: Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _copyAllWhatsApp,
+                icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                label: Text(
+                  'Copy WhatsApp (${totalSelectedMT.toStringAsFixed(1)} MT)',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.03),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: Column(
-            children: [
-              InkWell(
-                onTap: () {
-                  setState(() {
-                    _expandedCategories[cat] = !isExpanded;
-                  });
-                },
-                borderRadius: BorderRadius.circular(14),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                  child: Row(
-                    children: [
-                      Checkbox(
-                        value: catSelection,
-                        tristate: true,
-                        activeColor: kMetarollRed,
-                        onChanged: (val) =>
-                            _toggleCategorySelection(categoryRows, val ?? false),
-                      ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Text(
-                              cat,
-                              style: const TextStyle(
-                                fontSize: 14.5,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF0F172A),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: catSelectedCount > 0
-                                    ? const Color(0xFFFEF2F2)
-                                    : const Color(0xFFF1F5F9),
-                                borderRadius: BorderRadius.circular(12),
-                                border: catSelectedCount > 0
-                                    ? Border.all(
-                                        color: const Color(0xFFFCA5A5))
-                                    : null,
-                              ),
-                              child: Text(
-                                '$catSelectedCount / ${categoryRows.length}',
-                                style: TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w600,
-                                  color: catSelectedCount > 0
-                                      ? kMetarollRed
-                                      : const Color(0xFF64748B),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Text(
-                        '${catStockMT.toStringAsFixed(3)} MT',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF0F172A),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        isExpanded
-                            ? Icons.keyboard_arrow_up_rounded
-                            : Icons.keyboard_arrow_down_rounded,
-                        color: const Color(0xFF64748B),
-                      ),
-                    ],
-                  ),
+            const SizedBox(width: 10),
+            ElevatedButton(
+              onPressed: _isExporting ? null : _exportAndSharePDF,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
                 ),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
-              if (isExpanded) ...[
-                const Divider(height: 1, color: Color(0xFFE2E8F0)),
-                Container(
-                  color: const Color(0xFFFAFAFA),
-                  child: Column(
-                    children: [
-                      ...categoryRows.map((row) {
-                        final bool isSelected = _isItemSelected(row);
-                        final sizeLabel = row['size_label']?.toString() ?? '';
-                        final stock = _safeDouble(row['current_stock_mt']);
-
-                        return InkWell(
-                          onTap: () =>
-                              _toggleItemSelection(row, !isSelected),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 150),
-                            color: isSelected
-                                ? const Color(0xFFFEF2F2).withValues(alpha: 0.6)
-                                : Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 9),
-                            child: Row(
-                              children: [
-                                SizedBox(
-                                  width: 32,
-                                  child: Checkbox(
-                                    value: isSelected,
-                                    activeColor: kMetarollRed,
-                                    onChanged: (val) =>
-                                        _toggleItemSelection(row, val),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    _formatCombinedSizeString(
-                                        cat, sizeLabel, row['unit_weight_kg']),
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: isSelected
-                                          ? FontWeight.bold
-                                          : FontWeight.w500,
-                                      color: isSelected
-                                          ? kMetarollGray
-                                          : const Color(0xFF475569),
-                                    ),
-                                  ),
-                                ),
-                                Text(
-                                  '${stock.toStringAsFixed(3)} MT',
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    color: kMetarollRed,
-                                  ),
-                                  textAlign: TextAlign.right,
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.only(
-                            bottomLeft: Radius.circular(14),
-                            bottomRight: Radius.circular(14),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Subtotal ($cat)',
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF475569),
-                              ),
-                            ),
-                            Text(
-                              '${catStockMT.toStringAsFixed(3)} MT',
-                              style: const TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF0F172A),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
-        );
-      }).toList(),
+              child: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // STEP 4 WIDGET: STREAMLINED BOTTOM ACTION BAR ([Export PDF Document])
-  // ---------------------------------------------------------------------------
-  Widget _buildBottomActionBar() {
+  // ── EXPORT LOADING OVERLAY ──
+  Widget _buildExportOverlay() {
     return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.white.withValues(alpha: 0.0),
-            Colors.white.withValues(alpha: 0.9),
-            Colors.white,
-          ],
-          stops: const [0.0, 0.4, 1.0],
-        ),
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      child: SafeArea(
-        child: Container(
-          height: 52,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFFEF1C24),
-                Color(0xFFB80910),
-              ],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFFEF1C24).withValues(alpha: 0.35),
-                blurRadius: 14,
-                offset: const Offset(0, 4),
+      color: Colors.black.withValues(alpha: 0.4),
+      child: Center(
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(
+              horizontal: 24, vertical: 20),
+          content: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(
+                valueColor:
+                    AlwaysStoppedAnimation<Color>(Color(0xFFDC2626)),
+                strokeWidth: 3,
+              ),
+              SizedBox(width: 18),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Preparing PDF...',
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                  SizedBox(height: 3),
+                  Text(
+                    'Formatting branded Stock Sheet',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                ],
               ),
             ],
-          ),
-          child: ElevatedButton.icon(
-            onPressed: _isExporting ? null : _exportAndSharePDF,
-            icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-            label: const Text(
-              'Export PDF Document',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.3,
-              ),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.transparent,
-              shadowColor: Colors.transparent,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
           ),
         ),
       ),

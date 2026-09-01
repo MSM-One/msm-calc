@@ -1,13 +1,10 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../services/data_repository.dart';
 import '../models/stock_models.dart';
 import '../models/user_model.dart';
-import '../utils/steel_helper.dart';
-import '../utils/formatters.dart';
 import '../utils/sorting_utils.dart';
 
 class InventoryProvider extends ChangeNotifier {
@@ -21,6 +18,13 @@ class InventoryProvider extends ChangeNotifier {
   Map<String, List<SampleRateSize>> _sampleRateCategories = {};
   Map<String, List<SampleRateSize>> get sampleRateCategories =>
       _sampleRateCategories;
+
+  @visibleForTesting
+  void setSampleRateCategoriesForTesting(
+      Map<String, List<SampleRateSize>> categories) {
+    _sampleRateCategories = categories;
+    notifyListeners();
+  }
 
   List<ItemVariant> get lowStockItems {
     final inventory = DataRepository.inventoryListNotifier.value;
@@ -80,13 +84,9 @@ class InventoryProvider extends ChangeNotifier {
     "MS Pipe",
     "MS Angle",
     "MS Channel",
-    "Binding Wire",
-    "Nails",
     "Sqr Bar",
     "Round Bar",
     "Flats",
-    "HR Pipe",
-    "MS Structure ISMC",
     "Heavy Structure ISMB",
     "Barbed Wire",
     "GATE Channel",

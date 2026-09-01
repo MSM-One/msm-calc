@@ -25,6 +25,10 @@ import '../widgets/motion_toast.dart';
 import 'reports/low_stock_report_screen.dart';
 import 'reports/todays_summary_screen.dart';
 import 'reports/stock_ledger_screen.dart';
+import 'reports/reports_dashboard_screen.dart';
+import 'reports/desktop_reports_screen.dart';
+export 'reports/reports_dashboard_screen.dart';
+export 'reports/desktop_reports_screen.dart';
 import '../utils/file_download_helper.dart' as download_helper;
 
 import '../services/supabase_service.dart';
@@ -1115,68 +1119,7 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
   }
 
   Widget _buildDesktopLayout() {
-    return Row(
-      children: [
-        _ReportsSidebar(
-          activeTabs: _activeTabs,
-          selectedTabId: _activeTabs[_tabController.index]['id'] as String,
-          onTabChanged: (id) {
-            final index = _activeTabs.indexWhere((t) => t['id'] == id);
-            if (index != -1) _tabController.animateTo(index);
-            setState(() {});
-          },
-        ),
-        Expanded(
-          child: Column(
-            children: [
-              _ReportsPremiumHeader(
-                tabController: _tabController,
-                activeTabs: _activeTabs,
-                searchController: _searchController,
-                onSearch: _onSearchChanged,
-                onRefresh: () => _generateReports(forceRefresh: true),
-                onDateRange: _selectDateRange,
-                startDate: _startDate,
-                endDate: _endDate,
-                locationFilter: _locationFilter,
-                onLocationChange: (v) {
-                  setState(() => _locationFilter = v!);
-                  _generateReports();
-                },
-                onLocationTap: _showLocationFilter,
-                onExportPdf: () => _exportPdf(),
-                onExportExcel: () => _exportExcel(),
-                onExportLowStock: _exportLowStockReport,
-                isDesktop: true,
-                isDetailedView: _isDetailedView,
-                onViewToggle: (v) => setState(() => _isDetailedView = v),
-                selectedDatePreset: _selectedDatePreset,
-                onDatePresetSelected: _onDatePresetSelected,
-                todaySummaryTabMode: _todaySummaryTabMode,
-                onTodaySummaryTabModeChanged: (tab) {
-                  setState(() {
-                    _todaySummaryTabMode = tab;
-                    _isDetailedView = tab == 'Detailed';
-                  });
-                },
-                todaySummaryFlowMode: _todaySummaryFlowMode,
-                onTodaySummaryFlowModeChanged: (flow) {
-                  setState(() {
-                    _todaySummaryFlowMode = flow;
-                  });
-                },
-              ),
-              Expanded(
-                child: _isLoading
-                    ? const Center(
-                        child: CircularProgressIndicator(color: msmRed))
-                    : _buildContent(),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
+    return ReportsDashboardScreen(initialTabId: widget.initialTabId);
   }
 
   Widget _buildMobileLayout() {

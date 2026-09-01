@@ -323,57 +323,60 @@ class _ResponsiveSizePickerState extends State<ResponsiveSizePicker> {
             double.tryParse(s['weight']?.toString() ?? '0') ?? 0.0;
         final sd = s['sd'] ?? 0;
 
-        return ListTile(
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          title: Text(
-            formatSizeWithWeight(
-                formatSizeDisplay(widget.itemType, label), weight),
-            style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
-                color: Colors.black87),
-          ),
-          subtitle: Padding(
-            padding: const EdgeInsets.only(top: 4.0),
-            child: Row(
-              children: [
-                Text(
-                  "SD: +$sd",
-                  style: const TextStyle(
-                      fontSize: 11,
-                      color: Colors.blueGrey,
-                      fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(width: 8),
-                const Text("•",
-                    style: TextStyle(fontSize: 11, color: Colors.grey)),
-                const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.red.shade200, width: 0.7),
-                  ),
-                  child: Text(
-                    "Weight: ${weight.toStringAsFixed(1)} kg",
-                    style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.red.shade800,
-                        fontWeight: FontWeight.w800),
-                  ),
-                ),
-              ],
+        return Material(
+          color: Colors.transparent,
+          child: ListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            title: Text(
+              formatSizeWithWeight(
+                  formatSizeDisplay(widget.itemType, label), weight),
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  color: Colors.black87),
             ),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 4.0),
+              child: Row(
+                children: [
+                  Text(
+                    "SD: +$sd",
+                    style: const TextStyle(
+                        fontSize: 11,
+                        color: Colors.blueGrey,
+                        fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text("•",
+                      style: TextStyle(fontSize: 11, color: Colors.grey)),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.red.shade200, width: 0.7),
+                    ),
+                    child: Text(
+                      "Weight: ${weight.toStringAsFixed(1)} kg",
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.red.shade800,
+                          fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            trailing: widget.trailingBuilder != null
+                ? widget.trailingBuilder!(s)
+                : const Icon(Icons.chevron_right, size: 18, color: Colors.grey),
+            onTap: () => widget.onSizeSelected(s),
           ),
-          trailing: widget.trailingBuilder != null
-              ? widget.trailingBuilder!(s)
-              : const Icon(Icons.chevron_right, size: 18, color: Colors.grey),
-          onTap: () => widget.onSizeSelected(s),
         );
       },
     );

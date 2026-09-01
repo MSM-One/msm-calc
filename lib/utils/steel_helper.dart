@@ -1,4 +1,3 @@
-import 'formatters.dart' as formatters;
 import '../constants/app_colors.dart';
 import 'package:flutter/material.dart';
 
@@ -133,7 +132,7 @@ List<T> applyPrioritizedSearch<T>(
   return [...exact, ...starts, ...contains];
 }
 
-// ✅ UNIFIED INPUT DECORATIONS
+// ✅ UNIFIED INPUT DECORATIONS (High-Density ERP Style)
 InputDecoration msmInputDeco(String label,
     {String? hint, Widget? prefix, Widget? suffix}) {
   return InputDecoration(
@@ -143,19 +142,23 @@ InputDecoration msmInputDeco(String label,
     suffixIcon: suffix,
     filled: true,
     fillColor: inputFill,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+    isDense: true,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
     border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: borderLight)),
     enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: borderLight)),
     focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(30),
-        borderSide: const BorderSide(color: msmRed, width: 2)),
-    labelStyle: const TextStyle(color: textGrey, fontSize: 13),
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: msmRed, width: 1.5)),
+    labelStyle: const TextStyle(
+        color: Color(0xFF374151), fontSize: 13, fontWeight: FontWeight.w500),
+    hintStyle: const TextStyle(
+        color: Color(0xFF9CA3AF), fontSize: 13, fontWeight: FontWeight.w400),
     floatingLabelStyle:
-        const TextStyle(color: msmRed, fontWeight: FontWeight.bold),
+        const TextStyle(color: msmRed, fontWeight: FontWeight.bold, fontSize: 13),
   );
 }
 
@@ -165,7 +168,7 @@ InputDecoration msmTableInputDeco({String? hint, Color? fillColor}) {
     filled: true,
     fillColor: fillColor ?? inputFill,
     isDense: true,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
     border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: const BorderSide(color: borderLight)),
@@ -175,5 +178,7 @@ InputDecoration msmTableInputDeco({String? hint, Color? fillColor}) {
     focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: const BorderSide(color: msmRed, width: 1.5)),
+    hintStyle: const TextStyle(
+        color: Color(0xFF9CA3AF), fontSize: 12, fontWeight: FontWeight.w400),
   );
 }

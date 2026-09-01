@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
-import '../widgets/motion_toast.dart';
 import 'package:flutter/services.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
-import '../constants/app_colors.dart';
-import '../utils/formatters.dart';
-import '../widgets/global_view_wrapper.dart';
-
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
+
+import '../core/app_permissions.dart';
 import '../models/stock_models.dart';
 import '../providers/inventory_provider.dart';
-import '../widgets/m_loader.dart';
-import '../core/app_permissions.dart';
 import '../services/access_guard.dart';
-import '../utils/sorting_utils.dart';
 import '../services/data_repository.dart';
+import '../utils/formatters.dart';
+import '../utils/item_order_util.dart';
+import '../utils/sorting_utils.dart';
+import '../widgets/global_view_wrapper.dart';
+import '../widgets/m_loader.dart';
+import '../widgets/motion_toast.dart';
 
 class SampleRateCalcScreen extends StatefulWidget {
   const SampleRateCalcScreen({super.key});
@@ -30,7 +30,6 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
   double _gstRate = 0.18;
   double _lcRate = 255.0;
   double _ncDiscount = 3000.0;
-  bool _isLoadingCharges = true;
 
   // Controllers for Master Rate Panel
   final TextEditingController _pipeBasicCtrl = TextEditingController();
@@ -81,16 +80,10 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
           _ncDiscount =
               double.tryParse(meta['nc_discount']?.toString() ?? '3000') ??
                   3000.0;
-          _isLoadingCharges = false;
         });
       }
     } catch (e) {
       debugPrint("Error loading charges in SampleRateCalcScreen: $e");
-      if (mounted) {
-        setState(() {
-          _isLoadingCharges = false;
-        });
-      }
     }
   }
 
@@ -114,9 +107,10 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     if (cat.contains('ANGLE')) return _angleBasicCtrl;
     if (cat.contains('CHANNEL')) return _channelBasicCtrl;
     if (cat.contains('SQR') || cat.contains('SQUARE')) return _sqrBarBasicCtrl;
-    if (cat.contains('ROUND') || cat.contains('FLAT'))
+    if (cat.contains('ROUND') || cat.contains('FLAT')) {
       return _roundFlatsBasicCtrl;
-    return _pipeBasicCtrl; // default
+    }
+    return _pipeBasicCtrl;
   }
 
   double _calculateFinalRate(String category, num sd) {
@@ -134,7 +128,6 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     if (basic == 0.0) return 0.0;
 
     double loading = _lcRate;
-
     double subtotal = (basic + sd + loading).toDouble();
     if (_ncDiscountEnabled) {
       subtotal -= _ncDiscount;
@@ -145,7 +138,11 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
   void _applyToAll(String sourceCategory) {
     TextEditingController sourceCtrl =
         _getControllerForCategory(sourceCategory);
-    String sourceRate = sourceCtrl.text;
+    String sourceRate = sourceCtrl.text.trim();
+    if (sourceRate.isEmpty) {
+      MotionToast.show(context, "Please enter a rate first", isError: true);
+      return;
+    }
     setState(() {
       _pipeBasicCtrl.text = sourceRate;
       _angleBasicCtrl.text = sourceRate;
@@ -153,7 +150,21 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
       _sqrBarBasicCtrl.text = sourceRate;
       _roundFlatsBasicCtrl.text = sourceRate;
     });
-    MotionToast.show(context, "Rate $sourceRate applied to all categories!");
+    MotionToast.show(context, "Rate ₹$sourceRate applied to all base categories!");
+  }
+
+  /// Checks if a category should be excluded from the Sample Rate Calculator.
+  /// Explicitly filters out 'Binding Wire', 'Nails', 'HR Pipe', and 'MS Structure' / 'MS Structure ISMC'.
+  static bool isExcludedCategory(String cat) {
+    final upper = cat.toUpperCase().trim();
+    return upper == 'BINDING WIRE' ||
+        upper == 'NAILS' ||
+        upper == 'HR PIPE' ||
+        upper == 'MS STRUCTURE' ||
+        upper == 'MS STRUCTURE ISMC' ||
+        upper == 'MS STRUCTURE (ISMC)' ||
+        upper.startsWith('MS STRUCTURE') ||
+        upper == 'STRUCTURE ISMC';
   }
 
   String _generateRateMessage() {
@@ -166,7 +177,13 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     int categoryIndex = 1;
     bool hasAnySelected = false;
 
-    _categories.forEach((category, sizes) {
+    final sortedCategoryKeys = _categories.keys
+        .where((cat) => !isExcludedCategory(cat))
+        .toList()
+      ..sort(ItemOrderUtil.compare);
+
+    for (final category in sortedCategoryKeys) {
+      final sizes = _categories[category] ?? [];
       TextEditingController ctrl = _getControllerForCategory(category);
       double catBasic = double.tryParse(ctrl.text) ?? 0;
       if (catBasic > 0) {
@@ -176,11 +193,9 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
             "\n*${categoryIndex++}. ${category.toUpperCase()}* ($headerRate)");
         final sortedSizes = [...sizes]..sort(compareSampleRateSizes);
         for (var size in sortedSizes) {
-          if (size.isMissing) continue; // Skip missing sizes in shared text
+          if (size.isMissing) continue;
           double finalRate = _calculateFinalRate(category, size.sd);
-          final double w = size.weight != null
-              ? double.tryParse(size.weight.toString()) ?? 0.0
-              : 0.0;
+          final double w = size.weight.toDouble();
           final formattedWeight =
               w % 1 == 0 ? w.toInt().toString() : w.toStringAsFixed(1);
           String weightSuffix = w != 0 ? " ${formattedWeight}kg" : "";
@@ -191,7 +206,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
               "▪ $dispLabel = ${formatIndianCurrency(finalRate.round())} /-");
         }
       }
-    });
+    }
 
     if (!hasAnySelected) return "";
 
@@ -217,15 +232,20 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
       return;
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
         height: MediaQuery.of(context).size.height * 0.85,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF0F172A) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+          border: Border.all(
+            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          ),
         ),
         child: Column(
           children: [
@@ -234,19 +254,39 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text("Rate Preview",
-                      style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: textDark)),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD32F2F).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.bolt_rounded,
+                            color: Color(0xFFD32F2F), size: 18),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        "Sample Rates Preview",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? Colors.white : const Color(0xFF1E293B),
+                        ),
+                      ),
+                    ],
+                  ),
                   IconButton(
-                    icon: const Icon(Icons.close),
+                    icon: const Icon(Icons.close_rounded, size: 20),
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
               ),
             ),
-            const Divider(height: 1),
+            Divider(
+              height: 1,
+              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+            ),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
@@ -254,17 +294,23 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                   padding: const EdgeInsets.all(16),
                   width: double.infinity,
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade50,
+                    color: isDark
+                        ? const Color(0xFF1E293B)
+                        : const Color(0xFFF8FAFC),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade200),
+                    border: Border.all(
+                      color: isDark
+                          ? const Color(0xFF334155)
+                          : const Color(0xFFE2E8F0),
+                    ),
                   ),
                   child: SelectableText(
                     message,
                     style: TextStyle(
-                      fontFamily: 'Courier',
-                      fontSize: 14,
-                      color: Colors.grey.shade800,
-                      height: 1.5,
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                      color: isDark ? Colors.white : const Color(0xFF1E293B),
+                      height: 1.45,
                     ),
                   ),
                 ),
@@ -281,14 +327,20 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                         Clipboard.setData(ClipboardData(text: message));
                         MotionToast.show(context, "Copied to Clipboard");
                       },
-                      icon: const Icon(Icons.copy, size: 20),
-                      label: const Text("Copy"),
+                      icon: const Icon(Icons.copy_rounded, size: 18),
+                      label: const Text("Copy Text"),
                       style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        side: const BorderSide(color: msmRed),
-                        foregroundColor: msmRed,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: BorderSide(
+                          color: isDark
+                              ? const Color(0xFF334155)
+                              : const Color(0xFFCBD5E1),
+                        ),
+                        foregroundColor:
+                            isDark ? Colors.white : const Color(0xFF1E293B),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
                     ),
                   ),
@@ -300,14 +352,16 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                         Share.share(message);
                         Navigator.pop(context);
                       },
-                      icon: const Icon(Icons.share, size: 20),
+                      icon: const Icon(Icons.share_rounded, size: 18),
                       label: const Text("Share to WhatsApp"),
                       style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        backgroundColor: msmRed,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        backgroundColor: const Color(0xFF25D366),
                         foregroundColor: Colors.white,
+                        elevation: 0,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
                     ),
                   ),
@@ -322,27 +376,51 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final double screenWidth = MediaQuery.of(context).size.width;
     final bool isDesktop = screenWidth >= 1025;
 
     return GlobalViewWrapper(
       child: Scaffold(
-        backgroundColor: msmBg,
+        backgroundColor:
+            isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
         appBar: AppBar(
-          title: const Text(
+          title: Text(
             "Sample Rate Calc",
             style: TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+              letterSpacing: -0.2,
+            ),
           ),
-          backgroundColor: msmRed,
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
           elevation: 0,
-          iconTheme: const IconThemeData(color: Colors.white),
+          surfaceTintColor: Colors.transparent,
+          shape: Border(
+            bottom: BorderSide(
+              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+            ),
+          ),
+          iconTheme: IconThemeData(
+            color: isDark ? Colors.white : const Color(0xFF0F172A),
+          ),
           actions: [
             IconButton(
-              icon: const Icon(Icons.share_rounded, color: Colors.white),
+              icon: const Icon(Icons.refresh_rounded, size: 20),
+              tooltip: "Refresh Master Data",
+              onPressed: () {
+                context.read<InventoryProvider>().fetchSampleRateData(force: true);
+                _loadCharges();
+                MotionToast.show(context, "Refreshing sample rates...");
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.share_rounded, size: 20),
               tooltip: "Preview & Share",
               onPressed: _showRatePreview,
             ),
+            const SizedBox(width: 8),
           ],
         ),
         body: Consumer<InventoryProvider>(
@@ -354,91 +432,222 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
             _categories = inv.sampleRateCategories;
 
             if (inv.sampleRateCategories.isEmpty) {
-              return const Center(
-                  child: Text("No items found in Google Sheet."));
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.inventory_2_outlined,
+                        size: 48, color: Color(0xFF94A3B8)),
+                    const SizedBox(height: 12),
+                    const Text(
+                      "No items found in Master Catalog.",
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF64748B),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      onPressed: () => inv.fetchSampleRateData(force: true),
+                      icon: const Icon(Icons.refresh_rounded, size: 16),
+                      label: const Text("Retry Loading"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFD32F2F),
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              );
             }
 
-            if (_selectedCategory == null &&
-                inv.sampleRateCategories.isNotEmpty) {
-              _selectedCategory = inv.sampleRateCategories.keys.first;
+            final sortedCategories = inv.sampleRateCategories.keys
+                .where((cat) => !isExcludedCategory(cat))
+                .toList()
+              ..sort(ItemOrderUtil.compare);
+
+            if ((_selectedCategory == null ||
+                    !sortedCategories.contains(_selectedCategory)) &&
+                sortedCategories.isNotEmpty) {
+              _selectedCategory = sortedCategories.first;
+            } else if (sortedCategories.isEmpty) {
+              _selectedCategory = null;
             }
 
-            // Desktop layout: Side-by-side
             if (isDesktop) {
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Left panel: Rates & Settings
+                  // ── LEFT SIDEBAR: BASE RATES CONFIG ──
                   Container(
                     width: 320,
                     height: double.infinity,
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: isDark ? const Color(0xFF1E293B) : Colors.white,
                       border: Border(
-                          right: BorderSide(color: borderLight, width: 1)),
+                        right: BorderSide(
+                          color: isDark
+                              ? const Color(0xFF334155)
+                              : const Color(0xFFE2E8F0),
+                          width: 1,
+                        ),
+                      ),
                     ),
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(24.0),
+                      padding: const EdgeInsets.all(20.0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Row(
+                          // Header Badge
+                          Row(
                             children: [
-                              Icon(Icons.tune_rounded, color: msmRed, size: 20),
-                              SizedBox(width: 8),
-                              Text(
-                                "Pricing Settings",
-                                style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                    color: textDark),
+                              Container(
+                                padding: const EdgeInsets.all(7),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFD32F2F)
+                                      .withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(Icons.tune_rounded,
+                                    color: Color(0xFFD32F2F), size: 16),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      "Base Rates Config",
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 15,
+                                        color: isDark
+                                            ? Colors.white
+                                            : const Color(0xFF0F172A),
+                                      ),
+                                    ),
+                                    Text(
+                                      "Set base rates for live calculation",
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: isDark
+                                            ? const Color(0xFF94A3B8)
+                                            : const Color(0xFF64748B),
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 18),
+
+                          // 5 Base Rate Inputs
                           _PanelInput(
-                              label: "Pipe Basic", controller: _pipeBasicCtrl),
+                            label: "Pipe Basic",
+                            controller: _pipeBasicCtrl,
+                            isDark: isDark,
+                            onApplyAll: () => _applyToAll('MS Pipe'),
+                          ),
+                          const SizedBox(height: 10),
+                          _PanelInput(
+                            label: "Angle Basic",
+                            controller: _angleBasicCtrl,
+                            isDark: isDark,
+                          ),
+                          const SizedBox(height: 10),
+                          _PanelInput(
+                            label: "Channel Basic",
+                            controller: _channelBasicCtrl,
+                            isDark: isDark,
+                          ),
+                          const SizedBox(height: 10),
+                          _PanelInput(
+                            label: "SQR Bar Basic",
+                            controller: _sqrBarBasicCtrl,
+                            isDark: isDark,
+                          ),
+                          const SizedBox(height: 10),
+                          _PanelInput(
+                            label: "Round/Flats Basic",
+                            controller: _roundFlatsBasicCtrl,
+                            isDark: isDark,
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Quick Broadcast Button
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () => _applyToAll('MS Pipe'),
+                              icon: const Icon(Icons.copy_all_rounded, size: 15),
+                              label: const Text(
+                                "Apply Pipe Rate to All",
+                                style: TextStyle(
+                                    fontSize: 12, fontWeight: FontWeight.w600),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 10),
+                                side: BorderSide(
+                                  color: isDark
+                                      ? const Color(0xFF334155)
+                                      : const Color(0xFFCBD5E1),
+                                ),
+                                foregroundColor: isDark
+                                    ? Colors.white70
+                                    : const Color(0xFF475569),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+
+                          Divider(
+                            color: isDark
+                                ? const Color(0xFF334155)
+                                : const Color(0xFFE2E8F0),
+                          ),
+                          const SizedBox(height: 10),
+
+                          // NC Discount Toggle Card
+                          _buildNcDiscountToggle(isDark),
+
                           const SizedBox(height: 14),
-                          _PanelInput(
-                              label: "Angle Basic",
-                              controller: _angleBasicCtrl),
-                          const SizedBox(height: 14),
-                          _PanelInput(
-                              label: "Channel Basic",
-                              controller: _channelBasicCtrl),
-                          const SizedBox(height: 14),
-                          _PanelInput(
-                              label: "SQR Bar Basic",
-                              controller: _sqrBarBasicCtrl),
-                          const SizedBox(height: 14),
-                          _PanelInput(
-                              label: "Round/Flats Basic",
-                              controller: _roundFlatsBasicCtrl),
-                          const SizedBox(height: 24),
-                          const Divider(color: borderLight),
-                          const SizedBox(height: 12),
-                          _buildNcDiscountToggle(),
+
+                          // Calculation Meta Strip
+                          _buildChargesMetaCard(isDark),
                         ],
                       ),
                     ),
                   ),
 
-                  // Right panel: Category switcher & Table
+                  // ── RIGHT MAIN PANEL: CANONICAL TABS & PRICING TABLE ──
                   Expanded(
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.all(24.0),
                       child: Center(
                         child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 800),
+                          constraints: const BoxConstraints(maxWidth: 920),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _buildCategoryChips(inv),
-                              const SizedBox(height: 20),
+                              // Canonical Category Tabs
+                              _buildCategoryChips(sortedCategories, isDark),
+                              const SizedBox(height: 18),
+
+                              // Table Section
                               if (_selectedCategory != null &&
                                   _categories.containsKey(_selectedCategory))
-                                _buildCategorySection(_selectedCategory!,
-                                    _categories[_selectedCategory!]!),
+                                _buildCategorySection(
+                                  _selectedCategory!,
+                                  _categories[_selectedCategory!]!,
+                                  isDark,
+                                ),
                             ],
                           ),
                         ),
@@ -449,89 +658,170 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
               );
             }
 
-            // Mobile layout: Pinned vertical scroll
+            // ── MOBILE / NARROW LAYOUT ──
             return SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
+              padding: const EdgeInsets.all(14.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Basic Rates card
-                  Card(
-                    color: Colors.white,
-                    elevation: 2,
-                    shadowColor: kPremiumShadow,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: const BorderSide(color: borderLight),
+                  // Collapsible Rate Config Card
+                  Container(
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isDark
+                            ? const Color(0xFF334155)
+                            : const Color(0xFFE2E8F0),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.02),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: ExpansionTile(
-                        initiallyExpanded: true,
-                        tilePadding: EdgeInsets.zero,
-                        iconColor: msmRed,
-                        title: const Row(
+                    padding: const EdgeInsets.all(14.0),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: Theme(
+                        data: Theme.of(context)
+                            .copyWith(dividerColor: Colors.transparent),
+                        child: ExpansionTile(
+                          initiallyExpanded: true,
+                          tilePadding: EdgeInsets.zero,
+                          iconColor: const Color(0xFFD32F2F),
+                          collapsedIconColor: const Color(0xFF64748B),
+                          title: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFD32F2F)
+                                      .withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(Icons.tune_rounded,
+                                    color: Color(0xFFD32F2F), size: 16),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                "Base Rates Config",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14.5,
+                                  color: isDark
+                                      ? Colors.white
+                                      : const Color(0xFF0F172A),
+                                ),
+                              ),
+                            ],
+                          ),
                           children: [
-                            Icon(Icons.tune_rounded, color: msmRed, size: 20),
-                            SizedBox(width: 8),
-                            Text(
-                              "Rates & Settings",
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                  color: textDark),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _PanelInput(
+                                    label: "Pipe",
+                                    controller: _pipeBasicCtrl,
+                                    isDark: isDark,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _PanelInput(
+                                    label: "Angle",
+                                    controller: _angleBasicCtrl,
+                                    isDark: isDark,
+                                  ),
+                                ),
+                              ],
                             ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _PanelInput(
+                                    label: "Channel",
+                                    controller: _channelBasicCtrl,
+                                    isDark: isDark,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _PanelInput(
+                                    label: "SQR Bar",
+                                    controller: _sqrBarBasicCtrl,
+                                    isDark: isDark,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            _PanelInput(
+                              label: "Round/Flats",
+                              controller: _roundFlatsBasicCtrl,
+                              isDark: isDark,
+                            ),
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () => _applyToAll('MS Pipe'),
+                                icon: const Icon(Icons.copy_all_rounded, size: 14),
+                                label: const Text(
+                                  "Apply Pipe Rate to All",
+                                  style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w600),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 8),
+                                  side: BorderSide(
+                                    color: isDark
+                                        ? const Color(0xFF334155)
+                                        : const Color(0xFFCBD5E1),
+                                  ),
+                                  foregroundColor: isDark
+                                      ? Colors.white70
+                                      : const Color(0xFF475569),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Divider(
+                              color: isDark
+                                  ? const Color(0xFF334155)
+                                  : const Color(0xFFE2E8F0),
+                            ),
+                            _buildNcDiscountToggle(isDark),
+                            const SizedBox(height: 8),
+                            _buildChargesMetaCard(isDark),
                           ],
                         ),
-                        children: [
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                  child: _PanelInput(
-                                      label: "Pipe",
-                                      controller: _pipeBasicCtrl)),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                  child: _PanelInput(
-                                      label: "Angle",
-                                      controller: _angleBasicCtrl)),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                  child: _PanelInput(
-                                      label: "Channel",
-                                      controller: _channelBasicCtrl)),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                  child: _PanelInput(
-                                      label: "SQR Bar",
-                                      controller: _sqrBarBasicCtrl)),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          _PanelInput(
-                              label: "Round/Flats",
-                              controller: _roundFlatsBasicCtrl),
-                          const SizedBox(height: 16),
-                          const Divider(color: borderLight),
-                          _buildNcDiscountToggle(),
-                        ],
                       ),
                     ),
                   ),
-                  const SizedBox(height: 20),
-
-                  // Category chips & Table
-                  _buildCategoryChips(inv),
                   const SizedBox(height: 16),
+
+                  // Canonical Category Chips
+                  _buildCategoryChips(sortedCategories, isDark),
+                  const SizedBox(height: 14),
+
+                  // Responsive Pricing Table
                   if (_selectedCategory != null &&
                       _categories.containsKey(_selectedCategory))
                     _buildCategorySection(
-                        _selectedCategory!, _categories[_selectedCategory!]!),
+                      _selectedCategory!,
+                      _categories[_selectedCategory!]!,
+                      isDark,
+                    ),
                 ],
               ),
             );
@@ -541,37 +831,61 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     );
   }
 
-  Widget _buildCategoryChips(InventoryProvider inv) {
+  // ── CANONICAL CATEGORY PILL TABS ──
+  Widget _buildCategoryChips(List<String> sortedCategories, bool isDark) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       physics: const BouncingScrollPhysics(),
       child: Row(
-        children: inv.sampleRateCategories.keys.map((cat) {
+        children: sortedCategories.map((cat) {
           final isSelected = _selectedCategory == cat;
           return Padding(
             padding: const EdgeInsets.only(right: 8.0),
-            child: GestureDetector(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
               onTap: () {
                 setState(() => _selectedCategory = cat);
               },
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                    const EdgeInsets.symmetric(horizontal: 14.0, vertical: 8.0),
                 decoration: BoxDecoration(
-                  color: isSelected ? msmRed : const Color(0xFFF5F5F5),
+                  color: isSelected
+                      ? const Color(0xFFD32F2F)
+                      : (isDark
+                          ? const Color(0xFF1E293B)
+                          : const Color(0xFFF1F5F9)),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: isSelected ? Colors.transparent : borderLight,
+                    color: isSelected
+                        ? const Color(0xFFD32F2F)
+                        : (isDark
+                            ? const Color(0xFF334155)
+                            : const Color(0xFFE2E8F0)),
                     width: 1,
                   ),
+                  boxShadow: isSelected
+                      ? [
+                          BoxShadow(
+                            color: const Color(0xFFD32F2F).withValues(alpha: 0.25),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
                 ),
                 child: Text(
                   cat.toUpperCase(),
                   style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                    color: isSelected ? Colors.white : textDark,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                    fontSize: 11.5,
+                    color: isSelected
+                        ? Colors.white
+                        : (isDark
+                            ? const Color(0xFFCBD5E1)
+                            : const Color(0xFF475569)),
+                    letterSpacing: 0.3,
                   ),
                 ),
               ),
@@ -582,55 +896,248 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     );
   }
 
-  Widget _buildNcDiscountToggle() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+  // ── NC DISCOUNT TOGGLE CARD ──
+  Widget _buildNcDiscountToggle(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+        ),
+      ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                "NC Discount",
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: textDark,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        "NC Discount (-₹${_ncDiscount.toStringAsFixed(0)})",
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (_ncDiscountEnabled) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFDC2626).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          "ACTIVE",
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFFDC2626),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-              ),
-              Text(
-                "Apply extra discount to total",
-                style: TextStyle(
-                    fontSize: 11, color: textGrey, fontWeight: FontWeight.w500),
-              ),
-            ],
+                const SizedBox(height: 2),
+                Text(
+                  "Deduct ₹${_ncDiscount.toStringAsFixed(0)} before GST",
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: isDark
+                        ? const Color(0xFF94A3B8)
+                        : const Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
           ),
-          Switch.adaptive(
-            value: _ncDiscountEnabled,
-            activeColor: msmRed,
-            onChanged: (val) => setState(() => _ncDiscountEnabled = val),
+          Transform.scale(
+            scale: 0.8,
+            child: Switch.adaptive(
+              value: _ncDiscountEnabled,
+              activeTrackColor: const Color(0xFFD32F2F),
+              onChanged: (val) => setState(() => _ncDiscountEnabled = val),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildCategorySection(String title, List<SampleRateSize> sizes) {
+  // ── CHARGES META CARD ──
+  Widget _buildChargesMetaCard(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: isDark
+            ? const Color(0xFF0F172A).withValues(alpha: 0.5)
+            : const Color(0xFFF1F5F9).withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              Text(
+                "GST Rate: ${(_gstRate * 100).toStringAsFixed(1)}%",
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                ),
+              ),
+              Text(
+                "Loading: ₹${_lcRate.toStringAsFixed(0)}/MT",
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            "Formula: (Base + SD + LC${_ncDiscountEnabled ? ' - NC' : ''}) × ${(1 + _gstRate).toStringAsFixed(2)}",
+            style: TextStyle(
+              fontSize: 10,
+              fontStyle: FontStyle.italic,
+              color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── CATEGORY SECTION & HIGH-DENSITY PRICING TABLE ──
+  Widget _buildCategorySection(
+      String title, List<SampleRateSize> sizes, bool isDark) {
     final sortedSizes = [...sizes]..sort(compareSampleRateSizes);
+
+    final ctrl = _getControllerForCategory(title);
+    final double basic = double.tryParse(ctrl.text) ?? 0.0;
+    final bool hasBasic = basic > 0;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Card(
-          color: Colors.white,
-          elevation: 2,
-          shadowColor: kPremiumShadow,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: borderLight),
+        // Category Header Bar
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            border: Border.all(
+              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+            ),
+          ),
+          child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      "${sortedSizes.length} sizes",
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF64748B),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: hasBasic
+                      ? const Color(0xFFECFDF5)
+                      : (isDark
+                          ? const Color(0xFF334155)
+                          : const Color(0xFFF1F5F9)),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: hasBasic
+                        ? const Color(0xFFA7F3D0)
+                        : (isDark
+                            ? const Color(0xFF475569)
+                            : const Color(0xFFE2E8F0)),
+                  ),
+                ),
+                child: Text(
+                  hasBasic
+                      ? "Base: ₹${formatIndianCurrency(basic.round())}/MT"
+                      : "Base Rate Not Set",
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: hasBasic
+                        ? const Color(0xFF059669)
+                        : const Color(0xFF94A3B8),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Pricing Table
+        Container(
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius:
+                const BorderRadius.vertical(bottom: Radius.circular(12)),
+            border: Border(
+              left: BorderSide(
+                color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+              ),
+              right: BorderSide(
+                color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+              ),
+              bottom: BorderSide(
+                color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+              ),
+            ),
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius:
+                const BorderRadius.vertical(bottom: Radius.circular(12)),
             child: Table(
               columnWidths: const {
                 0: FlexColumnWidth(4),
@@ -639,30 +1146,42 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
               },
               border: TableBorder(
                 horizontalInside: BorderSide(
-                    color: borderLight.withValues(alpha: 0.5), width: 1),
+                  color: isDark
+                      ? const Color(0xFF334155).withValues(alpha: 0.6)
+                      : const Color(0xFFE2E8F0).withValues(alpha: 0.6),
+                  width: 0.5,
+                ),
               ),
               children: [
-                const TableRow(
-                  decoration: BoxDecoration(color: Color(0xFFFDFDFD)),
-                  children: [
-                    _TableCell(Text("Size Label",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: textDark))),
-                    _TableCell(Text("SD Value",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: textDark))),
-                    _TableCell(Text("Final Net Rate",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: textDark))),
+                // Table Header Row
+                TableRow(
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF0F172A)
+                        : const Color(0xFFF1F5F9),
+                  ),
+                  children: const [
+                    _TableHeaderCell(
+                      "SIZE DIMENSION",
+                      alignment: Alignment.centerLeft,
+                    ),
+                    _TableHeaderCell(
+                      "SD VALUE",
+                      alignment: Alignment.centerRight,
+                    ),
+                    _TableHeaderCell(
+                      "NET COMPUTED RATE",
+                      alignment: Alignment.centerRight,
+                    ),
                   ],
                 ),
-                ...sortedSizes.map((size) {
+
+                // Table Data Rows
+                ...sortedSizes.asMap().entries.map((entry) {
+                  final int index = entry.key;
+                  final SampleRateSize size = entry.value;
+                  final bool isEven = index % 2 == 0;
+
                   String weightText = '';
                   final double? wVal = double.tryParse(size.weight.toString());
                   final String lowerLabel = size.label.toLowerCase();
@@ -690,19 +1209,41 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                       ? formatSizeLabel(size.label, title, wVal ?? 0.0)
                       : "${size.label}$weightText";
 
-                  // If missing, show dash for values
+                  final Color rowBg = isEven
+                      ? (isDark ? const Color(0xFF1E293B) : Colors.white)
+                      : (isDark
+                          ? const Color(0xFF0F172A).withValues(alpha: 0.5)
+                          : const Color(0xFFF8FAFC));
+
                   if (size.isMissing) {
                     return TableRow(
+                      decoration: BoxDecoration(color: rowBg),
                       children: [
-                        _TableCell(Text(dispLabel,
-                            style: const TextStyle(
-                                fontSize: 13,
-                                color: textGrey,
-                                fontStyle: FontStyle.italic))),
-                        _TableCell(const Text("-",
-                            style: TextStyle(fontSize: 12, color: textGrey))),
-                        _TableCell(const Text("-",
-                            style: TextStyle(fontSize: 14, color: textGrey))),
+                        _TableCell(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            dispLabel,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark
+                                  ? const Color(0xFF64748B)
+                                  : const Color(0xFF94A3B8),
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
+                        const _TableCell(
+                          alignment: Alignment.centerRight,
+                          child: Text("—",
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF94A3B8))),
+                        ),
+                        const _TableCell(
+                          alignment: Alignment.centerRight,
+                          child: Text("—",
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF94A3B8))),
+                        ),
                       ],
                     );
                   }
@@ -711,45 +1252,87 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                   final hasCalculated = finalRate > 0;
 
                   return TableRow(
+                    decoration: BoxDecoration(color: rowBg),
                     children: [
-                      _TableCell(Text(dispLabel,
-                          style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: textDark))),
+                      // Col 1: Size & Weight
                       _TableCell(
-                        hasCalculated
-                            ? Text("+${size.sd.toStringAsFixed(0)}",
-                                style: const TextStyle(
-                                    fontSize: 12, color: textGrey))
-                            : const Text("-",
-                                style:
-                                    TextStyle(fontSize: 12, color: textGrey)),
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          dispLabel,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: isDark
+                                ? Colors.white
+                                : const Color(0xFF0F172A),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
+
+                      // Col 2: SD Value Badge
                       _TableCell(
-                        hasCalculated
+                        alignment: Alignment.centerRight,
+                        child: size.sd != 0
                             ? Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 4),
+                                    horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: msmRed.withValues(alpha: 0.08),
-                                  borderRadius: BorderRadius.circular(6),
+                                  color: size.sd > 0
+                                      ? const Color(0xFFECFDF5)
+                                      : const Color(0xFFFFFBEB),
+                                  borderRadius: BorderRadius.circular(5),
                                   border: Border.all(
-                                      color: msmRed.withValues(alpha: 0.15),
-                                      width: 0.5),
+                                    color: size.sd > 0
+                                        ? const Color(0xFFA7F3D0)
+                                        : const Color(0xFFFDE68A),
+                                    width: 0.5,
+                                  ),
                                 ),
                                 child: Text(
-                                  "₹ ${formatIndianCurrency(finalRate.round())}",
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    color: msmRed,
+                                  size.sd > 0
+                                      ? "+₹${size.sd.toStringAsFixed(0)}"
+                                      : "-₹${size.sd.abs().toStringAsFixed(0)}",
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: size.sd > 0
+                                        ? const Color(0xFF059669)
+                                        : const Color(0xFFD97706),
                                   ),
                                 ),
                               )
-                            : const Text("-",
-                                style:
-                                    TextStyle(fontSize: 14, color: textGrey)),
+                            : const Text(
+                                "Base",
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w500,
+                                  color: Color(0xFF94A3B8),
+                                ),
+                              ),
+                      ),
+
+                      // Col 3: Net Computed Rate
+                      _TableCell(
+                        alignment: Alignment.centerRight,
+                        child: hasCalculated
+                            ? Text(
+                                "₹ ${formatIndianCurrency(finalRate.round())}/MT",
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF059669),
+                                ),
+                              )
+                            : const Text(
+                                "—",
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: Color(0xFF94A3B8),
+                                ),
+                              ),
                       ),
                     ],
                   );
@@ -763,109 +1346,115 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     );
   }
 
-  // --- Sorting Helpers ---
-  double extractThickness(String sizeLabel) {
-    final match = RegExp(r'\((\d+(?:\.\d+)?)\)').firstMatch(sizeLabel);
-    if (match == null) return double.infinity;
-    return double.tryParse(match.group(1)!) ?? double.infinity;
-  }
-
-  double extractMainSize(String sizeLabel) {
-    final label = sizeLabel.toUpperCase();
-
-    final odMatch = RegExp(r'(\d+(?:\.\d+)?)\s*OD').firstMatch(label);
-    if (odMatch != null) {
-      return double.tryParse(odMatch.group(1)!) ?? double.infinity;
-    }
-
-    final xMatch =
-        RegExp(r'(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)').firstMatch(label);
-    if (xMatch != null) {
-      return double.tryParse(xMatch.group(1)!) ?? double.infinity;
-    }
-
-    final inchMatch = RegExp(r'(\d+(?:\.\d+)?)\s*"').firstMatch(label);
-    if (inchMatch != null) {
-      return double.tryParse(inchMatch.group(1)!) ?? double.infinity;
-    }
-
-    final numberMatch = RegExp(r'\d+(?:\.\d+)?').firstMatch(label);
-    if (numberMatch != null) {
-      return double.tryParse(numberMatch.group(0)!) ?? double.infinity;
-    }
-
-    return double.infinity;
-  }
-
   int compareSampleRateSizes(dynamic a, dynamic b) {
     String aLabel = '';
-    if (a is SampleRateSize)
+    if (a is SampleRateSize) {
       aLabel = a.label;
-    else if (a is Map)
+    } else if (a is Map) {
       aLabel = (a['label'] ?? a['size'] ?? '').toString();
-    else
+    } else {
       aLabel = a.toString();
+    }
 
     String bLabel = '';
-    if (b is SampleRateSize)
+    if (b is SampleRateSize) {
       bLabel = b.label;
-    else if (b is Map)
+    } else if (b is Map) {
       bLabel = (b['label'] ?? b['size'] ?? '').toString();
-    else
+    } else {
       bLabel = b.toString();
+    }
 
     return SortingUtils.compareSizes(aLabel, bLabel);
   }
 }
 
+// ── COMPACT ENTERPRISE PANEL INPUT ──
 class _PanelInput extends StatelessWidget {
   final String label;
   final TextEditingController controller;
+  final bool isDark;
+  final VoidCallback? onApplyAll;
 
-  const _PanelInput({required this.label, required this.controller});
+  const _PanelInput({
+    required this.label,
+    required this.controller,
+    this.isDark = false,
+    this.onApplyAll,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 6),
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: textGrey,
-              letterSpacing: 0.3,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF374151),
+              ),
             ),
-          ),
+            if (onApplyAll != null)
+              InkWell(
+                onTap: onApplyAll,
+                child: const Text(
+                  "Apply to All",
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFFD32F2F),
+                  ),
+                ),
+              ),
+          ],
         ),
-        SizedBox(
-          height: 44,
-          child: TextField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            textAlignVertical: TextAlignVertical.center,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: textDark,
+        const SizedBox(height: 4),
+        TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: isDark ? Colors.white : const Color(0xFF0F172A),
+          ),
+          decoration: InputDecoration(
+            isDense: true,
+            filled: true,
+            fillColor: isDark
+                ? const Color(0xFF0F172A)
+                : const Color(0xFFF8FAFC),
+            prefixText: "₹ ",
+            prefixStyle: TextStyle(
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
             ),
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: const Color(0xFFF8F9FB),
-              prefixIcon:
-                  const Icon(Icons.currency_rupee, size: 14, color: msmRed),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Color(0xFFE9ECEF)),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(
+                color: isDark
+                    ? const Color(0xFF334155)
+                    : const Color(0xFFE2E8F0),
               ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: msmRed, width: 1.5),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(
+                color: isDark
+                    ? const Color(0xFF334155)
+                    : const Color(0xFFE2E8F0),
               ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFFD32F2F), width: 1.5),
             ),
           ),
         ),
@@ -874,14 +1463,45 @@ class _PanelInput extends StatelessWidget {
   }
 }
 
-class _TableCell extends StatelessWidget {
-  final Widget child;
-  const _TableCell(this.child);
+// ── TABLE HEADER CELL ──
+class _TableHeaderCell extends StatelessWidget {
+  final String title;
+  final Alignment alignment;
+
+  const _TableHeaderCell(this.title, {this.alignment = Alignment.centerLeft});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+    return Container(
+      height: 34,
+      alignment: alignment,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontWeight: FontWeight.w700,
+          fontSize: 10.5,
+          color: Color(0xFF64748B),
+          letterSpacing: 0.4,
+        ),
+      ),
+    );
+  }
+}
+
+// ── TABLE DATA CELL ──
+class _TableCell extends StatelessWidget {
+  final Widget child;
+  final Alignment alignment;
+
+  const _TableCell({required this.child, this.alignment = Alignment.centerLeft});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 38,
+      alignment: alignment,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       child: child,
     );
   }

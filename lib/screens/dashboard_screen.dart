@@ -25,6 +25,11 @@ import '../models/stock_role.dart';
 import '../widgets/screen_gate.dart';
 
 import '../widgets/dashboard_sliver_header.dart';
+import '../widgets/dashboard/executive_telemetry_header.dart';
+import '../widgets/dashboard/compact_kpi_ribbon.dart';
+import '../widgets/dashboard/unified_stock_distribution_card.dart';
+import '../widgets/dashboard/enterprise_quick_actions_grid.dart';
+import 'reports/reports_dashboard_screen.dart';
 import '../services/auth_service.dart';
 import '../services/app_update_service.dart';
 
@@ -44,8 +49,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   String _phoneNumber = "";
   bool _isLoading = true;
   bool _isSyncing = false;
-  bool _hasLoggedHeroMetrics = false;
-  bool _hasLoggedDistributionMetrics = false;
 
   Timer? _permissionPollTimer;
 
@@ -192,7 +195,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   Future<void> _handleSync() async {
     setState(() {
       _isSyncing = true;
-      _hasLoggedHeroMetrics = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text("Syncing latest data..."),
@@ -421,52 +423,31 @@ class _DashboardScreenState extends State<DashboardScreen>
             );
           }
 
-          // Desktop/Tablet Layout (Unchanged)
+          // Desktop/Tablet Executive ERP Command Center Layout
           Widget rootContent = Scaffold(
-            backgroundColor: const Color(0xFFFFF8F8),
-            body: Container(
-              decoration: const BoxDecoration(
-                gradient: RadialGradient(
-                  center: Alignment.topLeft,
-                  radius: 1.5,
-                  colors: [
-                    Color(0x15FF2B45),
-                    Color(0xFFFFF8F8),
-                  ],
-                ),
-              ),
-              child: SafeArea(
-                child: RefreshIndicator(
-                  onRefresh: _handleSync,
-                  color: msmRed,
-                  child: SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding:
-                        EdgeInsets.fromLTRB(24, 24, 24, isDesktop ? 24 : 32),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildHeroHeader(isMobile),
-                        const SizedBox(height: 24),
-                        _buildStatCards(isDesktop, isMobile),
-                        const SizedBox(height: 24),
-                        _buildStockDistribution(isMobile),
-                        const SizedBox(height: 24),
-                        _buildQuickActionsGrid(isDesktop, isMobile),
-                        const SizedBox(height: 48),
-                        const Center(
-                          child: Text(
-                            "MSM Inventory · Crafted with depth and precision",
-                            style: TextStyle(
-                              color: Color(0xFF6B5E5E),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                      ],
-                    ),
+            backgroundColor: const Color(0xFFF8FAFC),
+            body: SafeArea(
+              child: RefreshIndicator(
+                onRefresh: _handleSync,
+                color: appRed,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: EdgeInsets.fromLTRB(
+                      20, 20, 20, isDesktop ? 24 : 32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildExecutiveTelemetryHeader(),
+                      const SizedBox(height: 16),
+                      _buildKpiRibbon(),
+                      const SizedBox(height: 16),
+                      _buildStockDistributionCard(),
+                      const SizedBox(height: 16),
+                      const EnterpriseQuickActionsGrid(),
+                      const SizedBox(height: 24),
+                      _buildEnterpriseFooter(),
+                      const SizedBox(height: 12),
+                    ],
                   ),
                 ),
               ),
@@ -844,1050 +825,212 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  // --- 2. HERO HEADER (Desktop/Tablet) ---
-  Widget _buildHeroHeader(bool isMobile) {
+  // --- 2. EXECUTIVE COMMAND CENTER BUILDERS (Desktop/Tablet) ---
+
+  Widget _buildExecutiveTelemetryHeader() {
     return StreamBuilder<List<ItemVariant>>(
       stream: DataRepository.getSupabaseStockStream(),
       builder: (context, snapshot) {
-        final inventory = snapshot.data ?? [];
-        final currentStock =
+        final inventory =
+            snapshot.data ?? DataRepository.inventoryListNotifier.value;
+        int attentionCount = 0;
+        for (final v in inventory) {
+          if (v.currentStockMT <= 0 || v.currentStockMT < v.minStock) {
+            attentionCount++;
+          }
+        }
+
+        return ExecutiveTelemetryHeader(
+          userName: _effectiveDisplayName(),
+          subtitle: 'MSM Yard Inventory & Operations',
+          isSupabaseLive: snapshot.connectionState != ConnectionState.waiting,
+          isSyncing: _isSyncing,
+          locationLabel: 'Yard: All',
+          attentionCount: attentionCount,
+          onRefresh: _handleSync,
+          onProfileTap: _showProfile,
+          onAttentionTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    const ReportsDashboardScreen(initialTabId: 'low'),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildKpiRibbon() {
+    return StreamBuilder<List<ItemVariant>>(
+      stream: DataRepository.getSupabaseStockStream(),
+      builder: (context, snapshot) {
+        final inventory =
+            snapshot.data ?? DataRepository.inventoryListNotifier.value;
+        final totalStock =
             inventory.fold(0.0, (sum, item) => sum + item.netStockMt);
+
+        return ListenableBuilder(
+          listenable: Listenable.merge([
+            DataRepository.allTransactionsNotifier,
+            DataRepository.todayOutNotifier,
+          ]),
+          builder: (context, _) {
+            final txns = DataRepository.allTransactionsNotifier.value;
+            final today = DateTime.now();
+            final todayStart = DateTime(today.year, today.month, today.day);
+            double todayIn = 0;
+            double todayOut = DataRepository.todayOutNotifier.value;
+
+            for (final tx in txns) {
+              if (tx.isReversed) continue;
+              if (!tx.dateTime.isBefore(todayStart)) {
+                final typeUpper = tx.type.trim().toUpperCase();
+                if ([
+                  'IN',
+                  'INWARD',
+                  'RETURN',
+                  'ADJUSTMENT',
+                  'OPENING',
+                  'OPENING_STOCK'
+                ].contains(typeUpper)) {
+                  todayIn += tx.qtyMT;
+                }
+              }
+            }
+
+            int attentionCount = 0;
+            for (final v in inventory) {
+              if (v.currentStockMT <= 0 || v.currentStockMT < v.minStock) {
+                attentionCount++;
+              }
+            }
+
+            return CompactKpiRibbon(
+              totalStockMT: totalStock,
+              todayInwardMT: todayIn,
+              todayOutwardMT: todayOut,
+              attentionDeficitCount: attentionCount,
+              onTotalStockTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        const ReportsDashboardScreen(initialTabId: 'movement'),
+                  ),
+                );
+              },
+              onInwardTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        const ReportsDashboardScreen(initialTabId: 'today'),
+                  ),
+                );
+              },
+              onOutwardTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        const ReportsDashboardScreen(initialTabId: 'today'),
+                  ),
+                );
+              },
+              onAttentionTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        const ReportsDashboardScreen(initialTabId: 'low'),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildStockDistributionCard() {
+    return StreamBuilder<List<ItemVariant>>(
+      stream: DataRepository.getSupabaseStockStream(),
+      builder: (context, snapshot) {
+        final inventory =
+            snapshot.data ?? DataRepository.inventoryListNotifier.value;
+        final totalStock =
+            inventory.fold(0.0, (sum, item) => sum + item.netStockMt);
+        final yardStock = inventory
+            .where((item) =>
+                item.location == 'YARD' ||
+                item.location == 'ALL' ||
+                item.location.trim().isEmpty)
+            .fold(0.0, (sum, item) => sum + item.currentStockMT);
         final factoryStock = inventory
             .where((item) => item.location == 'FACTORY')
             .fold(0.0, (sum, item) => sum + item.currentStockMT);
-        final txns = DataRepository.allTransactionsNotifier.value;
-        final isDataSyncing =
-            snapshot.connectionState == ConnectionState.waiting;
 
-        // --- Metric 1: Stock vs Yesterday ---
-        final now = DateTime.now();
-        final todayStart = DateTime(now.year, now.month, now.day);
-        double todayIn = 0;
-        double todayOut = 0;
-
-        for (final tx in txns) {
-          if (tx.isReversed) continue;
-          if (!tx.dateTime.isBefore(todayStart)) {
-            if (['IN', 'RETURN', 'ADJUSTMENT', 'OPENING'].contains(tx.type)) {
-              todayIn += tx.qtyMT;
-            } else if (['OUT', 'RESERVE'].contains(tx.type)) {
-              todayOut += tx.qtyMT;
-            }
-          }
-        }
-
-        final todayNetMovement = todayIn - todayOut;
-        final yesterdayStock = currentStock - todayNetMovement;
-
-        String trendValue = "—";
-        String trendLabel = "no previous data";
-        IconData trendIcon = Icons.trending_flat;
-
-        if (yesterdayStock > 0) {
-          final diff = currentStock - yesterdayStock;
-          final pct = (diff / yesterdayStock) * 100;
-          trendValue = "${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(1)}%";
-          trendLabel = "vs. yesterday";
-          trendIcon = pct >= 0
-              ? Icons.trending_up_rounded
-              : Icons.trending_down_rounded;
-        }
-
-        // --- Metric 2: Items need attention ---
-        int attentionCount = 0;
-        for (final v in inventory) {
-          bool needsAttention = false;
-          if (v.currentStockMT <= 0) {
-            needsAttention = true;
-          } else if (v.currentStockMT < v.minStock) {
-            needsAttention = true;
-          } else if (v.itemName.trim().isEmpty || v.size.trim().isEmpty) {
-            needsAttention = true;
-          } else if (v.currentStockMT.isNaN || v.currentStockMT.isInfinite) {
-            needsAttention = true;
-          }
-          if (needsAttention) attentionCount++;
-        }
-
-        String attentionValue = "$attentionCount items";
-        String attentionLabel =
-            attentionCount == 0 ? "all clear" : "need attention";
-
-        // --- Metric 3: Factory 1 Share ---
-        String factoryValue = "Factory 1 —";
-        String factoryLabel = "data unavailable";
-        if (currentStock > 0) {
-          final share = (factoryStock / currentStock) * 100;
-          factoryValue = "Factory 1 ${share.toStringAsFixed(0)}%";
-          factoryLabel = "of total stock";
-        }
-
-        // --- Badge Status ---
-        String badgeText = "Live Inventory";
-        Color badgeDotColor = Colors.greenAccent;
-        if (isDataSyncing && currentStock == 0) {
-          badgeText = "Loading inventory";
-          badgeDotColor = Colors.orangeAccent;
-        } else if (!isDataSyncing && currentStock == 0 && txns.isEmpty) {
-          badgeText = "Inventory unavailable";
-          badgeDotColor = Colors.redAccent;
-        }
-
-        // --- One-time Log ---
-        if (!_hasLoggedHeroMetrics &&
-            !isDataSyncing &&
-            (currentStock > 0 || txns.isNotEmpty)) {
-          _hasLoggedHeroMetrics = true;
-          debugPrint(
-              "DEBUG: [Dashboard Hero Metrics] Trend: $trendValue, Attention: $attentionValue, Factory: $factoryValue, Total: ${currentStock.toStringAsFixed(2)} MT");
-        }
-
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(40),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                msmRed,
-                msmRed.withValues(alpha: 0.8),
-                const Color(0xFFD32F2F),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(32),
-            boxShadow: [
-              BoxShadow(
-                color: msmRed.withValues(alpha: 0.3),
-                blurRadius: 30,
-                offset: const Offset(0, 15),
+        return UnifiedStockDistributionCard(
+          yardStockMT: yardStock,
+          factoryStockMT: factoryStock,
+          totalStockMT: totalStock,
+          onYardTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    const ReportsDashboardScreen(initialTabId: 'movement'),
               ),
-            ],
-          ),
-          child: Stack(
-            children: [
-              Positioned(
-                right: -30,
-                top: -30,
-                child: Icon(
-                  Icons.dashboard_rounded,
-                  size: 200,
-                  color: Colors.white.withValues(alpha: 0.05),
-                ),
+            );
+          },
+          onFactoryTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    const ReportsDashboardScreen(initialTabId: 'movement'),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.3)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.circle, color: badgeDotColor, size: 8),
-                            const SizedBox(width: 6),
-                            Text(
-                              badgeText,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          GestureDetector(
-                            onTap: _showProfile,
-                            child: Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white,
-                                  width: 1.5,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.12),
-                                    blurRadius: 6,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                _effectiveDisplayName().isNotEmpty
-                                    ? _effectiveDisplayName()[0].toUpperCase()
-                                    : "U",
-                                style: const TextStyle(
-                                  color: Color(0xFFDC2626),
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      )
-                    ],
-                  ),
-                  const SizedBox(height: 32),
-                  Text(
-                    "Welcome back,",
-                    style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.8),
-                        fontSize: 16),
-                  ),
-                  const SizedBox(height: 4),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      "${_effectiveDisplayName()} 👋",
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 36,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -1,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    "Here’s what’s happening across your yards today.",
-                    style: TextStyle(color: Colors.white, fontSize: 14),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 32),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      _buildGlassChip(trendIcon, trendValue, trendLabel),
-                      _buildGlassChip(Icons.warning_amber_rounded,
-                          attentionValue, attentionLabel),
-                      _buildGlassChip(
-                          Icons.insights_rounded, factoryValue, factoryLabel),
-                    ],
-                  )
-                ],
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
   }
 
-  Widget _buildGlassChip(IconData icon, String value, String subtext) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: Colors.white, size: 18),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  value,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  subtext,
-                  style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.8), fontSize: 9),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          )
-        ],
-      ),
-    );
-  }
-
-  // --- 3. STAT CARDS ---
-  Widget _buildStatCards(bool isDesktop, bool isMobile) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double width = constraints.maxWidth;
-        final bool isWrap = width < 600; // Consistent mobile threshold
-
-        final today = DateTime.now();
-        final todayStart = DateTime(today.year, today.month, today.day);
-
-        final cards = [
-          StreamBuilder<List<ItemVariant>>(
-            stream: DataRepository.getSupabaseStockStream(),
-            builder: (context, snapshot) {
-              final total = (snapshot.data ?? [])
-                  .fold(0.0, (sum, item) => sum + item.netStockMt);
-              return _buildStatCard(
-                title: "Total Stock",
-                value: "${total.toStringAsFixed(1)} MT",
-                icon: Icons.inventory_2_rounded,
-                isPrimary: true,
-              );
-            },
-          ),
-          ValueListenableBuilder<List<StockTransaction>>(
-            valueListenable: DataRepository.allTransactionsNotifier,
-            builder: (context, txns, _) {
-              final todayCount =
-                  txns.where((t) => !t.dateTime.isBefore(todayStart)).length;
-              return _buildStatCard(
-                title: "Activity",
-                value: "$todayCount Txns",
-                icon: Icons.swap_horiz,
-              );
-            },
-          ),
-          ValueListenableBuilder<double>(
-            valueListenable: DataRepository.todayOutNotifier,
-            builder: (context, val, _) => _buildStatCard(
-              title: "Out Today",
-              value: "${val.toStringAsFixed(2)} MT",
-              icon: Icons.output_rounded,
-            ),
-          ),
-        ];
-
-        if (isWrap) {
-          return Column(
-            children: [
-              SizedBox(width: double.infinity, child: cards[0]),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(child: cards[1]),
-                  const SizedBox(width: 16),
-                  Expanded(child: cards[2]),
-                ],
-              ),
-            ],
-          );
-        } else {
-          return Row(
-            children: [
-              Expanded(child: cards[0]),
-              const SizedBox(width: 16),
-              Expanded(child: cards[1]),
-              const SizedBox(width: 16),
-              Expanded(child: cards[2]),
-            ],
-          );
-        }
-      },
-    );
-  }
-
-  Widget _buildStatCard({
-    required String title,
-    required String value,
-    String? trend,
-    required IconData icon,
-    bool isPrimary = false,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: isPrimary ? const Color(0xFFFF2B45) : Colors.white,
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color:
-                isPrimary ? const Color(0x408B0000) : const Color(0x0F8B0000),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          if (isPrimary)
-            const Positioned(
-              right: -30,
-              bottom: -30,
-              child: Icon(Icons.inventory_2_rounded,
-                  size: 80, color: Color(0x20FFFFFF)),
-            ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        color: isPrimary
-                            ? Colors.white.withValues(alpha: 0.9)
-                            : const Color(0xFF6B5E5E),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  if (trend != null && trend.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: isPrimary
-                            ? Colors.white.withValues(alpha: 0.2)
-                            : const Color(0xFFFFF3F3),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        trend,
-                        style: TextStyle(
-                          color: isPrimary
-                              ? Colors.white
-                              : const Color(0xFFFF2B45),
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    )
-                ],
-              ),
-              const SizedBox(height: 20),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        value,
-                        style: TextStyle(
-                          color: isPrimary
-                              ? Colors.white
-                              : const Color(0xFF1F1A1A),
-                          fontSize: 26,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -1,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: isPrimary
-                          ? Colors.white.withValues(alpha: 0.2)
-                          : const Color(0xFFFFF8F8),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      icon,
-                      color: isPrimary ? Colors.white : const Color(0xFFFF2B45),
-                      size: 20,
-                    ),
-                  )
-                ],
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // --- 4. STOCK DISTRIBUTION ---
-  Widget _buildStockDistribution(bool isMobile) {
-    return ListenableBuilder(
-      listenable: Listenable.merge([
-        DataRepository.yardStockNotifier,
-        DataRepository.factoryStockNotifier,
-        DataRepository.totalStockNotifier,
-        DataRepository.allTransactionsNotifier,
-        DataRepository.isSyncing,
-      ]),
-      builder: (context, _) {
-        final yardCurrent = DataRepository.yardStockNotifier.value;
-        final factoryCurrent = DataRepository.factoryStockNotifier.value;
-        final totalStock = DataRepository.totalStockNotifier.value;
-        final txns = DataRepository.allTransactionsNotifier.value;
-        final isDataSyncing = DataRepository.isSyncing.value;
-
-        // Helper to calculate weekly trend
-        String getTrend(double current, String targetLoc) {
-          final now = DateTime.now();
-          final sevenDaysAgo = now.subtract(const Duration(days: 7));
-          double net = 0;
-
-          for (final tx in txns) {
-            if (tx.isReversed) continue;
-            final loc = StockUtils.normalizeLocation(tx.location);
-            final toLoc = tx.toLocation != null
-                ? StockUtils.normalizeLocation(tx.toLocation!)
-                : null;
-
-            if (tx.dateTime.isAfter(sevenDaysAgo)) {
-              if (loc == targetLoc) {
-                if (['IN', 'RETURN', 'ADJUSTMENT', 'OPENING']
-                    .contains(tx.type)) {
-                  net += tx.qtyMT;
-                } else if (['OUT', 'RESERVE'].contains(tx.type)) {
-                  net -= tx.qtyMT;
-                } else if (tx.type == 'TRANSFER') {
-                  net -= tx.qtyMT;
-                }
-              }
-              if (toLoc == targetLoc && tx.type == 'TRANSFER') {
-                net += tx.qtyMT;
-              }
-            }
-          }
-          final prev = current - net;
-          if (prev <= 0 || (current == 0 && net == 0)) return "— this week";
-          final pct = ((current - prev) / prev) * 100;
-          return "${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(1)}% this week";
-        }
-
-        final yardTrend = getTrend(yardCurrent, 'YARD');
-        final factoryTrend = getTrend(factoryCurrent, 'FACTORY');
-
-        // One-time Log
-        if (!_hasLoggedDistributionMetrics &&
-            !isDataSyncing &&
-            (totalStock > 0 || txns.isNotEmpty)) {
-          _hasLoggedDistributionMetrics = true;
-          debugPrint("DEBUG: [Dashboard Distribution Share] "
-              "Yard: ${yardCurrent.toStringAsFixed(1)} MT (${totalStock > 0 ? ((yardCurrent / totalStock) * 100).toStringAsFixed(1) : 0}%), "
-              "Factory: ${factoryCurrent.toStringAsFixed(1)} MT (${totalStock > 0 ? ((factoryCurrent / totalStock) * 100).toStringAsFixed(1) : 0}%), "
-              "Total: ${totalStock.toStringAsFixed(1)} MT");
-        }
-
-        return Container(
-          padding: EdgeInsets.all(isMobile ? 20 : 24),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(32),
-            boxShadow: const [
-              BoxShadow(
-                  color: Color(0x0F8B0000),
-                  blurRadius: 20,
-                  offset: Offset(0, 10)),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text("Stock Distribution",
-                            style: TextStyle(
-                                color: Color(0xFF1F1A1A),
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold)),
-                        SizedBox(height: 4),
-                        Text("Yard vs. Factory",
-                            style: TextStyle(
-                                color: Color(0xFF6B5E5E), fontSize: 13)),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFF3F3),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: const Text("Today",
-                        style: TextStyle(
-                            color: Color(0xFFFF2B45),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 11)),
-                  )
-                ],
-              ),
-              const SizedBox(height: 24),
-              if (isMobile)
-                Column(
-                  children: [
-                    _buildDistPanel("Yard Stock", Icons.warehouse_rounded,
-                        yardTrend, yardCurrent, totalStock),
-                    const SizedBox(height: 16),
-                    _buildDistPanel("Factory Stock", Icons.factory_rounded,
-                        factoryTrend, factoryCurrent, totalStock),
-                  ],
-                )
-              else
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildDistPanel(
-                          "Yard Stock",
-                          Icons.warehouse_rounded,
-                          yardTrend,
-                          yardCurrent,
-                          totalStock),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _buildDistPanel(
-                          "Factory Stock",
-                          Icons.factory_rounded,
-                          factoryTrend,
-                          factoryCurrent,
-                          totalStock),
-                    ),
-                  ],
-                )
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildDistPanel(
-      String title, IconData icon, String trend, double current, double total) {
-    double pct = total > 0 ? (current / total) : 0.0;
-    double clampedPct = pct.clamp(0.0, 1.0);
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF8F8),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white, width: 2),
-      ),
+  Widget _buildEnterpriseFooter() {
+    return const Center(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: const Color(0xFFFF2B45), size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1F1A1A),
-                      fontSize: 15),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            trend,
-            style: const TextStyle(color: Color(0xFF6B5E5E), fontSize: 11),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Flexible(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                      total > 0 ? "${(pct * 100).toStringAsFixed(1)}%" : "—",
-                      style: const TextStyle(
-                          color: Color(0xFFFF2B45),
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerRight,
-                  child: Text("${current.toStringAsFixed(0)} MT",
-                      style: const TextStyle(
-                          color: Color(0xFF1F1A1A),
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold)),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: clampedPct,
-              backgroundColor: Colors.white,
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(Color(0xFFFF2B45)),
-              minHeight: 8,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            total > 0 ? "of total stock" : "no stock data",
-            style: const TextStyle(
-                color: Color(0xFF6B5E5E),
-                fontSize: 11,
-                fontWeight: FontWeight.w500),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // --- 7. QUICK ACTIONS GRID ---
-  Widget _buildQuickActionsGrid(bool isDesktop, bool isMobile) {
-    return Container(
-      padding: EdgeInsets.all(isMobile ? 24 : 32),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(32),
-        boxShadow: const [
-          BoxShadow(
-              color: Color(0x0F8B0000), blurRadius: 20, offset: Offset(0, 10)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("Quick Actions",
-              style: TextStyle(
-                  color: const Color(0xFF1F1A1A),
-                  fontSize: isMobile ? 20 : 24,
-                  fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          const Text("Tap to launch a workflow",
-              style: TextStyle(color: Color(0xFF6B5E5E), fontSize: 13)),
-          const SizedBox(height: 24),
-          ValueListenableBuilder<PermissionSnapshot>(
-              valueListenable: UserSessionNotifier.instance,
-              builder: (context, snap, _) {
-                final actions = [
-                  if (snap.canAccessStockInventory)
-                    _ActionTileData(
-                      label: "Inventory In & Out",
-                      icon: Icons.add_box_rounded,
-                      isPrimary: true,
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => ScreenGate(
-                                    canAccess: (s) => s.canAccessStockInventory,
-                                    screenName: "Inventory In & Out",
-                                    child: const MainInventoryShell(),
-                                  ))),
-                    ),
-                  if (snap.canAccessReports)
-                    _ActionTileData(
-                      label: "Reports",
-                      icon: Icons.insert_chart_outlined,
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => ScreenGate(
-                                    canAccess: (s) => s.canAccessReports,
-                                    screenName: "Reports",
-                                    child: const ProfessionalReportsScreen(),
-                                  ))),
-                    ),
-                  if (snap.canAccessCalculator)
-                    _ActionTileData(
-                      label: "Netrate Calc",
-                      icon: Icons.calculate_outlined,
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => ScreenGate(
-                                    canAccess: (s) => s.canAccessCalculator,
-                                    screenName: "Netrate Calc",
-                                    child: const CalculatorScreen(
-                                        isQuotationMode: false),
-                                  ))),
-                    ),
-                  if (snap.canAccessSaudaBooking)
-                    _ActionTileData(
-                      label: "Sauda Book",
-                      icon: Icons.menu_book_rounded,
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => ScreenGate(
-                                    canAccess: (s) => s.canAccessSaudaBooking,
-                                    screenName: "Sauda Book",
-                                    child: const SaudaBookingScreen(),
-                                  ))),
-                    ),
-                  if (snap.canAccessVendorPurchaseScreen)
-                    _ActionTileData(
-                      label: "Vendor Purchase",
-                      icon: Icons.local_shipping_outlined,
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => ScreenGate(
-                                    canAccess: (s) =>
-                                        s.canAccessVendorPurchaseScreen,
-                                    screenName: "Vendor Purchase",
-                                    child: const VendorPurchaseReportScreen(),
-                                  ))),
-                    ),
-                  if (snap.canAccessStockInventory)
-                    _ActionTileData(
-                      label: "Stock Sheet",
-                      icon: Icons.share_rounded,
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => ScreenGate(
-                                    canAccess: (s) => s.canAccessStockInventory,
-                                    screenName: "Stock Sheet",
-                                    child: const DealerStockShareScreen(),
-                                  ))),
-                    ),
-                  if (snap.canAccessSampleRate)
-                    _ActionTileData(
-                      label: "Sample Rate",
-                      icon: Icons.bolt_rounded,
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => ScreenGate(
-                                    canAccess: (s) => s.canAccessSampleRate,
-                                    screenName: "Sample Rate",
-                                    child: const SampleRateCalcScreen(),
-                                  ))),
-                    ),
-                  if (snap.canAccessQuotation)
-                    _ActionTileData(
-                      label: "Quotation",
-                      icon: Icons.description_rounded,
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => ScreenGate(
-                                    canAccess: (s) => s.canAccessQuotation,
-                                    screenName: "Quotation",
-                                    child: const CalculatorScreen(
-                                        isQuotationMode: true),
-                                  ))),
-                    ),
-                  if (snap.role == StockRole.ADMIN || snap.canAccessUsers)
-                    _ActionTileData(
-                      label: "Users",
-                      icon: Icons.people_rounded,
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => ScreenGate(
-                                    canAccess: (s) =>
-                                        s.role == StockRole.ADMIN ||
-                                        s.canAccessUsers,
-                                    screenName: "Users",
-                                    child: const ManageUsersScreen(),
-                                  ))),
-                    ),
-                  if (snap.role == StockRole.ADMIN)
-                    _ActionTileData(
-                      label: "Sales Document Center",
-                      icon: Icons.assignment_turned_in_outlined,
-                      accentColor:
-                          const Color(0xFF1A237E), // Deep Indigo / Navy
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => ScreenGate(
-                                  canAccess: (s) => s.role == StockRole.ADMIN,
-                                  screenName: "Sales Document Center",
-                                  child: const SalesDocumentCenterScreen(),
-                                )),
-                      ),
-                    ),
-                  if (snap.canAccessMasterSize)
-                    _ActionTileData(
-                      label: "Master Size",
-                      icon: Icons.rule_rounded,
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => ScreenGate(
-                                  canAccess: (s) => s.canAccessMasterSize,
-                                  screenName: "Master Size",
-                                  child: const MasterSizeManagementScreen(),
-                                )),
-                      ),
-                    ),
-                ];
-
-                if (kDebugMode) {
-                  debugPrint(
-                      "DEBUG: [Dashboard] Rebuilding desktop actions grid. Count: ${actions.length}");
-                }
-
-                return GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: isDesktop ? 4 : 2,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                    childAspectRatio: isDesktop ? 1.4 : (isMobile ? 1.05 : 1.2),
-                  ),
-                  itemCount: actions.length,
-                  itemBuilder: (context, i) {
-                    return _ActionTile(data: actions[i]);
-                  },
-                );
-              }),
-        ],
-      ),
-    );
-  }
-}
-
-class _ActionTileData {
-  final String label;
-  final IconData icon;
-  final bool isPrimary;
-  final Color? accentColor;
-  final VoidCallback onTap;
-
-  _ActionTileData({
-    required this.label,
-    required this.icon,
-    this.isPrimary = false,
-    this.accentColor,
-    required this.onTap,
-  });
-}
-
-class _ActionTile extends StatefulWidget {
-  final _ActionTileData data;
-  const _ActionTile({required this.data});
-
-  @override
-  _ActionTileState createState() => _ActionTileState();
-}
-
-class _ActionTileState extends State<_ActionTile> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool p = widget.data.isPrimary;
-    final Color? ac = widget.data.accentColor;
-    final bool useWhiteText = ac != null || p;
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.data.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          transform: _hover
-              ? Matrix4.translationValues(0.0, -4.0, 0.0)
-              : Matrix4.identity(),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color:
-                ac ?? (p ? const Color(0xFFFF2B45) : const Color(0xFFFFF8F8)),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-                color: useWhiteText ? Colors.transparent : Colors.white,
-                width: useWhiteText ? 0 : 2),
-            boxShadow: _hover
-                ? const [
-                    BoxShadow(
-                      color: Color(0x308B0000),
-                      blurRadius: 16,
-                      offset: Offset(0, 8),
-                    )
-                  ]
-                : const [],
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: useWhiteText
-                        ? Colors.white.withValues(alpha: 0.2)
-                        : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Icon(widget.data.icon,
-                        color: useWhiteText
-                            ? Colors.white
-                            : const Color(0xFFFF2B45)),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
+              Icon(Icons.shield_outlined, size: 14, color: Color(0xFF94A3B8)),
+              SizedBox(width: 6),
               Text(
-                widget.data.label,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+                'MSM ERP Command Center · Precision Inventory & Tonnage Operations',
                 style: TextStyle(
-                  color: useWhiteText ? Colors.white : const Color(0xFF1F1A1A),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
+                  color: Color(0xFF64748B),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.2,
                 ),
               ),
             ],
           ),
-        ),
+          SizedBox(height: 4),
+          Text(
+            'Real-Time Telemetry · Supabase Live Sync · Multi-Location Yard Matrix',
+            style: TextStyle(
+              color: Color(0xFF94A3B8),
+              fontSize: 10.5,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }

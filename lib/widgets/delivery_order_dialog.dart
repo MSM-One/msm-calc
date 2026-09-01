@@ -1,6 +1,4 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../constants/app_colors.dart';
 import '../models/delivery_order_model.dart';
@@ -116,14 +114,6 @@ class _DeliveryOrderPrintDialogState extends State<DeliveryOrderPrintDialog> {
     }
   }
 
-  void _handleCopyJson() {
-    final model = _buildCurrentModel();
-    const encoder = JsonEncoder.withIndent('  ');
-    final jsonStr = encoder.convert(model.toJson());
-    Clipboard.setData(ClipboardData(text: jsonStr));
-    MotionToast.show(context, "Standard JSON Data Model copied to clipboard!");
-  }
-
   @override
   Widget build(BuildContext context) {
     final model = widget.initialModel;
@@ -215,7 +205,7 @@ class _DeliveryOrderPrintDialogState extends State<DeliveryOrderPrintDialog> {
 
                     // Document Title Selector
                     DropdownButtonFormField<String>(
-                      value: _documentTitle,
+                      initialValue: _documentTitle,
                       decoration: InputDecoration(
                         labelText: "Document Title",
                         labelStyle: const TextStyle(color: textGrey, fontSize: 13),
@@ -342,60 +332,45 @@ class _DeliveryOrderPrintDialogState extends State<DeliveryOrderPrintDialog> {
             const Divider(height: 24),
 
             // Action Buttons
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              alignment: WrapAlignment.spaceBetween,
-              crossAxisAlignment: WrapCrossAlignment.center,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 OutlinedButton.icon(
-                  onPressed: _handleCopyJson,
-                  icon: const Icon(Icons.code_rounded, size: 18),
-                  label: const Text("Copy JSON"),
+                  onPressed: _isProcessing ? null : _handleShare,
+                  icon: const Icon(Icons.share_rounded, size: 18),
+                  label: const Text("Share PDF"),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: textDark,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   ),
                 ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _isProcessing ? null : _handleShare,
-                      icon: const Icon(Icons.share_rounded, size: 18),
-                      label: const Text("Share PDF"),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: textDark,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      ),
+                const SizedBox(width: 10),
+                ElevatedButton.icon(
+                  onPressed: _isProcessing ? null : _handlePrint,
+                  icon: _isProcessing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.print_rounded, size: 18),
+                  label: const Text(
+                    "Print",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: msmRed,
+                    foregroundColor: Colors.white,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    const SizedBox(width: 10),
-                    ElevatedButton.icon(
-                      onPressed: _isProcessing ? null : _handlePrint,
-                      icon: _isProcessing
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.print_rounded, size: 18),
-                      label: const Text(
-                        "Print A4 Order",
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: msmRed,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ],
             ),

@@ -94,8 +94,12 @@ class DeliveryOrderPrintService {
               ),
             ),
             pw.Text(
-              "Iron & Steel Merchants | Structural Steel Specialists",
-              style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+              "Structural Steel Specialists",
+              style: pw.TextStyle(
+                fontSize: 8.5,
+                color: PdfColors.grey700,
+                fontWeight: pw.FontWeight.normal,
+              ),
             ),
           ],
         ),
@@ -590,13 +594,6 @@ class DeliveryOrderPrintService {
             ),
           ],
         ),
-        pw.SizedBox(height: 2),
-        pw.Center(
-          child: pw.Text(
-            "*** This is a computer generated Delivery Order and subject to Jalna Jurisdiction ***",
-            style: const pw.TextStyle(fontSize: 6.5, color: PdfColors.grey700),
-          ),
-        ),
       ],
     );
   }
@@ -786,7 +783,7 @@ class DeliveryOrderPrintService {
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
       <div>
         <h2 style="color:#C61A22; margin:0; font-size:16px;">METAROLL STEEL MART</h2>
-        <small>Iron & Steel Merchants | Structural Steel Specialists</small>
+        <small>Structural Steel Specialists</small>
       </div>
     </div>
     <div class="do-title">${model.documentTitle.isNotEmpty ? model.documentTitle.toUpperCase() : "SAUDA BOOK / DELIVERY ORDER"}</div>

@@ -10,6 +10,7 @@ import '../widgets/m_loader.dart';
 import '../widgets/guarded_metric.dart';
 import 'inventory_dashboard_screen.dart';
 import 'inventory_history_screen.dart';
+import 'inventory_in_out_screen.dart';
 import '../utils/formatters.dart';
 import '../utils/steel_helper.dart';
 
@@ -68,14 +69,14 @@ class _MainInventoryShellState extends State<MainInventoryShell> {
           },
           {
             'index': 2,
-            'title': 'Transactions',
-            'icon': Icons.history_rounded,
+            'title': 'In & Out Console',
+            'icon': Icons.swap_vert_circle_rounded,
             'allowed': canHistory,
             'widget': ScreenGate(
               canAccess: (s) =>
                   AccessGuard.can(Permissions.screensTransactions),
-              screenName: 'Transaction History',
-              child: const TransactionHistoryScreen(),
+              screenName: 'Inventory In & Out',
+              child: const InventoryInOutScreen(),
             ),
           },
         ];

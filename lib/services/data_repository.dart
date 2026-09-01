@@ -823,7 +823,8 @@ class DataRepository {
             double.tryParse(row['net_stock_mt']?.toString() ?? '0') ??
             0.0;
 
-        if (netStock <= 0) continue;
+        // Allow raw negative deficit items for audit integrity
+        if (netStock == 0) continue;
 
         final itemName = resolveItemName(row);
         final sizeLabel = resolveSizeLabel(row);
