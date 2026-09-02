@@ -1,5 +1,5 @@
-import 'package:intl/intl.dart';
 import '../services/data_repository.dart';
+import '../utils/formatters.dart';
 
 String detectCategory(String itemName) {
   final trimmed = itemName.trim();
@@ -260,6 +260,10 @@ class StockTransaction {
 
   factory StockTransaction.fromJson(Map<String, dynamic> json) {
     DateTime parseDate(dynamic d, String txnId) {
+      if (d != null && d.toString().trim().isNotEmpty) {
+        return parseSupabaseDateTime(d);
+      }
+
       // 1. Fast path: txnId contains a Unix ms timestamp (app-generated entries)
       try {
         final firstPart = txnId.split('_')[0];
@@ -271,27 +275,6 @@ class StockTransaction {
         }
       } catch (_) {}
 
-      // 2. Field value parsing
-      if (d == null) return DateTime.now();
-      final s = d.toString().trim();
-      if (s.isEmpty) return DateTime.now();
-
-      // 2a. Explicit DD/MM/YYYY HH:mm:ss (Google Sheets format) — highest priority
-      try {
-        return DateFormat('dd/MM/yyyy HH:mm:ss').parseStrict(s);
-      } catch (_) {}
-
-      // 2b. DD/MM/YYYY without time component
-      try {
-        return DateFormat('dd/MM/yyyy').parseStrict(s.split(' ')[0]);
-      } catch (_) {}
-
-      // 2c. ISO 8601 fallback (app-synced entries stored as ISO)
-      // Do NOT call .toLocal() — it shifts late-night UTC dates forward by +5:30
-      final iso = DateTime.tryParse(s);
-      if (iso != null) return iso;
-
-      // 2d. Last resort: return now so row isn't silently discarded
       return DateTime.now();
     }
 
@@ -299,10 +282,11 @@ class StockTransaction {
     final itemName = (json['itemName'] ??
                 json['Item Name'] ??
                 json['ITEM NAME'] ??
-                json['Item'])
+                json['Item'] ??
+                json['item_name'])
             ?.toString() ??
         "Unknown";
-    final size = (json['size'] ?? json['Size'] ?? json['Spec'] ?? json['SIZE'])
+    final size = (json['size'] ?? json['Size'] ?? json['Spec'] ?? json['SIZE'] ?? json['size_label'])
             ?.toString() ??
         "Standard";
     final qty = (json['qtyMT'] ??
@@ -311,9 +295,12 @@ class StockTransaction {
             json['qty'] ??
             json['Qty'] ??
             json['QTY'] ??
+            json['qty_mt'] ??
             0.0)
         .toString();
     final dateStr = (json['dateTime'] ??
+                json['date_time'] ??
+                json['created_at'] ??
                 json['date'] ??
                 json['Date'] ??
                 json['Timestamp'] ??
@@ -322,9 +309,11 @@ class StockTransaction {
         "";
 
     final id = (json['txnId'] ??
+                json['txn_id'] ??
                 json['TXN ID'] ??
                 json['TXNID'] ??
                 json['ID'] ??
+                json['id'] ??
                 json['Transaction ID'])
             ?.toString() ??
         "MANUAL_${itemName}_${size}_${qty}_${dateStr.replaceAll(RegExp(r'[^0-9]'), '')}";
@@ -333,22 +322,26 @@ class StockTransaction {
       txnId: id,
       dateTime: parseDate(
           json['dateTime'] ??
+              json['date_time'] ??
+              json['created_at'] ??
               json['date'] ??
               json['Date'] ??
               json['Timestamp'] ??
               json['DateTime'],
           id),
       itemName: (json['itemName'] ??
+                  json['item_name'] ??
                   json['Item Name'] ??
                   json['ITEM NAME'] ??
                   json['Item'])
               ?.toString() ??
           "Unknown",
-      size: (json['size'] ?? json['Size'] ?? json['Spec'] ?? json['SIZE'])
+      size: (json['size'] ?? json['size_label'] ?? json['Size'] ?? json['Spec'] ?? json['SIZE'])
               ?.toString() ??
           "Standard",
-      type: (json['type'] ?? json['Type'] ?? json['TYPE'])?.toString() ?? "IN",
+      type: (json['type'] ?? json['txn_type'] ?? json['Type'] ?? json['TYPE'])?.toString() ?? "IN",
       qtyMT: _safeDouble(json['qtyMT'] ??
+          json['qty_mt'] ??
           json['Qty (MT)'] ??
           json['QTY (MT)'] ??
           json['qty'] ??

@@ -957,10 +957,26 @@ class DataRepository {
     String locationFilter = 'ALL',
   }) async {
     try {
+      final startOfLocalDayUtc = DateTime(
+        startDate.year,
+        startDate.month,
+        startDate.day,
+      ).toUtc().toIso8601String();
+
+      final endOfLocalDayUtc = DateTime(
+        endDate.year,
+        endDate.month,
+        endDate.day,
+        23,
+        59,
+        59,
+        999,
+      ).toUtc().toIso8601String();
+
       final response = await SupabaseService.client
           .rpc('get_stock_movement_report', params: {
-        'start_date': startDate.toUtc().toIso8601String(),
-        'end_date': endDate.toUtc().toIso8601String(),
+        'start_date': startOfLocalDayUtc,
+        'end_date': endOfLocalDayUtc,
         'loc_filter': locationFilter,
       });
       return List<Map<String, dynamic>>.from(response as List);

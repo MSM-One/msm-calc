@@ -136,131 +136,118 @@ class _SplashScreenState extends State<SplashScreen> {
     );
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFFEF1C24), // Vibrant Metaroll Red (Left)
-              Color(0xFFB80910), // Deep Dark Red Accent (Right)
-            ],
-          ),
-        ),
-        child: SafeArea(
-        child: Stack(
-          children: [
-            // ── Main Centered Content ──
-            Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // White Circular Logo Badge
-                  Container(
-                    width: 140,
-                    height: 140,
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.18),
-                          blurRadius: 24,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: Image.asset(
-                      'assets/dashboard_logo.png',
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, __, ___) => const Icon(
-                        Icons.precision_manufacturing_rounded,
-                        size: 60,
-                        color: Color(0xFFE11D48),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 36),
-
-                  // Main Title
-                  const Text(
-                    'MSM CALC',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  // Subtitle
-                  const Text(
-                    'MSM ONE PORTAL',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: 2.0,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // ── Bottom Progress Bar & Authorized Footer ──
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 40,
-              child: Column(
-                children: [
-                  // Thin Linear Progress Indicator
-                  SizedBox(
-                    width: 200,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(2),
-                      child: const LinearProgressIndicator(
-                        minHeight: 3,
-                        backgroundColor: Colors.white24,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // Authorized Personnel Lock Footer
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.lock_outline,
-                        color: Colors.amber,
-                        size: 14,
-                      ),
-                      SizedBox(width: 6),
-                      Text(
-                        'AUTHORIZED PERSONNEL ONLY',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 1.5,
-                        ),
+      backgroundColor: const Color(0xFFD32F2F),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // ── Centered Brand Hero Component ──
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 1. Circular Logo Card
+                Container(
+                  width: 140,
+                  height: 140,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black12,
+                        blurRadius: 16,
+                        offset: Offset(0, 8),
                       ),
                     ],
                   ),
-                ],
+                  padding: const EdgeInsets.all(24),
+                  child: Image.asset(
+                    'assets/dashboard_logo.png',
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Icon(
+                      Icons.precision_manufacturing_rounded,
+                      size: 60,
+                      color: Color(0xFFD32F2F),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 28),
+
+                // 2. Primary Title
+                const Text(
+                  'MSM CALC',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 2.0,
+                  ),
+                ),
+                const SizedBox(height: 6),
+
+                // 3. Subtitle
+                Text(
+                  'MSM ONE PORTAL',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.75),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 2.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Bottom Progress Bar & Security Footer ──
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 40),
+              child: SafeArea(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 200,
+                      height: 3,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          backgroundColor: Colors.white.withValues(alpha: 0.2),
+                          valueColor:
+                              const AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.lock_outline,
+                          size: 14,
+                          color: Colors.amberAccent,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'AUTHORIZED PERSONNEL ONLY',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.85),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
-    ),
     );
   }
 }

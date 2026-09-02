@@ -1,7 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -19,20 +18,6 @@ class DeliveryOrderPrintService {
   static final PdfColor _headerBg = PdfColor.fromHex('#F0F0F0');
   static final PdfColor _brandRed = PdfColor.fromHex('#C61A22');
 
-  static Future<pw.ImageProvider?> _loadBrandLogo() async {
-    try {
-      final data = await rootBundle.load('assets/sTEEL MART .jpg');
-      return pw.MemoryImage(data.buffer.asUint8List());
-    } catch (e) {
-      try {
-        final data2 = await rootBundle.load('assets/dashboard_logo.jpg');
-        return pw.MemoryImage(data2.buffer.asUint8List());
-      } catch (_) {
-        return null;
-      }
-    }
-  }
-
   /// Builds a high-precision, automated A4 Delivery Order PDF matching the technical specification.
   static Future<Uint8List> generatePdf(DeliveryOrderDataModel model) async {
     final doc = pw.Document(
@@ -41,8 +26,6 @@ class DeliveryOrderPrintService {
         bold: pw.Font.helveticaBold(),
       ),
     );
-
-    final brandLogo = await _loadBrandLogo();
 
     doc.addPage(
       pw.MultiPage(
@@ -55,8 +38,6 @@ class DeliveryOrderPrintService {
         margin: const pw.EdgeInsets.all(14),
         build: (context) {
           return [
-            _buildCompanyHeader(brandLogo),
-            pw.SizedBox(height: 4),
             _buildTitleBanner(model),
             pw.SizedBox(height: 4),
             _buildHeaderGrid(model),
@@ -74,42 +55,6 @@ class DeliveryOrderPrintService {
     );
 
     return doc.save();
-  }
-
-  /// Header with Company Logo / Branding
-  static pw.Widget _buildCompanyHeader(pw.ImageProvider? brandLogo) {
-    return pw.Row(
-      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-      crossAxisAlignment: pw.CrossAxisAlignment.center,
-      children: [
-        pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Text(
-              "METAROLL STEEL MART",
-              style: pw.TextStyle(
-                fontSize: 14,
-                fontWeight: pw.FontWeight.bold,
-                color: _brandRed,
-              ),
-            ),
-            pw.Text(
-              "Structural Steel Specialists",
-              style: pw.TextStyle(
-                fontSize: 8.5,
-                color: PdfColors.grey700,
-                fontWeight: pw.FontWeight.normal,
-              ),
-            ),
-          ],
-        ),
-        if (brandLogo != null)
-          pw.Container(
-            height: 32,
-            child: pw.Image(brandLogo, fit: pw.BoxFit.contain),
-          ),
-      ],
-    );
   }
 
   /// Document Title Banner
@@ -560,12 +505,11 @@ class DeliveryOrderPrintService {
                         style: pw.TextStyle(
                             fontSize: 8, fontWeight: pw.FontWeight.bold),
                       ),
-                      pw.Text(
-                        model.signedBy.isNotEmpty
-                            ? model.signedBy
-                            : "Authorized Signatory",
-                        style: const pw.TextStyle(fontSize: 8),
-                      ),
+                      if (model.signedBy.isNotEmpty)
+                        pw.Text(
+                          model.signedBy,
+                          style: const pw.TextStyle(fontSize: 8),
+                        ),
                     ],
                   ),
                 ),
@@ -581,12 +525,11 @@ class DeliveryOrderPrintService {
                         style: pw.TextStyle(
                             fontSize: 8, fontWeight: pw.FontWeight.bold),
                       ),
-                      pw.Text(
-                        model.approvedBy.isNotEmpty
-                            ? model.approvedBy
-                            : "For METAROLL STEEL MART",
-                        style: const pw.TextStyle(fontSize: 8),
-                      ),
+                      if (model.approvedBy.isNotEmpty)
+                        pw.Text(
+                          model.approvedBy,
+                          style: const pw.TextStyle(fontSize: 8),
+                        ),
                     ],
                   ),
                 ),
@@ -780,12 +723,6 @@ class DeliveryOrderPrintService {
 </head>
 <body>
   <div id="printTableLayout" class="print-only do-page">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-      <div>
-        <h2 style="color:#C61A22; margin:0; font-size:16px;">METAROLL STEEL MART</h2>
-        <small>Structural Steel Specialists</small>
-      </div>
-    </div>
     <div class="do-title">${model.documentTitle.isNotEmpty ? model.documentTitle.toUpperCase() : "SAUDA BOOK / DELIVERY ORDER"}</div>
     
     <table class="header-table">
@@ -858,12 +795,12 @@ class DeliveryOrderPrintService {
     <table class="footer-table" style="margin-top:4px;">
       <tr>
         <td style="width:50%;">
-          <strong>Order Signed</strong><br><br>
-          ${model.signedBy.isNotEmpty ? model.signedBy : "Authorized Signatory"}
+          <strong>Order Signed</strong>
+          ${model.signedBy.isNotEmpty ? "<br><br>${model.signedBy}" : ""}
         </td>
         <td style="width:50%;">
-          <strong>Approved By</strong><br><br>
-          ${model.approvedBy.isNotEmpty ? model.approvedBy : "For METAROLL STEEL MART"}
+          <strong>Approved By</strong>
+          ${model.approvedBy.isNotEmpty ? "<br><br>${model.approvedBy}" : ""}
         </td>
       </tr>
     </table>

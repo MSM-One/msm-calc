@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -29,7 +28,6 @@ import '../widgets/dashboard/executive_telemetry_header.dart';
 import '../widgets/dashboard/compact_kpi_ribbon.dart';
 import '../widgets/dashboard/unified_stock_distribution_card.dart';
 import '../widgets/dashboard/enterprise_quick_actions_grid.dart';
-import 'reports/reports_dashboard_screen.dart';
 import '../services/auth_service.dart';
 import '../services/app_update_service.dart';
 
@@ -434,20 +432,36 @@ class _DashboardScreenState extends State<DashboardScreen>
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: EdgeInsets.fromLTRB(
                       20, 20, 20, isDesktop ? 24 : 32),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildExecutiveTelemetryHeader(),
-                      const SizedBox(height: 16),
-                      _buildKpiRibbon(),
-                      const SizedBox(height: 16),
-                      _buildStockDistributionCard(),
-                      const SizedBox(height: 16),
-                      const EnterpriseQuickActionsGrid(),
-                      const SizedBox(height: 24),
-                      _buildEnterpriseFooter(),
-                      const SizedBox(height: 12),
-                    ],
+                  child: ListenableBuilder(
+                    listenable: Listenable.merge([
+                      DataRepository.currentUserNotifier,
+                      UserSessionNotifier.instance,
+                    ]),
+                    builder: (context, _) {
+                      final currentUser =
+                          DataRepository.currentUserNotifier.value;
+                      final bool isAdmin = (currentUser != null &&
+                              currentUser.isAdmin) ||
+                          UserSession.currentRole == StockRole.ADMIN ||
+                          UserSessionNotifier.instance.value.role ==
+                              StockRole.ADMIN;
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildExecutiveTelemetryHeader(),
+                          const SizedBox(height: 16),
+                          if (isAdmin) ...[
+                            _buildKpiRibbon(),
+                            const SizedBox(height: 16),
+                            _buildStockDistributionCard(),
+                            const SizedBox(height: 16),
+                          ],
+                          const EnterpriseQuickActionsGrid(),
+                          const SizedBox(height: 32),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ),
@@ -998,40 +1012,6 @@ class _DashboardScreenState extends State<DashboardScreen>
           },
         );
       },
-    );
-  }
-
-  Widget _buildEnterpriseFooter() {
-    return const Center(
-      child: Column(
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.shield_outlined, size: 14, color: Color(0xFF94A3B8)),
-              SizedBox(width: 6),
-              Text(
-                'MSM ERP Command Center · Precision Inventory & Tonnage Operations',
-                style: TextStyle(
-                  color: Color(0xFF64748B),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.2,
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: 4),
-          Text(
-            'Real-Time Telemetry · Supabase Live Sync · Multi-Location Yard Matrix',
-            style: TextStyle(
-              color: Color(0xFF94A3B8),
-              fontSize: 10.5,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

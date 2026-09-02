@@ -14,7 +14,6 @@ import '../services/access_guard.dart';
 import '../widgets/responsive_size_picker.dart';
 import '../widgets/motion_toast.dart';
 import '../models/delivery_order_model.dart';
-import '../services/delivery_order_print_service.dart';
 import '../widgets/delivery_order_dialog.dart';
 import '../services/data_repository.dart';
 
@@ -125,7 +124,9 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
     for (int i = 0; i < items.length; i++) {
       var item = items[i];
       if (item.itemType == null ||
-          (item.getTotalQty() == 0 && !item.manualMode)) continue;
+          (item.getTotalQty() == 0 && !item.manualMode)) {
+        continue;
+      }
       String unit = item.isPiecesItem() ? "Pcs" : "MT";
       String totalQtyStr =
           item.getTotalQty().toStringAsFixed(item.isPiecesItem() ? 0 : 3);
@@ -296,7 +297,7 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
       lorryNo: vehicleCtrl.text.trim().toUpperCase(),
       note: remarksCtrl.text.trim(),
       signedBy: "",
-      approvedBy: "For METAROLL STEEL MART",
+      approvedBy: "",
       items: deliveryItems,
     );
   }
@@ -587,27 +588,20 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
 
                               // Other Details / Remarks Section
                               _buildSectionCard(
-                                title: "Other Details & Print Settings",
-                                icon: Icons.tune_rounded,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _buildDocumentTitleSelector(),
-                                    const SizedBox(height: 12),
-                                    TextField(
-                                      controller: remarksCtrl,
-                                      maxLines: 3,
-                                      style: const TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
-                                          color: Color(0xFF0F172A)),
-                                      decoration: msmInputDeco(
-                                          "Remarks / Instructions",
-                                          hint:
-                                              "Optional delivery, terms, or transport notes"),
-                                      onChanged: (_) => _saveData(),
-                                    ),
-                                  ],
+                                title: "Other Details",
+                                icon: Icons.notes_rounded,
+                                child: TextField(
+                                  controller: remarksCtrl,
+                                  maxLines: 3,
+                                  style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                      color: Color(0xFF0F172A)),
+                                  decoration: msmInputDeco(
+                                      "Remarks / Instructions",
+                                      hint:
+                                          "Optional delivery, terms, or transport notes"),
+                                  onChanged: (_) => _saveData(),
                                 ),
                               ),
                               const SizedBox(height: 24),
@@ -735,7 +729,10 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
 
   Widget _buildBasicDetailsFields(bool isMobile) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _buildDocumentTitleSelector(),
+        const SizedBox(height: 12),
         if (isMobile) ...[
           InkWell(
             onTap: () => _pickDate(),
@@ -1252,7 +1249,10 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
         DropdownButtonFormField<String>(
           isExpanded: true,
           initialValue: _documentTitle,
-          decoration: msmInputDeco("Print Title"),
+          decoration: msmInputDeco(
+            "Print Title",
+            prefix: const Icon(Icons.print_outlined, size: 16, color: msmRed),
+          ),
           dropdownColor: Colors.white,
           items: const [
             DropdownMenuItem(

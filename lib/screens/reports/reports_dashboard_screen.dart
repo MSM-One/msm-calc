@@ -7,7 +7,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../constants/app_colors.dart';
 import '../../core/app_permissions.dart';
 import '../../models/report_models.dart';
 import '../../models/stock_models.dart';
@@ -22,7 +21,6 @@ import '../../services/report_calculators.dart';
 import '../../utils/file_download_helper.dart' as download_helper;
 import '../../utils/item_order_util.dart';
 import '../../utils/sorting_utils.dart';
-import '../../widgets/m_loader.dart';
 import '../../widgets/motion_toast.dart';
 import '../../widgets/reports/enterprise_stock_movement_table.dart';
 import '../../widgets/reports/reports_export_toolbar.dart';
@@ -70,8 +68,6 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
 
   // Expansion Sets
   final Set<String> _expandedMovementCategories = {};
-  String? _expandedLowStockCategory;
-  String? _expandedNonMovingCategory;
 
   // Data Loading & Reports
   bool _isLoading = false;
@@ -741,43 +737,42 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Top Section (Sticky KPI & Control Bar)
+            // 1. Sticky Compact Horizontal Metric Ribbon (48px)
+            StockReportsKpiBanner(
+              totalStockMT: _kpiTotalStockMT,
+              inwardMT: _kpiInwardMT,
+              outwardMT: _kpiOutwardMT,
+              criticalAlertsCount: _kpiCriticalAlertsCount,
+              locationLabel: _locationFilter == 'ALL'
+                  ? 'All Locations'
+                  : (_locationFilter == 'YARD'
+                      ? 'Yard Stock'
+                      : 'Factory Stock'),
+              dateRangeLabel: _selectedDatePreset == 'Custom'
+                  ? '${DateFormat('dd MMM').format(_startDate)} - ${DateFormat('dd MMM').format(_endDate)}'
+                  : _selectedDatePreset,
+              onTotalStockTap: () => _onTabSelected('movement'),
+              onInwardTap: () {
+                setState(() {
+                  _todaySummaryFlowMode = 'Inward';
+                  _onTabSelected('today');
+                });
+              },
+              onOutwardTap: () {
+                setState(() {
+                  _todaySummaryFlowMode = 'Outward';
+                  _onTabSelected('today');
+                });
+              },
+              onAlertsTap: () => _onTabSelected('low'),
+            ),
+
+            // Top Control Bar (Sub-tabs & Export toolbar)
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // 1. KPI Metric Strip
-                  StockReportsKpiBanner(
-                    totalStockMT: _kpiTotalStockMT,
-                    inwardMT: _kpiInwardMT,
-                    outwardMT: _kpiOutwardMT,
-                    criticalAlertsCount: _kpiCriticalAlertsCount,
-                    locationLabel: _locationFilter == 'ALL'
-                        ? 'All Locations'
-                        : (_locationFilter == 'YARD'
-                            ? 'Yard Stock'
-                            : 'Factory Stock'),
-                    dateRangeLabel: _selectedDatePreset == 'Custom'
-                        ? '${DateFormat('dd MMM').format(_startDate)} - ${DateFormat('dd MMM').format(_endDate)}'
-                        : _selectedDatePreset,
-                    onTotalStockTap: () => _onTabSelected('movement'),
-                    onInwardTap: () {
-                      setState(() {
-                        _todaySummaryFlowMode = 'Inward';
-                        _onTabSelected('today');
-                      });
-                    },
-                    onOutwardTap: () {
-                      setState(() {
-                        _todaySummaryFlowMode = 'Outward';
-                        _onTabSelected('today');
-                      });
-                    },
-                    onAlertsTap: () => _onTabSelected('low'),
-                  ),
-                  const SizedBox(height: 14),
-
                   // 2. Sub-Report Tab Switcher Bar
                   Row(
                     children: [
@@ -790,7 +785,7 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
 
                   // 3. Compact Export Toolbar
                   ReportsExportToolbar(
@@ -833,17 +828,20 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
 
             // Main Sub-Report Body
             Expanded(
-              child: _isLoading
-                  ? const Center(
-                      child: CircularProgressIndicator(
-                        color: Color(0xFFD32F2F),
-                      ),
-                    )
-                  : _buildActiveTabContent(),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: _isLoading
+                    ? const Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFFD32F2F),
+                        ),
+                      )
+                    : _buildActiveTabContent(),
+              ),
             ),
           ],
         ),
@@ -1066,8 +1064,8 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
           children: [
             Container(
               padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
+              decoration: const BoxDecoration(
+                color: Color(0xFFF1F5F9),
                 shape: BoxShape.circle,
               ),
               child: const Icon(

@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -11,8 +10,6 @@ import '../utils/formatters.dart';
 /// Generates thermal / A5 / A4 printable slips for Inward, Outward, and Yard Transfers.
 class TransactionSlipService {
   TransactionSlipService._();
-
-  static final DateFormat _dateFormat = DateFormat('dd/MM/yyyy hh:mm a');
 
   /// Prints or previews a professional transaction gate pass / weighment slip
   static Future<void> printSlip(BuildContext context, StockTransaction tx) async {
@@ -132,7 +129,7 @@ class TransactionSlipService {
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     _buildMetaBlock('TRANSACTION ID', tx.txnId),
-                    _buildMetaBlock('DATE & TIME', _dateFormat.format(tx.dateTime)),
+                    _buildMetaBlock('DATE & TIME', formatTransactionDateTime(tx.dateTime)),
                     _buildMetaBlock('LOCATION', tx.location.toUpperCase()),
                     if (tx.toLocation != null)
                       _buildMetaBlock('DESTINATION', tx.toLocation!.toUpperCase()),

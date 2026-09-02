@@ -1643,9 +1643,8 @@ class _VendorPurchaseReportScreenState
                                   String dateDisplay = dateRaw;
                                   try {
                                     if (dateRaw.isNotEmpty) {
-                                      final dt = DateTime.parse(dateRaw);
-                                      dateDisplay =
-                                          DateFormat('dd/MM/yyyy').format(dt);
+                                      final dt = parseSupabaseDateTime(dateRaw);
+                                      dateDisplay = formatTransactionDate(dt);
                                     }
                                   } catch (_) {}
 

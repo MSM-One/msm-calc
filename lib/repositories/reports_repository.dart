@@ -1,140 +1,168 @@
 import 'package:flutter/foundation.dart';
-import 'package:intl/intl.dart';
 import '../services/supabase_service.dart';
 import '../models/stock_models.dart';
 import '../services/data_repository.dart';
+import '../utils/formatters.dart';
 
 class ReportsRepository {
   static final ReportsRepository instance = ReportsRepository._internal();
   factory ReportsRepository() => instance;
   ReportsRepository._internal();
 
-  /// Query master view 'vw_daily_transactions' matching 'transaction_date' ('yyyy-MM-dd')
+  /// Query master view 'vw_daily_transactions' or 'transactions' matching local date range.
+  /// Converts start and end of local day to UTC ISO-8601 strings for Supabase querying,
+  /// and validates exact local calendar date matching on result rows.
   Future<List<Map<String, dynamic>>> fetchDailyTransactions({
     required DateTime startDate,
     required DateTime endDate,
     String? normalizedType, // 'INWARD', 'OUTWARD', or null for ALL
     String locationFilter = 'ALL',
   }) async {
-    try {
-      final DateFormat formatter = DateFormat('yyyy-MM-dd');
-      final String startStr = formatter.format(startDate);
-      final String endStr = formatter.format(endDate);
+    final startOfLocalDayUtc = DateTime(
+      startDate.year,
+      startDate.month,
+      startDate.day,
+    ).toUtc().toIso8601String();
 
+    final endOfLocalDayUtc = DateTime(
+      endDate.year,
+      endDate.month,
+      endDate.day,
+      23,
+      59,
+      59,
+      999,
+    ).toUtc().toIso8601String();
+
+    final startLocal =
+        DateTime(startDate.year, startDate.month, startDate.day);
+    final endLocal =
+        DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59, 999);
+
+    try {
       var query =
           SupabaseService.client.from('vw_daily_transactions').select('*');
 
-      if (startStr == endStr) {
-        query = query.eq('transaction_date', startStr);
-      } else {
-        query = query
-            .gte('transaction_date', startStr)
-            .lte('transaction_date', endStr);
-      }
+      query = query
+          .gte('created_at', startOfLocalDayUtc)
+          .lte('created_at', endOfLocalDayUtc);
 
-      if (normalizedType != null && normalizedType != 'ALL') {
+      if (normalizedType != null &&
+          normalizedType.isNotEmpty &&
+          normalizedType != 'ALL') {
         query = query.eq('normalized_type', normalizedType.toUpperCase());
       }
 
-      if (locationFilter != 'ALL') {
-        query = query.eq('location', locationFilter.toUpperCase());
-      }
-
       final response =
-          await query.order('transaction_date', ascending: false).limit(10000);
-      return List<Map<String, dynamic>>.from(response as List);
+          await query.order('created_at', ascending: true).limit(10000);
+      final list = List<Map<String, dynamic>>.from(response as List);
+
+      final filtered = list.where((row) {
+        final txDate = parseRowDateTime(row);
+        final inRange =
+            !txDate.isBefore(startLocal) && !txDate.isAfter(endLocal);
+        if (!inRange) return false;
+
+        if (locationFilter != 'ALL') {
+          final loc = (row['location'] ?? '').toString().toUpperCase();
+          final toLoc = (row['to_location'] ?? '').toString().toUpperCase();
+          final filterLoc = locationFilter.toUpperCase();
+          return loc == filterLoc || toLoc == filterLoc;
+        }
+        return true;
+      }).toList();
+
+      return filtered;
     } catch (e) {
       debugPrint(
-          '[ReportsRepository] Error querying vw_daily_transactions: $e');
-      return [];
+          '[ReportsRepository] Error fetching daily transactions from view: $e');
+      // Fallback directly to 'transactions' table with UTC range
+      try {
+        var fallbackQuery =
+            SupabaseService.client.from('transactions').select('*');
+
+        fallbackQuery = fallbackQuery
+            .gte('created_at', startOfLocalDayUtc)
+            .lte('created_at', endOfLocalDayUtc);
+
+        if (normalizedType != null &&
+            normalizedType.isNotEmpty &&
+            normalizedType != 'ALL') {
+          fallbackQuery =
+              fallbackQuery.eq('txn_type', normalizedType.toUpperCase());
+        }
+
+        final res = await fallbackQuery
+            .order('created_at', ascending: true)
+            .limit(10000);
+        final list = List<Map<String, dynamic>>.from(res as List);
+
+        return list.where((row) {
+          final txDate = parseRowDateTime(row);
+          final inRange =
+              !txDate.isBefore(startLocal) && !txDate.isAfter(endLocal);
+          if (!inRange) return false;
+
+          if (locationFilter != 'ALL') {
+            final loc = (row['location'] ?? '').toString().toUpperCase();
+            final toLoc = (row['to_location'] ?? '').toString().toUpperCase();
+            final filterLoc = locationFilter.toUpperCase();
+            return loc == filterLoc || toLoc == filterLoc;
+          }
+          return true;
+        }).toList();
+      } catch (fallbackErr) {
+        debugPrint(
+            '[ReportsRepository] Fallback query error: $fallbackErr');
+        return [];
+      }
     }
   }
 
-  /// Today's Summary helper method — queries view v_todays_summary
+  /// Convenience helper to fetch single day transactions with defaults
+  Future<List<Map<String, dynamic>>> fetchSingleDayTransactions({
+    DateTime? targetDate,
+    String? normalizedType,
+    String locationFilter = 'ALL',
+  }) {
+    final target = targetDate ?? DateTime.now();
+    return fetchDailyTransactions(
+      startDate: DateTime(target.year, target.month, target.day),
+      endDate: DateTime(target.year, target.month, target.day),
+      normalizedType: normalizedType,
+      locationFilter: locationFilter,
+    );
+  }
+
+  /// Today's Summary helper method — aggregates inward & outward transactions for the selected local date
   Future<List<Map<String, dynamic>>> fetchTodaysSummary({
+    DateTime? selectedDate,
     String? normalizedType,
     String locationFilter = 'ALL',
   }) async {
-    try {
-      var query = SupabaseService.client.from('v_todays_summary').select('*');
-      if (locationFilter != 'ALL') {
-        query = query.eq('location', locationFilter.toUpperCase());
-      }
-      if (normalizedType != null && normalizedType != 'ALL') {
-        query = query.eq('txn_type', normalizedType.toUpperCase());
-      }
-      final response = await query.limit(10000);
-      return List<Map<String, dynamic>>.from(response as List);
-    } catch (e) {
-      debugPrint('[ReportsRepository] Error querying v_todays_summary: $e');
-      final now = DateTime.now();
-      return fetchDailyTransactions(
-        startDate: DateTime(now.year, now.month, now.day),
-        endDate: DateTime(now.year, now.month, now.day),
-        normalizedType: normalizedType,
-        locationFilter: locationFilter,
-      );
-    }
+    final target = selectedDate ?? DateTime.now();
+    return fetchDailyTransactions(
+      startDate: DateTime(target.year, target.month, target.day),
+      endDate: DateTime(target.year, target.month, target.day),
+      normalizedType: normalizedType,
+      locationFilter: locationFilter,
+    );
   }
 
-  /// Robustly parses row DateTime using raw transaction_date (yyyy-MM-dd) to prevent +5:30 timezone date spill.
-  ///
+  /// Robustly parses row DateTime converting Supabase UTC timestamps into local IST DateTime.
   /// Works with both:
-  ///  - `vw_daily_transactions` rows (have `transaction_date` column — uses it directly)
-  ///  - Raw `transactions` table rows (no `transaction_date` — extracts date from the raw timestamp string)
-  ///
-  /// NEVER calls `.toLocal()` on the date portion. IST time is computed manually (+5:30).
+  ///  - `vw_daily_transactions` rows (have `created_at`, `transaction_date` column)
+  ///  - Raw `transactions` table rows (have `created_at`, `date_time`, etc.)
   static DateTime parseRowDateTime(dynamic row) {
     if (row == null) return DateTime.now();
 
-    final txDateStr = row['transaction_date']?.toString();
-    final rawTs = row['effective_timestamp']?.toString() ??
-        row['date_time']?.toString() ??
-        row['created_at']?.toString();
+    final rawTs = row['created_at'] ??
+        row['date_time'] ??
+        row['effective_timestamp'] ??
+        row['transaction_date'] ??
+        row['date'];
 
-    int year = DateTime.now().year;
-    int month = DateTime.now().month;
-    int day = DateTime.now().day;
-    int hour = 0;
-    int minute = 0;
-    int second = 0;
-
-    // --- Extract DATE ---
-    if (txDateStr != null && txDateStr.length >= 10) {
-      // View row: use the pre-computed transaction_date directly
-      final parts = txDateStr.substring(0, 10).split('-');
-      if (parts.length == 3) {
-        year = int.tryParse(parts[0]) ?? year;
-        month = int.tryParse(parts[1]) ?? month;
-        day = int.tryParse(parts[2]) ?? day;
-      }
-    } else if (rawTs != null && rawTs.length >= 10) {
-      // Raw table row: extract yyyy-MM-dd from the ISO string directly.
-      // DO NOT call .toLocal() — that would shift late-night UTC dates forward by +5:30.
-      final datePart = rawTs.substring(0, 10);
-      final parts = datePart.split('-');
-      if (parts.length == 3) {
-        year = int.tryParse(parts[0]) ?? year;
-        month = int.tryParse(parts[1]) ?? month;
-        day = int.tryParse(parts[2]) ?? day;
-      }
-    }
-
-    // --- Extract TIME (IST = UTC + 5:30) ---
-    if (rawTs != null) {
-      final parsedTs = DateTime.tryParse(rawTs);
-      if (parsedTs != null) {
-        // Convert UTC time to IST (+5:30) for display purposes.
-        // The DATE is already fixed above; this only adjusts the time-of-day display.
-        final utc = parsedTs.toUtc();
-        final istMinutes = utc.hour * 60 + utc.minute + 330; // +5:30 = +330 min
-        hour = (istMinutes ~/ 60) % 24;
-        minute = istMinutes % 60;
-        second = utc.second;
-      }
-    }
-
-    return DateTime(year, month, day, hour, minute, second);
+    return parseSupabaseDateTime(rawTs);
   }
 
   /// Transaction History query using 'vw_daily_transactions'
@@ -146,20 +174,28 @@ class ReportsRepository {
     int offset = 0,
   }) async {
     try {
-      final DateFormat formatter = DateFormat('yyyy-MM-dd');
-      final String startStr = formatter.format(startDate);
-      final String endStr = formatter.format(endDate);
+      final startOfLocalDayUtc = DateTime(
+        startDate.year,
+        startDate.month,
+        startDate.day,
+      ).toUtc().toIso8601String();
+
+      final endOfLocalDayUtc = DateTime(
+        endDate.year,
+        endDate.month,
+        endDate.day,
+        23,
+        59,
+        59,
+        999,
+      ).toUtc().toIso8601String();
 
       var query =
           SupabaseService.client.from('vw_daily_transactions').select('*');
 
-      if (startStr == endStr) {
-        query = query.eq('transaction_date', startStr);
-      } else {
-        query = query
-            .gte('transaction_date', startStr)
-            .lte('transaction_date', endStr);
-      }
+      query = query
+          .gte('created_at', startOfLocalDayUtc)
+          .lte('created_at', endOfLocalDayUtc);
 
       if (filterType != 'ALL') {
         query = query.eq('normalized_type', filterType.toUpperCase());
@@ -225,15 +261,27 @@ class ReportsRepository {
     String locationFilter = 'ALL',
   }) async {
     try {
-      final DateFormat formatter = DateFormat('yyyy-MM-dd');
-      final String startStr = formatter.format(startDate);
-      final String endStr = formatter.format(endDate);
+      final startOfLocalDayUtc = DateTime(
+        startDate.year,
+        startDate.month,
+        startDate.day,
+      ).toUtc().toIso8601String();
+
+      final endOfLocalDayUtc = DateTime(
+        endDate.year,
+        endDate.month,
+        endDate.day,
+        23,
+        59,
+        59,
+        999,
+      ).toUtc().toIso8601String();
 
       var query = SupabaseService.client
           .from('vw_daily_transactions')
           .select('*')
-          .gte('transaction_date', startStr)
-          .lte('transaction_date', endStr);
+          .gte('created_at', startOfLocalDayUtc)
+          .lte('created_at', endOfLocalDayUtc);
 
       if (itemName != null && itemName.isNotEmpty) {
         query = query.eq('item_name', itemName);
@@ -255,3 +303,4 @@ class ReportsRepository {
     }
   }
 }
+

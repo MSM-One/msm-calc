@@ -77,10 +77,8 @@ class _LiveTransactionLedgerTableState extends State<LiveTransactionLedgerTable>
       final List<StockTransaction> list = [];
       for (final row in response as List) {
         try {
-          final rawDate = row['date_time'] ?? row['date'];
-          final dt = rawDate != null
-              ? DateTime.tryParse(rawDate.toString()) ?? DateTime.now()
-              : DateTime.now();
+          final rawDate = row['date_time'] ?? row['created_at'] ?? row['date'];
+          final dt = parseSupabaseDateTime(rawDate);
 
           list.add(
             StockTransaction(

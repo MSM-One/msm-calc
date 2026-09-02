@@ -52,12 +52,8 @@ class _DeliveryOrderPrintDialogState extends State<DeliveryOrderPrintDialog> {
         text: m.dealerName.isNotEmpty ? m.dealerName : m.billingName);
     _lorryNoCtrl = TextEditingController(text: m.lorryNo);
     _noteCtrl = TextEditingController(text: m.note);
-    _signedByCtrl = TextEditingController(
-        text: m.signedBy.isNotEmpty ? m.signedBy : 'Authorized Staff');
-    _approvedByCtrl = TextEditingController(
-        text: m.approvedBy.isNotEmpty
-            ? m.approvedBy
-            : 'For METAROLL STEEL MART');
+    _signedByCtrl = TextEditingController(text: m.signedBy);
+    _approvedByCtrl = TextEditingController(text: m.approvedBy);
     _billType = m.billType.isNotEmpty ? m.billType : 'BILL';
   }
 

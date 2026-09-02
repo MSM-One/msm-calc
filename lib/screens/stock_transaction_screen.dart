@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../widgets/m_loader.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -130,7 +129,6 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
       _toLocation = null;
       _selectedDate = DateTime.now();
       _items.clear();
-      _formSubmitted = false;
     });
     MotionToast.show(context, "Form cleared");
   }
@@ -141,7 +139,6 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
   final Map<String, double> _currentStockMap = {};
   bool _isLoading = true;
   bool _isSubmitting = false;
-  bool _formSubmitted = false;
 
   @override
   void initState() {
@@ -342,7 +339,6 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
   }
 
   void _confirmTransaction() async {
-    setState(() => _formSubmitted = true);
     if (!_formKey.currentState!.validate()) return;
     if (_selectedLocation == null) {
       MotionToast.show(context, "Please select a location", isError: true);
@@ -446,7 +442,7 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
         ? googleUser!.displayName!
         : (storedDisplayName.isNotEmpty
             ? storedDisplayName
-            : (googleUser?.email?.isNotEmpty == true
+            : (googleUser?.email.isNotEmpty == true
                 ? googleUser!.email
                 : (currentUser?.email.isNotEmpty == true
                     ? currentUser!.email
@@ -454,7 +450,7 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
                         ? storedEmail
                         : (UserSession.userEmail?.isNotEmpty == true
                             ? UserSession.userEmail!
-                            : (googleUser?.id?.isNotEmpty == true
+                            : (googleUser?.id.isNotEmpty == true
                                 ? googleUser!.id
                                 : 'Unknown User'))))));
 
@@ -659,7 +655,6 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
     }
 
     final nav = Navigator.of(context);
-    final overlay = Overlay.of(context);
 
     if (mounted) {
       await DataRepository.getERPStockAsync(null, forceRefresh: true);
@@ -703,10 +698,9 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
         ),
         bottomNavigationBar: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             color: Colors.white,
-            border:
-                Border(top: BorderSide(color: Colors.grey.shade200, width: 1)),
+            border: Border(top: BorderSide(color: Color(0xFFE2E8F0), width: 1)),
           ),
           child: SafeArea(
             child: Row(
@@ -719,6 +713,7 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
                       totalWeight: _grandTotalMT,
                       isSubmitting: _isSubmitting,
                       onProceed: _confirmTransaction,
+                      selectedType: _selectedType,
                     ),
                   ),
                 ),
@@ -741,26 +736,42 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
       backgroundColor: msmRed,
       foregroundColor: Colors.white,
       elevation: 0,
+      scrolledUnderElevation: 0,
       centerTitle: false,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(12),
+          bottomRight: Radius.circular(12),
+        ),
+      ),
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("MSM ONE",
-              style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white70,
-                  letterSpacing: 2)),
+          Text(
+            "MSM ONE",
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              color: Colors.white.withValues(alpha: 0.8),
+              letterSpacing: 2,
+            ),
+          ),
           Text(
             _selectedType == 'IN'
                 ? 'Stock In Transaction'
                 : _selectedType == 'OUT'
                     ? 'Stock Out Transaction'
-                    : 'Stock Operation',
+                    : _selectedType == 'TRANSFER'
+                        ? 'Stock Transfer'
+                        : 'Stock ${_selectedType[0]}${_selectedType.substring(1).toLowerCase()}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-                fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+              letterSpacing: -0.2,
+            ),
           ),
         ],
       ),
@@ -817,17 +828,20 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
 
   Widget _buildDesktopLayout() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
       child: Column(
         children: [
           _buildTypeSelector(context),
+          const SizedBox(height: 18),
+          _buildFormSection(
+            title: "Logistics & Timing",
+            child: _buildBasicInfo(context),
+          ),
           const SizedBox(height: 16),
           _buildFormSection(
-              title: "Logistics & Timing", child: _buildBasicInfo(context)),
-          const SizedBox(height: 16),
-          _buildFormSection(
-              title: "Transport Details",
-              child: _buildAdvancedTransport(context)),
+            title: "Transport Details",
+            child: _buildAdvancedTransport(context),
+          ),
           const SizedBox(height: 16),
           _buildFormSection(
             title: "Stock Items",
@@ -860,76 +874,109 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
         children: [
           _buildTypeSelector(context),
           const SizedBox(height: 16),
-          _buildBasicInfo(context),
-          const SizedBox(height: 12),
-          _buildAdvancedTransport(context),
-          const SizedBox(height: 16),
-          ..._items
-              .asMap()
-              .entries
-              .map((e) => _buildItemCard(context, e.key, e.value)),
-          const SizedBox(height: 12),
-          _buildAddItemButton(context),
-          const SizedBox(height: 16),
-          _buildSplitLoading(context),
+          _buildFormSection(
+            title: "Logistics & Timing",
+            child: _buildBasicInfo(context),
+          ),
+          const SizedBox(height: 14),
+          _buildFormSection(
+            title: "Transport Details",
+            child: _buildAdvancedTransport(context),
+          ),
+          const SizedBox(height: 14),
+          _buildFormSection(
+            title: "Stock Items",
+            child: Column(
+              children: [
+                ..._items
+                    .asMap()
+                    .entries
+                    .map((e) => _buildItemCard(context, e.key, e.value)),
+                const SizedBox(height: 12),
+                _buildAddItemButton(context),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          _buildFormSection(
+            title: "Split Loading",
+            child: _buildSplitLoading(context),
+          ),
           const SizedBox(height: 24),
         ],
       ),
     );
   }
 
-  Widget _buildFormSection(
-      {required String title, Widget? trailing, required Widget child}) {
+  Widget _buildFormSection({
+    required String title,
+    Widget? trailing,
+    required Widget child,
+  }) {
     IconData? titleIcon;
-    if (title.contains("Logistics"))
+    if (title.contains("Logistics")) {
       titleIcon = Icons.location_on_rounded;
-    else if (title.contains("Transport"))
+    } else if (title.contains("Transport")) {
       titleIcon = Icons.local_shipping_rounded;
-    else if (title.contains("Split"))
+    } else if (title.contains("Split")) {
       titleIcon = Icons.call_split_rounded;
-    else if (title.contains("Stock")) titleIcon = Icons.inventory_2_rounded;
+    } else if (title.contains("Stock")) {
+      titleIcon = Icons.inventory_2_rounded;
+    }
 
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderLight),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withValues(alpha: 0.02),
-              blurRadius: 10,
-              offset: const Offset(0, 4))
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Row(
                   children: [
                     if (titleIcon != null) ...[
-                      Icon(titleIcon, color: msmRed, size: 18),
-                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: msmRed.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(titleIcon, color: msmRed, size: 16),
+                      ),
+                      const SizedBox(width: 10),
                     ],
-                    Text(title,
-                        style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: textDark)),
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0F172A),
+                        letterSpacing: -0.2,
+                      ),
+                    ),
                   ],
                 ),
                 if (trailing != null) trailing,
               ],
             ),
           ),
-          const Divider(height: 1, color: borderLight),
+          const Divider(height: 1, thickness: 1, color: Color(0xFFF1F5F9)),
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(18),
             child: child,
           ),
         ],
@@ -937,22 +984,40 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
     );
   }
 
-  InputDecoration _filledDeco(String label, {Widget? suffix}) {
+  InputDecoration _filledDeco(String label, {Widget? suffix, String? hint}) {
     return InputDecoration(
       labelText: label,
+      hintText: hint,
+      isDense: true,
       labelStyle: const TextStyle(
-          color: textGrey, fontSize: 13, fontWeight: FontWeight.w600),
+        color: Color(0xFF64748B),
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+      ),
+      hintStyle: const TextStyle(
+        color: Color(0xFF94A3B8),
+        fontSize: 13,
+      ),
       filled: true,
-      fillColor: const Color(0xFFF6F8FA),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      fillColor: const Color(0xFFF8FAFC),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       suffixIcon: suffix,
       border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+      ),
       enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+      ),
       focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: msmRed, width: 1.5)),
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: msmRed, width: 1.5),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Colors.redAccent),
+      ),
     );
   }
 
@@ -968,11 +1033,13 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
 
     return Center(
       child: Container(
-        height: 48,
+        height: 44,
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
-            color: Colors.grey.shade200,
-            borderRadius: BorderRadius.circular(24)),
+          color: const Color(0xFFF1F5F9),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           physics: const BouncingScrollPhysics(),
@@ -987,25 +1054,30 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
                   curve: Curves.easeInOut,
                   alignment: Alignment.center,
                   padding:
-                      const EdgeInsets.symmetric(vertical: 8, horizontal: 20),
+                      const EdgeInsets.symmetric(vertical: 6, horizontal: 18),
                   decoration: BoxDecoration(
                     color: isSelected ? Colors.white : Colors.transparent,
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: isSelected
                         ? [
                             BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.05),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2))
+                              color: Colors.black.withValues(alpha: 0.06),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2),
+                            ),
                           ]
-                        : [],
+                        : null,
                   ),
-                  child: Text(t,
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: isSelected ? msmRed : textGrey,
-                          letterSpacing: 0.5)),
+                  child: Text(
+                    t,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight:
+                          isSelected ? FontWeight.w800 : FontWeight.w600,
+                      color: isSelected ? msmRed : const Color(0xFF64748B),
+                      letterSpacing: 0.5,
+                    ),
+                  ),
                 ),
               );
             }).toList(),
@@ -1016,62 +1088,60 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
   }
 
   Widget _buildBasicInfo(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(16)),
-      child: Column(
-        children: [
-          _buildLocationDropdown(context),
-          const SizedBox(height: 12),
-          _buildDateInput(context),
-          const SizedBox(height: 12),
-          LayoutBuilder(builder: (context, constraints) {
-            bool stack = _shouldStack(context);
-            List<Widget> children = [
-              Flexible(
-                flex: stack ? 0 : 1,
-                fit: stack ? FlexFit.loose : FlexFit.tight,
-                child: TextFormField(
-                  controller: _invoiceCtrl,
-                  keyboardType: TextInputType.text,
-                  decoration: _filledDeco(
-                    "Bill/Invoice Number",
-                    suffix: IconButton(
-                      icon: const Icon(Icons.qr_code_scanner, color: msmRed),
-                      onPressed: () {
-                        MotionToast.show(context,
-                            "Scanner library not linked. Please enter manually.",
-                            isError: true);
-                      },
-                    ),
+    return Column(
+      children: [
+        _buildLocationDropdown(context),
+        const SizedBox(height: 12),
+        _buildDateInput(context),
+        const SizedBox(height: 12),
+        LayoutBuilder(builder: (context, constraints) {
+          bool stack = _shouldStack(context);
+          List<Widget> children = [
+            Flexible(
+              flex: stack ? 0 : 1,
+              fit: stack ? FlexFit.loose : FlexFit.tight,
+              child: TextFormField(
+                controller: _invoiceCtrl,
+                keyboardType: TextInputType.text,
+                decoration: _filledDeco(
+                  "Bill/Invoice Number",
+                  suffix: IconButton(
+                    icon: const Icon(Icons.qr_code_scanner,
+                        color: msmRed, size: 20),
+                    onPressed: () {
+                      MotionToast.show(
+                        context,
+                        "Scanner library not linked. Please enter manually.",
+                        isError: true,
+                      );
+                    },
                   ),
                 ),
               ),
-              if (!stack) const SizedBox(width: 12),
-              if (stack) const SizedBox(height: 12),
-              Flexible(
-                flex: stack ? 0 : 1,
-                fit: stack ? FlexFit.loose : FlexFit.tight,
-                child: TextFormField(
-                  controller: _lorryCtrl,
-                  decoration: _filledDeco("Lorry Number"),
-                ),
+            ),
+            if (!stack) const SizedBox(width: 12),
+            if (stack) const SizedBox(height: 12),
+            Flexible(
+              flex: stack ? 0 : 1,
+              fit: stack ? FlexFit.loose : FlexFit.tight,
+              child: TextFormField(
+                controller: _lorryCtrl,
+                decoration: _filledDeco("Lorry Number"),
               ),
-            ];
+            ),
+          ];
 
-            return stack
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: children)
-                : Row(children: children);
-          }),
-          if (_selectedType == 'TRANSFER') ...[
-            const SizedBox(height: 12),
-            _buildToLocationDropdown(context),
-          ]
-        ],
-      ),
+          return stack
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: children)
+              : Row(children: children);
+        }),
+        if (_selectedType == 'TRANSFER') ...[
+          const SizedBox(height: 12),
+          _buildToLocationDropdown(context),
+        ]
+      ],
     );
   }
 
@@ -1082,9 +1152,16 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
       child: InputDecorator(
         decoration: _filledDeco(
             _selectedType == 'TRANSFER' ? "From Location" : "Location"),
-        child: Text(_selectedLocation ?? "Select Location",
-            style: TextStyle(
-                color: _selectedLocation == null ? textGrey : textDark)),
+        child: Text(
+          _selectedLocation ?? "Select Location",
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: _selectedLocation == null
+                ? const Color(0xFF64748B)
+                : const Color(0xFF0F172A),
+          ),
+        ),
       ),
     );
   }
@@ -1096,8 +1173,16 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
           exclude: _selectedLocation),
       child: InputDecorator(
         decoration: _filledDeco("To Location"),
-        child: Text(_toLocation ?? "Select Destination",
-            style: TextStyle(color: _toLocation == null ? textGrey : textDark)),
+        child: Text(
+          _toLocation ?? "Select Destination",
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: _toLocation == null
+                ? const Color(0xFF64748B)
+                : const Color(0xFF0F172A),
+          ),
+        ),
       ),
     );
   }
@@ -1106,25 +1191,39 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
       {String? exclude}) {
     final locs = ['YARD', 'FACTORY'].where((l) => l != exclude).toList();
     showModalBottomSheet(
-        context: context,
-        builder: (ctx) => ListView(
-              shrinkWrap: true,
-              children: locs
-                  .map((l) => ListTile(
-                      title: Text(l),
-                      onTap: () {
-                        onSelect(l);
-                        Navigator.pop(ctx);
-                      }))
-                  .toList(),
-            ));
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          children: locs
+              .map((l) => ListTile(
+                    title: Text(
+                      l,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 14),
+                    ),
+                    trailing: const Icon(Icons.arrow_forward_ios_rounded,
+                        size: 14, color: Color(0xFF94A3B8)),
+                    onTap: () {
+                      onSelect(l);
+                      Navigator.pop(ctx);
+                    },
+                  ))
+              .toList(),
+        ),
+      ),
+    );
   }
 
   Widget _buildDateInput(BuildContext context) {
     return TextFormField(
       readOnly: true,
       decoration: _filledDeco("Date",
-          suffix: const Icon(Icons.calendar_today, size: 16)),
+          suffix: const Icon(Icons.calendar_today_rounded,
+              size: 18, color: msmRed)),
       controller: TextEditingController(
           text:
               "${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}"),
@@ -1143,17 +1242,21 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
-        title: const Text("Advanced Transport Details",
-            style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 13,
-                color: Colors.indigo)),
-        childrenPadding: const EdgeInsets.only(bottom: 12),
+        title: const Text(
+          "Advanced Transport Details",
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 13,
+            color: Color(0xFF334155),
+          ),
+        ),
+        childrenPadding: const EdgeInsets.only(bottom: 8),
         tilePadding: EdgeInsets.zero,
         children: [
           TextFormField(
-              controller: _transportCompanyCtrl,
-              decoration: _filledDeco("Transport Company")),
+            controller: _transportCompanyCtrl,
+            decoration: _filledDeco("Transport Company"),
+          ),
           const SizedBox(height: 12),
           LayoutBuilder(builder: (context, constraints) {
             bool stack = _shouldStack(context);
@@ -1187,8 +1290,9 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
           }),
           const SizedBox(height: 12),
           TextFormField(
-              controller: _remarksCtrl,
-              decoration: _filledDeco("General Remarks")),
+            controller: _remarksCtrl,
+            decoration: _filledDeco("General Remarks"),
+          ),
         ],
       ),
     );
@@ -1201,15 +1305,16 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
     double totalAmt = totalMT * rate;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 20),
+      margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -1219,22 +1324,24 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
           InkWell(
             onTap: () => setState(() => item.isExpanded = !item.isExpanded),
             borderRadius: BorderRadius.vertical(
-                top: const Radius.circular(20),
-                bottom: Radius.circular(item.isExpanded ? 0 : 20)),
+              top: const Radius.circular(12),
+              bottom: Radius.circular(item.isExpanded ? 0 : 12),
+            ),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               child: Row(
                 children: [
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 40,
+                    height: 40,
                     decoration: BoxDecoration(
                       color: msmRed.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.category_rounded, color: msmRed),
+                    child:
+                        const Icon(Icons.category_rounded, color: msmRed, size: 20),
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1242,39 +1349,43 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
                         Text(
                           item.selectedItemName ?? "Select Product",
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: 14,
                             fontWeight: FontWeight.w800,
                             color: item.selectedItemName == null
-                                ? textGrey
-                                : textDark,
+                                ? const Color(0xFF64748B)
+                                : const Color(0xFF0F172A),
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 2),
                         Row(
                           children: [
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 2),
+                                  horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: msmRed.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(8),
+                                color: msmRed.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 "${totalMT.toStringAsFixed(3)} MT",
                                 style: const TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    color: msmRed),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: msmRed,
+                                ),
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            Text(
-                              "₹ ${totalAmt.toStringAsFixed(0)}",
-                              style: const TextStyle(
-                                  fontSize: 12,
+                            if (totalAmt > 0) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                "₹ ${totalAmt.toStringAsFixed(0)}",
+                                style: const TextStyle(
+                                  fontSize: 11,
                                   fontWeight: FontWeight.w700,
-                                  color: textDark),
-                            ),
+                                  color: Color(0xFF0F172A),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ],
@@ -1291,34 +1402,38 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
             ),
           ),
           if (item.isExpanded) ...[
-            Divider(color: Colors.grey.shade100, height: 1),
+            const Divider(color: Color(0xFFF1F5F9), height: 1),
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Product Type row
                   const Padding(
-                    padding: EdgeInsets.only(left: 4, bottom: 6),
-                    child: Text("Product Type",
-                        style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: textGrey)),
+                    padding: EdgeInsets.only(left: 2, bottom: 6),
+                    child: Text(
+                      "PRODUCT TYPE",
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF64748B),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
                   ),
                   Row(
                     children: [
                       Expanded(
                         child: InkWell(
                           onTap: () => _showItemPicker(context, item),
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(8),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 14),
+                                horizontal: 14, vertical: 12),
                             decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.grey.shade200),
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFFE2E8F0)),
                             ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1326,11 +1441,11 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
                                 Text(
                                   item.selectedItemName ?? "Select Item Type",
                                   style: TextStyle(
-                                    fontSize: 14,
+                                    fontSize: 13,
                                     fontWeight: FontWeight.w600,
                                     color: item.selectedItemName == null
-                                        ? textGrey
-                                        : textDark,
+                                        ? const Color(0xFF64748B)
+                                        : const Color(0xFF0F172A),
                                   ),
                                 ),
                                 const Icon(Icons.keyboard_arrow_down_rounded,
@@ -1340,15 +1455,15 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 10),
                       InkWell(
                         onTap: () => setState(() => _items.removeAt(idx)),
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(8),
                         child: Container(
-                          padding: const EdgeInsets.all(14),
+                          padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             color: msmRed.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Icon(Icons.delete_outline_rounded,
                               color: msmRed, size: 20),
@@ -1356,10 +1471,10 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
 
                   ...item.sizes.map((sz) => _buildSizeRow(context, item, sz)),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   Align(
                     alignment: Alignment.centerLeft,
                     child: InkWell(
@@ -1367,25 +1482,28 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
                           id: DateTime.now()
                               .millisecondsSinceEpoch
                               .toString()))),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(6),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
+                            horizontal: 14, vertical: 6),
                         decoration: BoxDecoration(
                           color: msmRed.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(6),
                         ),
                         child: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(Icons.add_circle_outline_rounded,
-                                color: msmRed, size: 16),
+                                color: msmRed, size: 14),
                             SizedBox(width: 6),
-                            Text("Add Size",
-                                style: TextStyle(
-                                    color: msmRed,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12)),
+                            Text(
+                              "Add Size",
+                              style: TextStyle(
+                                color: msmRed,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -1406,11 +1524,11 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
         _getAvailableStock(item.selectedItemName, sz.selectedSizeLabel);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade100),
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
       child: LayoutBuilder(builder: (context, constraints) {
         bool isNarrow = constraints.maxWidth < 400;
@@ -1419,13 +1537,13 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Padding(
-              padding: EdgeInsets.only(left: 4, bottom: 6),
+              padding: EdgeInsets.only(left: 2, bottom: 4),
               child: Text(
                 "SIZE / VARIANT",
                 style: TextStyle(
                   fontSize: 9,
                   fontWeight: FontWeight.w800,
-                  color: textGrey,
+                  color: Color(0xFF64748B),
                   letterSpacing: 0.5,
                 ),
               ),
@@ -1435,35 +1553,36 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
                 onTap: () => _showSizePicker(context, item, sz),
                 child: InputDecorator(
                   decoration: InputDecoration(
+                    isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 12),
+                        horizontal: 12, vertical: 10),
                     filled: true,
-                    fillColor: Colors.grey.shade50,
+                    fillColor: Colors.white,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: Colors.grey.shade200),
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: Colors.grey.shade200),
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(8),
                       borderSide: const BorderSide(color: msmRed, width: 1.5),
                     ),
                     suffixIcon: const Icon(Icons.keyboard_arrow_down_rounded,
-                        color: msmRed),
+                        color: msmRed, size: 20),
                   ),
                   child: Text(
                     sz.selectedSizeLabel == null
                         ? "Select Size"
                         : getFormattedSizeDisplay(sz.selectedSizeLabel!, null),
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 13,
                       fontWeight: FontWeight.w600,
                       color: sz.selectedSizeLabel == null
-                          ? textGrey
-                          : Colors.black87,
+                          ? const Color(0xFF64748B)
+                          : const Color(0xFF0F172A),
                     ),
                   ),
                 ),
@@ -1471,13 +1590,15 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
             }),
             if (item.selectedItemName != null &&
                 sz.selectedSizeLabel != null) ...[
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
               Text(
                 "Stock: ${avail.toStringAsFixed(3)} MT",
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w800,
-                  color: avail > 0.1 ? Colors.teal : Colors.orange,
+                  color: avail > 0.1
+                      ? const Color(0xFF059669)
+                      : const Color(0xFFD97706),
                 ),
               ),
             ],
@@ -1488,13 +1609,13 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Padding(
-              padding: EdgeInsets.only(left: 4, bottom: 6),
+              padding: EdgeInsets.only(left: 2, bottom: 4),
               child: Text(
                 "WEIGHT (MT)",
                 style: TextStyle(
                   fontSize: 9,
                   fontWeight: FontWeight.w800,
-                  color: textGrey,
+                  color: Color(0xFF64748B),
                   letterSpacing: 0.5,
                 ),
               ),
@@ -1506,27 +1627,31 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
               cursorColor: msmRed,
               onChanged: (v) => setState(() {}),
               style: const TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w900, color: textDark),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF0F172A)),
               decoration: InputDecoration(
                 hintText: "0.000",
                 isDense: true,
                 filled: true,
-                fillColor: Colors.grey.shade50,
+                fillColor: Colors.white,
                 suffixText: "MT",
                 suffixStyle: const TextStyle(
-                    fontWeight: FontWeight.w800, fontSize: 11, color: textGrey),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 11,
+                    color: Color(0xFF64748B)),
                 contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade200),
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
                 ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade200),
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: msmRed, width: 1.5),
                 ),
               ),
@@ -1535,19 +1660,19 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
         );
 
         return Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(10),
           child: Column(
             children: [
               if (isNarrow) ...[
                 sizeInfo,
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 Row(
                   children: [
                     Expanded(child: weightInput),
                     const SizedBox(width: 8),
                     IconButton(
                       icon: const Icon(Icons.remove_circle_outline_rounded,
-                          color: textGrey, size: 22),
+                          color: Color(0xFF64748B), size: 20),
                       onPressed: () => setState(() => item.sizes.remove(sz)),
                     ),
                   ],
@@ -1557,12 +1682,12 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Expanded(flex: 3, child: sizeInfo),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Expanded(flex: 2, child: weightInput),
                     const SizedBox(width: 4),
                     IconButton(
                       icon: const Icon(Icons.remove_circle_outline_rounded,
-                          color: textGrey, size: 22),
+                          color: Color(0xFF64748B), size: 20),
                       onPressed: () => setState(() => item.sizes.remove(sz)),
                     ),
                   ],
@@ -1576,13 +1701,24 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
 
   String _getItemIconPath(String itemName) {
     String name = itemName.toLowerCase().trim();
-    if (name.contains("pipe") && name.contains("hr"))
+    if (name.contains("pipe") && name.contains("hr")) {
       return "assets/hr_pipe.png";
-    if (name.contains("pipe")) return "assets/ms_pipe.png";
-    if (name.contains("round")) return "assets/round_bar.png";
-    if (name.contains("angle")) return "assets/angle.png";
-    if (name.contains("channel")) return "assets/channel.png";
-    if (name.contains("flat")) return "assets/flat.png";
+    }
+    if (name.contains("pipe")) {
+      return "assets/ms_pipe.png";
+    }
+    if (name.contains("round")) {
+      return "assets/round_bar.png";
+    }
+    if (name.contains("angle")) {
+      return "assets/angle.png";
+    }
+    if (name.contains("channel")) {
+      return "assets/channel.png";
+    }
+    if (name.contains("flat")) {
+      return "assets/flat.png";
+    }
     return "assets/msm_icon.jpg";
   }
 
@@ -1598,175 +1734,151 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
       builder: (ctx) {
         String query = "";
         return StatefulBuilder(
-          builder: (context, setSheetState) {
-            var filtered = applyPrioritizedSearch(query, allNames, (n) => n);
-            if (_selectedType == 'OUT') {
-              filtered = filtered.where((name) {
-                double totalQty = 0;
-                final sizes = _masterItemData[name] ?? [];
-                for (var s in sizes)
-                  totalQty += _getAvailableStock(name, s['label'].toString());
-                return totalQty > 0.0001;
-              }).toList();
-            }
+          builder: (context, setModalState) {
+            final filtered = allNames
+                .where(
+                    (name) => name.toLowerCase().contains(query.toLowerCase()))
+                .toList();
 
-            return ConstrainedBox(
-              constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(context).size.height * 0.8),
-              child: Padding(
-                padding: EdgeInsets.only(
-                    bottom: MediaQuery.of(context).viewInsets.bottom,
-                    top: 24,
-                    left: 16,
-                    right: 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text("Select Item",
-                            style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: textDark)),
-                        const Icon(Icons.sort, color: msmRed),
-                      ],
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.75,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      autofocus: true,
-                      decoration: msmInputDeco("Search Item...",
-                          prefix: const Icon(Icons.search, color: textGrey)),
-                      onChanged: (val) => setSheetState(() => query = val),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    "Select Product Category",
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    onChanged: (val) => setModalState(() => query = val),
+                    decoration: InputDecoration(
+                      hintText: "Search products...",
+                      prefixIcon: const Icon(Icons.search, color: msmRed),
+                      filled: true,
+                      fillColor: Colors.grey.shade100,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
                     ),
-                    const SizedBox(height: 16),
-                    Flexible(
-                      child: filtered.isEmpty
-                          ? const Center(child: Text("No item found"))
-                          : ListView.separated(
-                              itemCount: filtered.length,
-                              separatorBuilder: (c, i) =>
-                                  const Divider(height: 1),
-                              itemBuilder: (context, i) {
-                                final name = filtered[i];
-                                double totalQty = 0;
-                                final sizes = _masterItemData[name] ?? [];
-                                for (var s in sizes)
-                                  totalQty += _getAvailableStock(
-                                      name, s['label'].toString());
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: filtered.length,
+                      separatorBuilder: (_, __) =>
+                          Divider(height: 1, color: Colors.grey.shade200),
+                      itemBuilder: (ctx, i) {
+                        final name = filtered[i];
+                        final isSelected = block?.selectedItemName == name;
+                        final count = _masterItemData[name]?.length ?? 0;
 
-                                return ListTile(
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 4, vertical: 4),
-                                  leading: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                        color: msmRed.withValues(alpha: 0.05),
-                                        shape: BoxShape.circle),
-                                    child: Image.asset(_getItemIconPath(name),
-                                        width: 24,
-                                        height: 24,
-                                        errorBuilder: (_, __, ___) =>
-                                            const Icon(Icons.category,
-                                                color: msmRed, size: 20)),
-                                  ),
-                                  title: Text(name,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          color: textDark)),
-                                  trailing: (_selectedType == 'OUT' ||
-                                          _selectedType == 'TRANSFER')
-                                      ? Text(
-                                          "${totalQty.toStringAsFixed(3)} MT",
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.green,
-                                              fontSize: 14))
-                                      : const Icon(Icons.chevron_right,
-                                          size: 16, color: textGrey),
-                                  onTap: () => Navigator.pop(context, name),
-                                );
-                              },
+                        return ListTile(
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 8),
+                          leading: Container(
+                            width: 36,
+                            height: 36,
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? msmRed
+                                  : msmRed.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(8),
                             ),
+                            child: Image.asset(
+                              _getItemIconPath(name),
+                              errorBuilder: (_, __, ___) => Icon(
+                                Icons.category,
+                                color: isSelected ? Colors.white : msmRed,
+                                size: 18,
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            name,
+                            style: TextStyle(
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.w600,
+                              color: isSelected ? msmRed : Colors.black87,
+                            ),
+                          ),
+                          subtitle: Text(
+                            "$count size variants",
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey.shade600),
+                          ),
+                          trailing: isSelected
+                              ? const Icon(Icons.check_circle, color: msmRed)
+                              : null,
+                          onTap: () {
+                            if (block != null) {
+                              setState(() {
+                                block.selectedItemName = name;
+                                block.sizes = [
+                                  _StockSizeRow(
+                                      id: DateTime.now()
+                                          .millisecondsSinceEpoch
+                                          .toString())
+                                ];
+                              });
+                            }
+                            Navigator.pop(ctx);
+                          },
+                        );
+                      },
                     ),
-                    const SizedBox(height: 16),
-                  ],
-                ),
+                  ),
+                ],
               ),
             );
           },
         );
       },
-    ).then((selectedItemName) {
-      if (selectedItemName != null && selectedItemName is String) {
-        if (block != null) {
-          setState(() {
-            block.selectedItemName = selectedItemName;
-            for (var s in block.sizes) {
-              s.selectedSizeLabel = null;
-            }
-          });
-        } else {
-          setState(() {
-            _items.add(_StockItemBlock(
-              id: DateTime.now().millisecondsSinceEpoch.toString(),
-              sizes: [
-                _StockSizeRow(
-                    id: DateTime.now().millisecondsSinceEpoch.toString())
-              ],
-              selectedItemName: selectedItemName,
-            ));
-          });
-        }
-      }
-    });
+    );
   }
 
   void _showSizePicker(
       BuildContext context, _StockItemBlock block, _StockSizeRow szRow) async {
-    if (block.selectedItemName == null) return;
-    final selectedMaterialName = block.selectedItemName;
-    final selectedMaterialId =
-        DataRepository.getMaterialIdByName(selectedMaterialName);
-    final allSizes = DataRepository.instance.itemSizes;
+    if (block.selectedItemName == null) {
+      MotionToast.show(context, "Please select product category first",
+          isError: true);
+      return;
+    }
 
-    final matchingSizes = allSizes.where((s) {
-      final sMatId = s['material_id'] ?? s['materialId'];
-      final sMatName = (s['material_name'] ?? s['materialName'])?.toString();
-      final matchId = (selectedMaterialId != null &&
-          sMatId != null &&
-          sMatId.toString() == selectedMaterialId.toString());
-      final matchName = (selectedMaterialName != null &&
-          selectedMaterialName.trim().isNotEmpty &&
-          sMatName != null &&
-          sMatName.trim().toLowerCase() ==
-              selectedMaterialName.trim().toLowerCase());
-      return matchId || matchName;
-    }).toList();
+    final rawSizes = _masterItemData[block.selectedItemName] ?? [];
+    int? selectedMaterialId;
+    final data = DataRepository.sheetDataNotifier.value;
+    final List<dynamic> itemsList = data['items'] ?? [];
+    for (var item in itemsList) {
+      if ((item['name']?.toString().trim() ?? '') == block.selectedItemName) {
+        selectedMaterialId = item['id'] as int?;
+        break;
+      }
+    }
 
-    final availableSizes = matchingSizes
-        .where((row) {
-          final label = (row['label'] ?? row['size_label'] ?? '').toString();
-          if (label.isEmpty) return false;
-          if (_selectedType == 'OUT') {
-            return _getAvailableStock(block.selectedItemName, label) > 0.0001;
-          }
-          return true;
-        })
-        .map((row) => {
-              'id': row['id'],
-              'material_id': row['material_id'] ?? row['materialId'],
-              'material_name': row['material_name'] ?? row['materialName'],
-              'label': (row['label'] ?? row['size_label'] ?? '').toString(),
-              'weight': double.tryParse(
-                      (row['unit_weight_kg'] ?? row['weight'] ?? '0')
-                          .toString()) ??
-                  0.0,
-              'sd': double.tryParse(
-                      (row['size_difference'] ?? row['sd'] ?? '0')
-                          .toString()) ??
-                  0.0,
+    final availableSizes = rawSizes
+        .map((s) => {
+              'label': s['label'] ?? '',
+              'weight': s['weight'] ?? 0.0,
+              'sd': s['sd'] ?? 0.0,
+              'raw': s,
             })
         .toList();
 
@@ -1800,67 +1912,62 @@ class _StockTransactionScreenState extends State<StockTransactionScreen> {
   }
 
   Widget _buildAddItemButton(BuildContext context) {
-    return TextButton.icon(
+    return FilledButton.icon(
       onPressed: _addItem,
       icon: const Icon(Icons.add_circle_outline_rounded, size: 16),
-      label: const Text("ADD ITEM",
-          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11)),
-      style: TextButton.styleFrom(
-        backgroundColor: Colors.blue.withValues(alpha: 0.08),
-        foregroundColor: Colors.blue,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      label: const Text(
+        "+ ADD ITEM",
+        style: TextStyle(
+            fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 0.5),
+      ),
+      style: FilledButton.styleFrom(
+        backgroundColor: msmRed.withValues(alpha: 0.08),
+        foregroundColor: msmRed,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        elevation: 0,
       ),
     );
   }
 
   Widget _buildSplitLoading(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(16)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text("Split Loading (Hand vs Crane)",
-              style: TextStyle(
-                  fontWeight: FontWeight.bold, fontSize: 13, color: textDark)),
-          const SizedBox(height: 12),
-          LayoutBuilder(builder: (context, constraints) {
-            bool stack = _shouldStack(context);
-            List<Widget> children = [
-              Flexible(
-                flex: stack ? 0 : 1,
-                fit: stack ? FlexFit.loose : FlexFit.tight,
-                child: TextFormField(
-                  controller: _handMTCtrl,
-                  decoration: _filledDeco("Hand MT"),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LayoutBuilder(builder: (context, constraints) {
+          bool stack = _shouldStack(context);
+          List<Widget> children = [
+            Flexible(
+              flex: stack ? 0 : 1,
+              fit: stack ? FlexFit.loose : FlexFit.tight,
+              child: TextFormField(
+                controller: _handMTCtrl,
+                decoration: _filledDeco("Hand MT", hint: "0.000"),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
               ),
-              if (!stack) const SizedBox(width: 12),
-              if (stack) const SizedBox(height: 12),
-              Flexible(
-                flex: stack ? 0 : 1,
-                fit: stack ? FlexFit.loose : FlexFit.tight,
-                child: TextFormField(
-                  controller: _craneMTCtrl,
-                  decoration: _filledDeco("Crane MT"),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                ),
+            ),
+            if (!stack) const SizedBox(width: 12),
+            if (stack) const SizedBox(height: 12),
+            Flexible(
+              flex: stack ? 0 : 1,
+              fit: stack ? FlexFit.loose : FlexFit.tight,
+              child: TextFormField(
+                controller: _craneMTCtrl,
+                decoration: _filledDeco("Crane MT", hint: "0.000"),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
               ),
-            ];
+            ),
+          ];
 
-            return stack
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: children)
-                : Row(children: children);
-          }),
-        ],
-      ),
+          return stack
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: children)
+              : Row(children: children);
+        }),
+      ],
     );
   }
 }
@@ -1869,17 +1976,26 @@ class StockTransactionTotalWeightCard extends StatelessWidget {
   final double totalWeight;
   final bool isSubmitting;
   final VoidCallback onProceed;
+  final String selectedType;
 
   const StockTransactionTotalWeightCard({
     super.key,
     required this.totalWeight,
     required this.isSubmitting,
     required this.onProceed,
+    this.selectedType = 'IN',
   });
 
   @override
   Widget build(BuildContext context) {
     final bool isMobile = MediaQuery.of(context).size.width < 500;
+    final bool isOut = selectedType == 'OUT';
+    final bool isIn = selectedType == 'IN';
+    final Color weightColor = isOut
+        ? const Color(0xFFDC2626) // Crimson Red for Outward
+        : isIn
+            ? const Color(0xFF059669) // Emerald Green for Inward
+            : const Color(0xFF0F172A);
 
     Widget weightWidget = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1890,32 +2006,33 @@ class StockTransactionTotalWeightCard extends StatelessWidget {
           style: TextStyle(
             fontSize: 10,
             fontWeight: FontWeight.w800,
-            color: textGrey,
-            letterSpacing: 1.2,
+            color: Color(0xFF64748B),
+            letterSpacing: 1.0,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
         Text(
           "${totalWeight.toStringAsFixed(3)} MT",
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.w900,
-            color: msmRed,
+            color: weightColor,
+            letterSpacing: -0.5,
           ),
         ),
       ],
     );
 
     Widget buttonWidget = SizedBox(
-      height: 46,
-      width: isMobile ? double.infinity : 200,
+      height: 44,
+      width: isMobile ? double.infinity : 180,
       child: FilledButton.icon(
         onPressed: isSubmitting ? null : onProceed,
         style: FilledButton.styleFrom(
           backgroundColor: msmRed,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          elevation: 1,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          elevation: 0,
         ),
         icon: isSubmitting
             ? const MLoader(size: 16, color: Colors.white)
@@ -1923,9 +2040,9 @@ class StockTransactionTotalWeightCard extends StatelessWidget {
         label: const Text(
           "Proceed",
           style: TextStyle(
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w800,
             fontSize: 14,
-            letterSpacing: 0.5,
+            letterSpacing: 0.3,
           ),
         ),
       ),
@@ -1933,11 +2050,18 @@ class StockTransactionTotalWeightCard extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: isMobile
           ? Column(
@@ -1949,7 +2073,7 @@ class StockTransactionTotalWeightCard extends StatelessWidget {
                     weightWidget,
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 buttonWidget,
               ],
             )
@@ -1968,14 +2092,13 @@ class _StockItemBlock {
   final String id;
   String? selectedItemName;
   List<_StockSizeRow> sizes;
-  bool isExpanded;
+  bool isExpanded = true;
   final TextEditingController basicRateCtrl = TextEditingController();
 
   _StockItemBlock({
     required this.id,
     required this.sizes,
     this.selectedItemName,
-    this.isExpanded = true,
   });
 }
 

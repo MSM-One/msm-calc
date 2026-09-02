@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'supabase_service.dart';
 import 'data_repository.dart';
+import '../utils/formatters.dart';
 
 class SyncResult {
   final bool success;
@@ -149,8 +150,7 @@ class SheetService {
           'location': row['location'] ?? "YARD",
           'is_hidden': isHidden,
           'date': row['date_time'] != null
-              ? DateFormat('dd/MM/yyyy')
-                  .format(DateTime.parse(row['date_time']))
+              ? formatTransactionDate(parseSupabaseDateTime(row['date_time']))
               : "",
         };
       }).toList();

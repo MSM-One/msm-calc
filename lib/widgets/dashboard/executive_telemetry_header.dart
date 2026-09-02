@@ -143,15 +143,11 @@ class _ExecutiveTelemetryHeaderState extends State<ExecutiveTelemetryHeader>
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Status Pill 1: Supabase Live
-            _buildLiveStatusPill(),
-            const SizedBox(width: 8),
-
-            // Status Pill 2: Location
+            // Status Pill 1: Location
             _buildLocationPill(),
             const SizedBox(width: 8),
 
-            // Status Pill 3: Critical Alerts
+            // Status Pill 2: Critical Alerts
             _buildAlertsPill(),
             const SizedBox(width: 12),
 
@@ -223,51 +219,11 @@ class _ExecutiveTelemetryHeaderState extends State<ExecutiveTelemetryHeader>
           spacing: 8,
           runSpacing: 6,
           children: [
-            _buildLiveStatusPill(),
             _buildLocationPill(),
             _buildAlertsPill(),
           ],
         ),
       ],
-    );
-  }
-
-  Widget _buildLiveStatusPill() {
-    final bool isLive = widget.isSupabaseLive && !widget.isSyncing;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: isLive ? const Color(0xFFECFDF5) : const Color(0xFFFFFBEB),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isLive ? const Color(0xFFA7F3D0) : const Color(0xFFFDE68A),
-          width: 1,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              color: isLive ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            widget.isSyncing
-                ? 'Syncing...'
-                : (isLive ? 'Supabase Live' : 'Connecting'),
-            style: TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w600,
-              color: isLive ? const Color(0xFF065F46) : const Color(0xFF92400E),
-            ),
-          ),
-        ],
-      ),
     );
   }
 

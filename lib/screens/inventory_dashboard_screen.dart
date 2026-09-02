@@ -167,116 +167,107 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
       decoration: const BoxDecoration(
         color: msmRed,
         borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(32),
-          bottomRight: Radius.circular(32),
+          bottomLeft: Radius.circular(12),
+          bottomRight: Radius.circular(12),
         ),
       ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -40,
-            right: -40,
-            child: Container(
-              width: 180,
-              height: 180,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.06),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(24, isMobile ? 8 : 16, 24, 28),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(24, isMobile ? 12 : 16, 24, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  Row(
-                    children: [
-                      if (!isMobile)
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                              color: Colors.white, size: 20),
-                          onPressed: () => Navigator.pop(context),
+                  if (!isMobile)
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                          color: Colors.white, size: 18),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.2)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF4ADE80),
+                            shape: BoxShape.circle,
+                          ),
                         ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.2)),
+                        const SizedBox(width: 6),
+                        const Text(
+                          "LIVE TELEMETRY",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5,
+                          ),
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: Colors.greenAccent,
-                                shape: BoxShape.circle,
-                                boxShadow: [
-                                  BoxShadow(
-                                      color: Colors.greenAccent, blurRadius: 4)
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            const Text(
-                              "LIVE",
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 0.5),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        onPressed: () => DataRepository.refreshAllStockData(
-                            forceRefresh: true),
-                        icon: const Icon(Icons.refresh_rounded,
-                            color: Colors.white, size: 22),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      const SizedBox(width: 8),
-                      CircleAvatar(
-                        radius: 18,
-                        backgroundColor: Colors.white.withValues(alpha: 0.2),
-                        child: const Icon(Icons.person_rounded,
-                            color: Colors.white, size: 20),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    "Inventory Dashboard",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: isMobile ? 26 : 30,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.5,
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Real-time stock overview & control panel",
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.75),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => DataRepository.refreshAllStockData(
+                        forceRefresh: true),
+                    icon: const Icon(Icons.refresh_rounded,
+                        color: Colors.white, size: 20),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  const SizedBox(width: 8),
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: Colors.white.withValues(alpha: 0.2),
+                    child: const Icon(Icons.person_rounded,
+                        color: Colors.white, size: 18),
                   ),
                 ],
               ),
-            ),
+              const SizedBox(height: 14),
+              const Text(
+                "MSM ERP · INVENTORY OPERATIONS",
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white70,
+                  letterSpacing: 2.0,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                "Inventory Dashboard",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: isMobile ? 24 : 28,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                "Real-time stock overview & control panel",
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.8),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -297,9 +288,9 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 20,
+                        fontSize: 18,
                         fontWeight: FontWeight.w900,
-                        color: Color(0xFF1A1D21),
+                        color: Color(0xFF0F172A),
                         letterSpacing: -0.5,
                       ),
                     ),
@@ -313,7 +304,7 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: 12,
-                              color: textGrey,
+                              color: Color(0xFF64748B),
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -346,9 +337,9 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontSize: 20,
+                              fontSize: 18,
                               fontWeight: FontWeight.w900,
-                              color: Color(0xFF1A1D21),
+                              color: Color(0xFF0F172A),
                               letterSpacing: -0.5,
                             ),
                           ),
@@ -358,7 +349,7 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: 12,
-                              color: textGrey,
+                              color: Color(0xFF64748B),
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -407,44 +398,69 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(12),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        padding: const EdgeInsets.all(20),
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isSelected ? color : borderLight,
+            color: isSelected ? color : const Color(0xFFE2E8F0),
             width: isSelected ? 2 : 1,
           ),
           boxShadow: [
             BoxShadow(
               color: isSelected
-                  ? color.withValues(alpha: 0.2)
-                  : color.withValues(alpha: 0.12),
-              blurRadius: isSelected ? 30 : 20,
-              offset: Offset(0, isSelected ? 12 : 10),
+                  ? color.withValues(alpha: 0.15)
+                  : Colors.black.withValues(alpha: 0.02),
+              blurRadius: isSelected ? 12 : 8,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Icon(icon, color: color, size: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(icon, color: color, size: 20),
+                ),
+                if (isSelected)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      "SELECTED",
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        color: color,
+                      ),
+                    ),
+                  ),
+              ],
             ),
-            const SizedBox(height: 20),
-            Text(title,
-                style: const TextStyle(
-                    fontSize: 12,
-                    color: textGrey,
-                    fontWeight: FontWeight.bold)),
+            const SizedBox(height: 14),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF64748B),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             const SizedBox(height: 4),
             FittedBox(
               fit: BoxFit.scaleDown,
@@ -453,7 +469,11 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
                 permission: Permissions.inventoryMetricsView,
                 value: "${value.toStringAsFixed(3)} MT",
                 style: const TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.w900, color: textDark),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF0F172A),
+                  letterSpacing: -0.3,
+                ),
               ),
             ),
           ],
@@ -499,13 +519,13 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
       width: double.infinity,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: borderLight, width: 1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
         boxShadow: [
           BoxShadow(
-            color: msmRed.withValues(alpha: 0.12),
-            blurRadius: 30,
-            offset: const Offset(0, 15),
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -513,9 +533,9 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
         color: Colors.transparent,
         child: InkWell(
           onTap: _showTotalStockDrilldown,
-          borderRadius: BorderRadius.circular(32),
+          borderRadius: BorderRadius.circular(12),
           child: Padding(
-            padding: const EdgeInsets.all(32),
+            padding: const EdgeInsets.all(20),
             child: Row(
               children: [
                 Expanded(
@@ -525,13 +545,13 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
                       const Text(
                         "TOTAL NET STOCK",
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: 11,
                           fontWeight: FontWeight.w800,
-                          color: textGrey,
-                          letterSpacing: 2.0,
+                          color: Color(0xFF64748B),
+                          letterSpacing: 1.5,
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 8),
                       FittedBox(
                         fit: BoxFit.scaleDown,
                         alignment: Alignment.centerLeft,
@@ -539,39 +559,42 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
                           permission: Permissions.inventoryMetricsView,
                           value: "${total.toStringAsFixed(3)} MT",
                           style: TextStyle(
-                            fontSize: isMobile ? 32 : 40,
+                            fontSize: isMobile ? 28 : 34,
                             fontWeight: FontWeight.w900,
-                            color: textDark,
-                            letterSpacing: -1.5,
+                            color: const Color(0xFF0F172A),
+                            letterSpacing: -1.0,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Row(
+                      const SizedBox(height: 6),
+                      const Row(
                         children: [
                           Icon(Icons.auto_graph_rounded,
-                              size: 14, color: Colors.teal.shade700),
-                          const SizedBox(width: 4),
-                          const Text("Real-time tracked",
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.teal,
-                                  fontWeight: FontWeight.bold)),
+                              size: 14, color: Color(0xFF059669)),
+                          SizedBox(width: 4),
+                          Text(
+                            "Real-time synchronized",
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF059669),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ],
                       ),
                     ],
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: msmRed.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
+                    color: msmRed.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Icon(
                     Icons.inventory_2_rounded,
                     color: msmRed,
-                    size: 32,
+                    size: 28,
                   ),
                 ),
               ],
@@ -588,42 +611,39 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(12),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: borderLight, width: 1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.03),
-                blurRadius: 15,
-                offset: const Offset(0, 8),
+                color: Colors.black.withValues(alpha: 0.02),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
               ),
             ],
           ),
-          child: Column(
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
+                  color: color.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(icon, color: color, size: 28),
+                child: Icon(icon, color: color, size: 22),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(width: 12),
               Text(
                 label,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w800,
-                  color: textDark,
+                  color: Color(0xFF0F172A),
                 ),
               ),
             ],
@@ -737,7 +757,7 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderLight, width: 0.5),
+        border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
       ),
       child: Row(
         children: [
@@ -766,13 +786,13 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
                   style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
-                      color: textDark),
+                      color: Color(0xFF0F172A)),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
                   "${tx.type} • ${tx.size}",
-                  style: const TextStyle(fontSize: 11, color: textGrey),
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                 ),
               ],
             ),
@@ -808,8 +828,8 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: borderLight, width: 1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
           ),
           child: Column(
             children: topItems.map((i) => _buildStockRow(i)).toList(),

@@ -1154,7 +1154,7 @@ class _SaudaEntryScreenState extends State<SaudaEntryScreen> {
 
                           final recentList = sorted.take(5).toList();
 
-                          return ListView.separated(
+                      return ListView.separated(
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             padding: EdgeInsets.zero,
@@ -1169,7 +1169,7 @@ class _SaudaEntryScreenState extends State<SaudaEntryScreen> {
                               String formattedDate = 'N/A';
                               if (rawDate.isNotEmpty) {
                                 try {
-                                  final parsed = DateTime.parse(rawDate);
+                                  final parsed = parseSupabaseDateTime(rawDate);
                                   formattedDate =
                                       DateFormat('dd MMM yyyy').format(parsed);
                                 } catch (_) {}
