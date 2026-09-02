@@ -12,6 +12,7 @@ class ResilientSupabaseStream<T> {
   Duration _currentDelay;
   Timer? _retryTimer;
   bool _isDisposed = false;
+  T? _latestData;
 
   final ValueNotifier<bool> isErrorNotifier = ValueNotifier<bool>(false);
 
@@ -24,6 +25,8 @@ class ResilientSupabaseStream<T> {
     _connect();
   }
 
+  T? get latestData => _latestData;
+
   Stream<T> get stream => _controller.stream;
 
   void _connect() {
@@ -33,6 +36,7 @@ class ResilientSupabaseStream<T> {
     try {
       _subscription = streamFactory().listen(
         (data) {
+          _latestData = data;
           _currentDelay = initialDelay; // Reset backoff on success
           if (isErrorNotifier.value) {
             isErrorNotifier.value = false;
@@ -45,6 +49,9 @@ class ResilientSupabaseStream<T> {
           debugPrint("[ResilientSupabaseStream] Stream error: $error");
           if (!isErrorNotifier.value) {
             isErrorNotifier.value = true;
+          }
+          if (!_controller.isClosed) {
+            _controller.addError(error);
           }
           _handleFailure();
         },
@@ -61,6 +68,9 @@ class ResilientSupabaseStream<T> {
       debugPrint("[ResilientSupabaseStream] Connection error: $e");
       if (!isErrorNotifier.value) {
         isErrorNotifier.value = true;
+      }
+      if (!_controller.isClosed) {
+        _controller.addError(e);
       }
       _handleFailure();
     }

@@ -141,5 +141,24 @@ void main() {
 
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets('Renders "No pending registrations" placeholder when pending list is empty',
+        (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1200, 900));
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: ManageUsersScreen(),
+        ),
+      );
+
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 500));
+
+      // Verify empty state placeholder
+      expect(find.text("No pending registrations"), findsOneWidget);
+      expect(find.text("New signup requests will appear here."), findsOneWidget);
+      expect(find.byIcon(Icons.inbox_outlined), findsOneWidget);
+    });
   });
 }

@@ -50,11 +50,26 @@ class ManageUsersScreenState extends State<ManageUsersScreen> {
   void initState() {
     super.initState();
 
-    _pendingStream = ResilientSupabaseStream<List<Map<String, dynamic>>>(
-      streamFactory: () => SupabaseService.client
-          .from('users')
-          .stream(primaryKey: ['id']).eq('status', 'PENDING'),
-    );
+    try {
+      _pendingStream = ResilientSupabaseStream<List<Map<String, dynamic>>>(
+        streamFactory: () => SupabaseService.client
+            .from('users')
+            .stream(primaryKey: ['email'])
+            .map((rows) => rows.where((u) {
+                  final status =
+                      (u['status']?.toString() ?? '').toUpperCase().trim();
+                  final isApproved = u['is_approved'];
+                  return status == 'PENDING' ||
+                      (isApproved != null &&
+                          isApproved == false &&
+                          status != 'APPROVED' &&
+                          status != 'REJECTED');
+                }).toList()),
+      );
+    } catch (e) {
+      debugPrint("Pending users stream init skipped: $e");
+      _pendingStream = null;
+    }
 
     // --- Hard Navigation Guard ---
     if (!widget.isEmbedded) {
@@ -1070,55 +1085,84 @@ class ManageUsersScreenState extends State<ManageUsersScreen> {
     final borderColor = isDark ? borderDark : borderLight;
     final textColor = isDark ? Colors.white : textDark;
 
+    final List<Map<String, dynamic>> fallbackPending = _users
+        .where((u) {
+          final status = (u['status']?.toString() ?? '').toUpperCase().trim();
+          final isApproved = u['is_approved'];
+          return status == 'PENDING' ||
+              (isApproved != null &&
+                  isApproved == false &&
+                  status != 'APPROVED' &&
+                  status != 'REJECTED');
+        })
+        .map((u) => Map<String, dynamic>.from(u as Map))
+        .toList();
+
     if (_pendingStream == null) {
-      return _buildPremiumEmptyState(
-        title: "No pending registrations",
-        subtitle: "New signup requests will appear here.",
-        icon: Icons.assignment_turned_in_rounded,
-        isDark: isDark,
-      );
+      if (fallbackPending.isEmpty) {
+        return _buildPendingEmptyContainer(isDark);
+      }
     }
 
     return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: _pendingStream!.stream,
+      stream: _pendingStream?.stream,
+      initialData: _pendingStream?.latestData ?? fallbackPending,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 16.0),
-            child: Center(
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
               child: SizedBox(
                 width: 24,
                 height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(warningOrange),
-                ),
+                child: CircularProgressIndicator(strokeWidth: 2),
               ),
             ),
           );
         }
-        if (snapshot.hasError) {
+
+        if (snapshot.hasError && (!snapshot.hasData || snapshot.data == null)) {
+          if (snapshot.error.toString().contains('_isInitialized')) {
+            return _buildPendingEmptyContainer(isDark);
+          }
           return Container(
-            padding: const EdgeInsets.all(12),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
             decoration: BoxDecoration(
-              color: Colors.red.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.red.shade100),
+              color: isDark
+                  ? Colors.red.shade900.withValues(alpha: 0.2)
+                  : Colors.red.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isDark ? Colors.red.shade800 : Colors.red.shade100,
+              ),
             ),
-            child: Text(
-              "Error streaming pending registrations: ${snapshot.error}",
-              style: TextStyle(color: Colors.red.shade800, fontSize: 12),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.error_outline_rounded,
+                  color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    "Unable to load pending registrations: ${snapshot.error}",
+                    style: TextStyle(
+                      color: isDark ? Colors.red.shade200 : Colors.red.shade800,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
             ),
           );
         }
+
         final pendingUsers = snapshot.data ?? [];
         if (pendingUsers.isEmpty) {
-          return _buildPremiumEmptyState(
-            title: "No pending registrations",
-            subtitle: "New signup requests will appear here.",
-            icon: Icons.assignment_turned_in_rounded,
-            isDark: isDark,
-          );
+          return _buildPendingEmptyContainer(isDark);
         }
 
         return ListView.builder(
@@ -1218,6 +1262,55 @@ class ManageUsersScreenState extends State<ManageUsersScreen> {
     );
   }
 
+  Widget _buildPendingEmptyContainer(bool isDark) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
+      decoration: BoxDecoration(
+        color: isDark ? cardDark : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isDark ? borderDark : const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.05)
+                  : const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.inbox_outlined,
+              color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+              size: 22,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'No pending registrations',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : const Color(0xFF1E293B),
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'New signup requests will appear here.',
+            style: TextStyle(
+              fontSize: 12,
+              color: Color(0xFF64748B),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildPremiumEmptyState({
     required String title,
     required String subtitle,
@@ -1249,7 +1342,8 @@ class ManageUsersScreenState extends State<ManageUsersScreen> {
             ),
             child: Icon(icon,
                 size: 24,
-                color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8)),
+                color:
+                    isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8)),
           ),
           const SizedBox(height: 10),
           Text(
