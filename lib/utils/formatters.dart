@@ -43,6 +43,77 @@ DateTime parseSupabaseDateTime(dynamic raw) {
   return DateTime.now();
 }
 
+/// Robustly parses timestamps stored as local wall-clock IST time tagged with UTC (+00 or Z).
+/// Strips the UTC timezone suffix (+00:00, +00, Z) so DateTime.tryParse treats it as wall-clock time,
+/// preventing the double +05:30 offset bug.
+DateTime parseIstDateTime(dynamic value) {
+  if (value == null) return DateTime.now();
+  if (value is DateTime) return value.isUtc ? value.toLocal() : value;
+  final raw = value.toString().trim();
+  if (raw.isEmpty) return DateTime.now();
+
+  // If timestamp has trailing 'Z', '+00', '+00:00', or '+0000', strip timezone suffix to treat as wall-clock IST
+  final cleaned = raw.replaceAll(RegExp(r'(\+00(:?00)?|Z)$'), '').trim();
+  final parsed = DateTime.tryParse(cleaned);
+  if (parsed != null) {
+    return parsed;
+  }
+
+  // Fallbacks for standard formatted strings
+  try {
+    return DateFormat('dd/MM/yyyy HH:mm:ss').parseStrict(cleaned);
+  } catch (_) {}
+
+  try {
+    return DateFormat('dd/MM/yyyy hh:mm a').parseStrict(cleaned);
+  } catch (_) {}
+
+  try {
+    return DateFormat('dd/MM/yyyy').parseStrict(cleaned.split(' ')[0]);
+  } catch (_) {}
+
+  try {
+    return DateFormat('yyyy-MM-dd').parseStrict(cleaned.split(' ')[0]);
+  } catch (_) {}
+
+  return DateTime.now();
+}
+
+/// Robustly extracts and parses the transaction timestamp from a JSON/Map row.
+/// 1. If `date_time` or `date` is present (stored as wall-clock time), it uses [parseIstDateTime].
+/// 2. If only `created_at` is present (true UTC timestamp from PostgreSQL), converts via [.toLocal()].
+/// 3. If neither is present, attempts to parse unix timestamp from `txn_id` or falls back to [DateTime.now()].
+DateTime parseTransactionTimestamp(Map<String, dynamic> row) {
+  final dtVal = row['date_time'] ??
+      row['dateTime'] ??
+      row['date'] ??
+      row['Date'] ??
+      row['Timestamp'] ??
+      row['DateTime'];
+  if (dtVal != null && dtVal.toString().trim().isNotEmpty) {
+    return parseIstDateTime(dtVal);
+  }
+
+  final createdAtVal = row['created_at'];
+  if (createdAtVal != null && createdAtVal.toString().trim().isNotEmpty) {
+    final parsed = DateTime.tryParse(createdAtVal.toString().trim());
+    if (parsed != null) return parsed.toLocal();
+  }
+
+  final txnId = (row['txn_id'] ?? row['txnId'] ?? row['id'] ?? '').toString();
+  try {
+    final firstPart = txnId.split('_')[0];
+    if (firstPart.length >= 13) {
+      final ms = int.tryParse(firstPart.substring(0, 13));
+      if (ms != null && ms > 1600000000000 && ms < 2000000000000) {
+        return DateTime.fromMillisecondsSinceEpoch(ms);
+      }
+    }
+  } catch (_) {}
+
+  return DateTime.now();
+}
+
 /// Formats a DateTime for compact table columns: 'dd/MM hh:mm a' (e.g., '01/09 09:27 PM')
 String formatTransactionTime(DateTime dt) {
   return DateFormat('dd/MM hh:mm a').format(dt.toLocal());
@@ -134,6 +205,7 @@ String formatAngleSize(String sizeDesc, double weight) {
           RegExp(r'\s*\(?\d*[\.,]?\d*\s*kg\)?$', caseSensitive: false), "")
       .trim();
 
+  if (weight <= 0) return base.replaceAll(' ', '');
   final formattedWeight =
       weight % 1 == 0 ? weight.toInt().toString() : weight.toStringAsFixed(1);
   return "${base.replaceAll(' ', '')} ${formattedWeight}kg";

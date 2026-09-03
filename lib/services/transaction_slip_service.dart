@@ -143,17 +143,17 @@ class TransactionSlipService {
                         'VEHICLE / LORRY NO',
                         (tx.lorryNo != null && tx.lorryNo!.isNotEmpty)
                             ? tx.lorryNo!
-                            : '—'),
+                            : '-'),
                     _buildMetaBlock(
                         'INVOICE / REF NO',
                         (tx.invoiceNo != null && tx.invoiceNo!.isNotEmpty)
                             ? tx.invoiceNo!
-                            : '—'),
+                            : '-'),
                     _buildMetaBlock(
                         'TRANSPORT CO',
                         (tx.transportCo != null && tx.transportCo!.isNotEmpty)
                             ? tx.transportCo!
-                            : '—'),
+                            : '-'),
                     _buildMetaBlock(
                         'OPERATOR',
                         tx.user != null && tx.user!.isNotEmpty

@@ -16,6 +16,7 @@ import '../models/report_models.dart';
 import '../models/stock_models.dart';
 import '../services/data_repository.dart';
 import '../utils/sorting_utils.dart';
+import '../utils/item_order_util.dart';
 
 class PdfReportService {
   static final PdfColor logoRed = PdfColor.fromHex('#C61A22');
@@ -876,6 +877,8 @@ class PdfReportService {
     String flowMode = 'Inward',
     DateTime? startDate,
     DateTime? endDate,
+    String location = 'ALL',
+    bool activeOnly = true,
   }) async {
     final doc = _createDocument();
     final logo = await _loadLogo();
@@ -892,12 +895,41 @@ class PdfReportService {
     final bool isNetQty = flowMode == 'Net Qty';
     final String headerTitle = isNetQty
         ? "NET QUANTITY REPORT (MT)"
-        : selectedMode == 'Summary'
-            ? (isOutward ? "OUTWARD SUMMARY" : "INWARD SUMMARY")
-            : 'DETAILED REPORT';
+        : (selectedMode == 'Detailed'
+            ? "DAILY STOCK MOVEMENT SUMMARY (DETAILED)"
+            : "DAILY STOCK MOVEMENT SUMMARY");
+
+    final String locationLabel = location == 'ALL'
+        ? 'All Locations'
+        : (location.toUpperCase() == 'YARD' ? 'Yard' : location);
     final String dateSubtitle = isSameDay
-        ? 'Date: ${df.format(effectiveStart)}'
-        : 'Period: ${df.format(effectiveStart)} - ${df.format(effectiveEnd)}';
+        ? 'Date: ${df.format(effectiveStart)} | Location: $locationLabel'
+        : 'Period: ${df.format(effectiveStart)} - ${df.format(effectiveEnd)} | Location: $locationLabel';
+
+    pw.Widget buildDetailedCell(
+      String text, {
+      bool isHeader = false,
+      pw.TextAlign align = pw.TextAlign.center,
+      bool isBold = false,
+      PdfColor? color,
+      double fontSize = 8.5,
+    }) {
+      return pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3.5),
+        child: pw.Text(
+          text,
+          textAlign: align,
+          style: pw.TextStyle(
+            fontSize: fontSize,
+            color: color ??
+                (isHeader ? PdfColors.white : PdfColor.fromHex('#1E293B')),
+            fontWeight: (isHeader || isBold)
+                ? pw.FontWeight.bold
+                : pw.FontWeight.normal,
+          ),
+        ),
+      );
+    }
 
     pw.Widget buildSummaryCell(String text,
         {bool isHeader = false,
@@ -917,6 +949,16 @@ class PdfReportService {
           ),
         ),
       );
+    }
+
+    String formatPdfCell(double val,
+        {bool isPositive = false, bool isNegative = false}) {
+      if (val == 0.0 || val.abs() < 0.00001) {
+        return "-"; // Standard ASCII hyphen supported by standard PDF Helvetica
+      }
+      final formatted = val.abs().toStringAsFixed(3);
+      if (isNegative || val < 0) return '-$formatted';
+      return isPositive ? '+$formatted' : formatted;
     }
 
     double extractUnitWeight(String sizeLabel) {
@@ -972,14 +1014,11 @@ class PdfReportService {
             final summaryCategories = summaryMap.entries.toList()
               ..sort((a, b) => SortingUtils.compareCategories(a.key, b.key));
 
-            final double grandOpen = summaryCategories.fold(
-                0.0, (sum, entry) => sum + (entry.value['open'] ?? 0.0));
             final double grandIn = summaryCategories.fold(
                 0.0, (sum, entry) => sum + (entry.value['in'] ?? 0.0));
             final double grandOut = summaryCategories.fold(
                 0.0, (sum, entry) => sum + (entry.value['out'] ?? 0.0));
-            final double grandClosing = summaryCategories.fold(
-                0.0, (sum, entry) => sum + (entry.value['closing'] ?? 0.0));
+            final double grandNet = grandIn - grandOut;
 
             content.add(
               pw.Center(
@@ -988,25 +1027,26 @@ class PdfReportService {
                   border:
                       pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
                   columnWidths: const {
-                    0: pw.FlexColumnWidth(3), // Item Category
-                    1: pw.FlexColumnWidth(2), // Opening Stock (MT)
+                    0: pw.FixedColumnWidth(25), // #
+                    1: pw.FlexColumnWidth(3), // Category / Material
                     2: pw.FlexColumnWidth(2), // Inward (MT)
                     3: pw.FlexColumnWidth(2), // Outward (MT)
-                    4: pw.FlexColumnWidth(2), // Closing Stock (MT)
+                    4: pw.FlexColumnWidth(2), // Net Qty (MT)
                   },
                   children: [
                     pw.TableRow(
-                      decoration: pw.BoxDecoration(color: logoRed),
+                      decoration:
+                          const pw.BoxDecoration(color: PdfColors.red800),
                       children: [
-                        buildSummaryCell('Item Category',
+                        buildSummaryCell('#',
+                            isHeader: true, align: pw.TextAlign.center),
+                        buildSummaryCell('Category / Material',
                             isHeader: true, align: pw.TextAlign.left),
-                        buildSummaryCell('Opening Stock (MT)',
-                            isHeader: true, align: pw.TextAlign.right),
                         buildSummaryCell('Inward (MT)',
                             isHeader: true, align: pw.TextAlign.right),
                         buildSummaryCell('Outward (MT)',
                             isHeader: true, align: pw.TextAlign.right),
-                        buildSummaryCell('Closing Stock (MT)',
+                        buildSummaryCell('Net Qty (MT)',
                             isHeader: true, align: pw.TextAlign.right),
                       ],
                     ),
@@ -1015,26 +1055,27 @@ class PdfReportService {
                       final item = entry.value;
                       final rowBg =
                           idx % 2 == 1 ? PdfColors.grey50 : PdfColors.white;
-                      final openVal = item.value['open'] ?? 0.0;
                       final inVal = item.value['in'] ?? 0.0;
                       final outVal = item.value['out'] ?? 0.0;
-                      final closeVal = item.value['closing'] ?? (openVal + inVal - outVal);
+                      final netVal = inVal - outVal;
 
                       return pw.TableRow(
                         decoration: pw.BoxDecoration(color: rowBg),
                         children: [
+                          buildSummaryCell('${idx + 1}',
+                              align: pw.TextAlign.center),
                           buildSummaryCell(item.key.toUpperCase(),
                               align: pw.TextAlign.left),
-                          buildSummaryCell(openVal.toStringAsFixed(3),
+                          buildSummaryCell(
+                              formatPdfCell(inVal, isPositive: true),
                               align: pw.TextAlign.right),
                           buildSummaryCell(
-                              inVal > 0 ? "+${inVal.toStringAsFixed(3)}" : "—",
+                              formatPdfCell(outVal, isNegative: true),
                               align: pw.TextAlign.right),
                           buildSummaryCell(
-                              outVal > 0 ? "-${outVal.toStringAsFixed(3)}" : "—",
-                              align: pw.TextAlign.right),
-                          buildSummaryCell(closeVal.toStringAsFixed(3),
-                              align: pw.TextAlign.right, isBold: true),
+                              formatPdfCell(netVal, isPositive: true),
+                              align: pw.TextAlign.right,
+                              isBold: true),
                         ],
                       );
                     }),
@@ -1044,16 +1085,30 @@ class PdfReportService {
                         color: PdfColor.fromHex('#F1F5F9'),
                       ),
                       children: [
+                        buildSummaryCell('',
+                            align: pw.TextAlign.center, isBold: true),
                         buildSummaryCell('TOTAL',
                             align: pw.TextAlign.left, isBold: true),
-                        buildSummaryCell(grandOpen.toStringAsFixed(3),
-                            align: pw.TextAlign.right, isBold: true),
-                        buildSummaryCell(grandIn.toStringAsFixed(3),
-                            align: pw.TextAlign.right, isBold: true),
-                        buildSummaryCell(grandOut.toStringAsFixed(3),
-                            align: pw.TextAlign.right, isBold: true),
-                        buildSummaryCell("${grandClosing.toStringAsFixed(3)} MT",
-                            align: pw.TextAlign.right, isBold: true),
+                        buildSummaryCell(
+                            grandIn == 0.0
+                                ? "-"
+                                : "+${grandIn.toStringAsFixed(3)} MT",
+                            align: pw.TextAlign.right,
+                            isBold: true),
+                        buildSummaryCell(
+                            grandOut == 0.0
+                                ? "-"
+                                : "-${grandOut.toStringAsFixed(3)} MT",
+                            align: pw.TextAlign.right,
+                            isBold: true),
+                        buildSummaryCell(
+                            grandNet.abs() < 0.00001
+                                ? "-"
+                                : (grandNet > 0
+                                    ? "+${grandNet.toStringAsFixed(3)} MT"
+                                    : "${grandNet.toStringAsFixed(3)} MT"),
+                            align: pw.TextAlign.right,
+                            isBold: true),
                       ],
                     ),
                   ],
@@ -1081,17 +1136,71 @@ class PdfReportService {
               catEntries
                   .sort((a, b) => SortingUtils.compareSizes(a.size, b.size));
 
-              double catOpen = 0;
+              // Compute Category Totals across all entries in category
               double catIn = 0;
               double catOut = 0;
-              double catClosing = 0;
               for (var e in catEntries) {
-                catOpen += e.openingQty;
                 catIn += e.inQty.abs();
                 catOut += e.outQty.abs();
-                catClosing += e.closingQty;
+              }
+              final double catNet = catIn - catOut;
+
+              // Filter sizes based on activeOnly:
+              // For "Active Only" report: filter to sizes that had inward or outward movement.
+              // For "All Sizes" report: keep all registered sizes for that category.
+              final List<DailyMovementEntry> displayEntries = activeOnly
+                  ? catEntries
+                      .where((e) => e.inQty.abs() > 0.0001 || e.outQty.abs() > 0.0001)
+                      .toList()
+                  : catEntries;
+
+              // If activeOnly and entire category had zero movements today:
+              if (activeOnly && displayEntries.isEmpty) {
+                content.add(
+                  pw.Center(
+                    child: pw.SizedBox(
+                      width: 500,
+                      child: pw.Container(
+                        margin: const pw.EdgeInsets.only(bottom: 6),
+                        padding: const pw.EdgeInsets.symmetric(
+                            vertical: 5, horizontal: 10),
+                        decoration: pw.BoxDecoration(
+                          color: PdfColor.fromHex('#F8FAFC'),
+                          borderRadius:
+                              const pw.BorderRadius.all(pw.Radius.circular(4)),
+                          border: pw.Border.all(
+                              color: PdfColor.fromHex('#E2E8F0'), width: 0.5),
+                        ),
+                        child: pw.Row(
+                          mainAxisAlignment:
+                              pw.MainAxisAlignment.spaceBetween,
+                          children: [
+                            pw.Text(
+                              '${cat.toUpperCase()} - No Transactions Today',
+                              style: pw.TextStyle(
+                                fontSize: 8.5,
+                                fontWeight: pw.FontWeight.bold,
+                                color: PdfColor.fromHex('#475569'),
+                              ),
+                            ),
+                            pw.Text(
+                              'Net: 0.000 MT',
+                              style: pw.TextStyle(
+                                fontSize: 8.5,
+                                fontWeight: pw.FontWeight.bold,
+                                color: PdfColor.fromHex('#94A3B8'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+                continue;
               }
 
+              // Category Header Banner
               content.add(
                 pw.Center(
                   child: pw.SizedBox(
@@ -1100,43 +1209,68 @@ class PdfReportService {
                       width: double.infinity,
                       padding: const pw.EdgeInsets.symmetric(
                           vertical: 4, horizontal: 8),
-                      decoration:
-                          const pw.BoxDecoration(color: PdfColors.grey200),
-                      child: pw.Text(
-                          '${cat.toUpperCase()} | Closing: ${catClosing.toStringAsFixed(3)} MT',
-                          style: pw.TextStyle(
+                      decoration: pw.BoxDecoration(
+                        color: PdfColor.fromHex('#F1F5F9'),
+                        borderRadius: const pw.BorderRadius.vertical(
+                          top: pw.Radius.circular(4),
+                        ),
+                        border: pw.Border.all(
+                            color: PdfColor.fromHex('#CBD5E1'), width: 0.5),
+                      ),
+                      child: pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                        children: [
+                          pw.Text(
+                            cat.toUpperCase(),
+                            style: pw.TextStyle(
                               fontWeight: pw.FontWeight.bold,
-                              fontSize: 10,
-                              color: PdfColors.red900)),
+                              fontSize: 9.5,
+                              color: PdfColor.fromHex('#D32F2F'),
+                            ),
+                          ),
+                          pw.Text(
+                            'Net: ${catNet.abs() < 0.00001 ? "0.000" : (catNet > 0 ? "+${catNet.toStringAsFixed(3)}" : "${catNet.toStringAsFixed(3)}")} MT',
+                            style: pw.TextStyle(
+                              fontWeight: pw.FontWeight.bold,
+                              fontSize: 9,
+                              color: catNet < 0
+                                  ? PdfColor.fromHex('#DC2626')
+                                  : PdfColor.fromHex('#0F172A'),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               );
-              content.add(pw.SizedBox(height: 5));
 
               List<pw.TableRow> tableRows = [];
 
-              // Sub-header Row
+              // 5-Column Sub-header Row:
+              // [ # | SIZE & SECTION | INWARD (MT) | OUTWARD (MT) | NET QTY (MT) ]
               tableRows.add(
                 pw.TableRow(
-                  decoration: pw.BoxDecoration(color: logoRed),
+                  decoration: pw.BoxDecoration(
+                    color: logoRed,
+                  ),
                   children: [
-                    buildSummaryCell('Size Description',
+                    buildDetailedCell('#',
+                        isHeader: true, align: pw.TextAlign.center),
+                    buildDetailedCell('SIZE & SECTION',
                         isHeader: true, align: pw.TextAlign.left),
-                    buildSummaryCell('Opening (MT)',
+                    buildDetailedCell('INWARD (MT)',
                         isHeader: true, align: pw.TextAlign.right),
-                    buildSummaryCell('Inward (MT)',
+                    buildDetailedCell('OUTWARD (MT)',
                         isHeader: true, align: pw.TextAlign.right),
-                    buildSummaryCell('Outward (MT)',
-                        isHeader: true, align: pw.TextAlign.right),
-                    buildSummaryCell('Closing (MT)',
+                    buildDetailedCell('NET QTY (MT)',
                         isHeader: true, align: pw.TextAlign.right),
                   ],
                 ),
               );
 
-              for (var i = 0; i < catEntries.length; i++) {
-                final e = catEntries[i];
+              for (var i = 0; i < displayEntries.length; i++) {
+                final e = displayEntries[i];
                 double weight = lookupSizeWeight(e.size);
                 if (weight == 0) {
                   weight = extractUnitWeight(e.size);
@@ -1145,31 +1279,70 @@ class PdfReportService {
                     ? weight.toInt().toString()
                     : weight.toStringAsFixed(1);
                 final String weightStr =
-                    weight != 0 ? " ${formattedWeight}kg" : "";
+                    weight != 0 ? ' ${formattedWeight}kg' : '';
                 final String sizeDesc = cat.trim() == 'MS Angle'
                     ? formatSizeLabel(e.size, cat, weight)
-                    : "${e.size}$weightStr";
-                final rowBg = i % 2 == 1 ? PdfColors.grey50 : PdfColors.white;
+                    : '${e.size}$weightStr';
+                final rowBg =
+                    i % 2 == 1 ? PdfColor.fromHex('#F8FAFC') : PdfColors.white;
+
+                final double netVal = e.inQty.abs() - e.outQty.abs();
+                final bool isNetNeg = netVal < 0;
 
                 tableRows.add(
                   pw.TableRow(
                     decoration: pw.BoxDecoration(color: rowBg),
                     children: [
-                      buildSummaryCell(sizeDesc, align: pw.TextAlign.left),
-                      buildSummaryCell(e.openingQty.toStringAsFixed(3),
-                          align: pw.TextAlign.right),
-                      buildSummaryCell(
-                          e.inQty.abs() > 0
-                              ? "+${e.inQty.abs().toStringAsFixed(3)}"
-                              : '-',
-                          align: pw.TextAlign.right),
-                      buildSummaryCell(
-                          e.outQty.abs() > 0
-                              ? "-${e.outQty.abs().toStringAsFixed(3)}"
-                              : '-',
-                          align: pw.TextAlign.right),
-                      buildSummaryCell(e.closingQty.toStringAsFixed(3),
-                          align: pw.TextAlign.right, isBold: true),
+                      // 1. # (width: 25, center)
+                      buildDetailedCell(
+                        '${i + 1}',
+                        align: pw.TextAlign.center,
+                        color: PdfColor.fromHex('#94A3B8'),
+                      ),
+                      // 2. SIZE & SECTION (flex: 4, left, bold dark slate)
+                      buildDetailedCell(
+                        sizeDesc,
+                        align: pw.TextAlign.left,
+                        isBold: true,
+                        color: PdfColor.fromHex('#1E293B'),
+                      ),
+                      // 3. INWARD (MT) (flex: 2, right, emerald green)
+                      buildDetailedCell(
+                        e.inQty.abs() > 0
+                            ? '+${e.inQty.abs().toStringAsFixed(3)}'
+                            : '-',
+                        align: pw.TextAlign.right,
+                        isBold: e.inQty.abs() > 0,
+                        color: e.inQty.abs() > 0
+                            ? PdfColor.fromHex('#059669')
+                            : PdfColor.fromHex('#94A3B8'),
+                      ),
+                      // 4. OUTWARD (MT) (flex: 2, right, crimson red)
+                      buildDetailedCell(
+                        e.outQty.abs() > 0
+                            ? '-${e.outQty.abs().toStringAsFixed(3)}'
+                            : '-',
+                        align: pw.TextAlign.right,
+                        isBold: e.outQty.abs() > 0,
+                        color: e.outQty.abs() > 0
+                            ? PdfColor.fromHex('#DC2626')
+                            : PdfColor.fromHex('#94A3B8'),
+                      ),
+                      // 5. NET QTY (MT) (flex: 2, right, bold dark slate)
+                      buildDetailedCell(
+                        netVal.abs() < 0.00001
+                            ? '-'
+                            : (netVal > 0
+                                ? '+${netVal.toStringAsFixed(3)}'
+                                : '-${netVal.abs().toStringAsFixed(3)}'),
+                        align: pw.TextAlign.right,
+                        isBold: netVal.abs() >= 0.00001,
+                        color: netVal.abs() < 0.00001
+                            ? PdfColor.fromHex('#94A3B8')
+                            : (isNetNeg
+                                ? PdfColor.fromHex('#DC2626')
+                                : PdfColor.fromHex('#0F172A')),
+                      ),
                     ],
                   ),
                 );
@@ -1178,20 +1351,47 @@ class PdfReportService {
               // Dedicated CATEGORY TOTAL row
               tableRows.add(
                 pw.TableRow(
-                  decoration: const pw.BoxDecoration(
-                    color: PdfColors.grey200,
+                  decoration: pw.BoxDecoration(
+                    color: PdfColor.fromHex('#F1F5F9'),
                   ),
                   children: [
-                    buildSummaryCell('CATEGORY TOTAL',
-                        align: pw.TextAlign.left, isBold: true),
-                    buildSummaryCell(catOpen.toStringAsFixed(3),
-                        align: pw.TextAlign.right, isBold: true),
-                    buildSummaryCell(catIn.toStringAsFixed(3),
-                        align: pw.TextAlign.right, isBold: true),
-                    buildSummaryCell(catOut.toStringAsFixed(3),
-                        align: pw.TextAlign.right, isBold: true),
-                    buildSummaryCell(catClosing.toStringAsFixed(3),
-                        align: pw.TextAlign.right, isBold: true),
+                    buildDetailedCell('', align: pw.TextAlign.center),
+                    buildDetailedCell(
+                      'CATEGORY TOTAL',
+                      align: pw.TextAlign.left,
+                      isBold: true,
+                      color: PdfColor.fromHex('#0F172A'),
+                    ),
+                    buildDetailedCell(
+                      catIn == 0 ? '-' : '+${catIn.toStringAsFixed(3)}',
+                      align: pw.TextAlign.right,
+                      isBold: true,
+                      color: catIn == 0
+                          ? PdfColor.fromHex('#94A3B8')
+                          : PdfColor.fromHex('#059669'),
+                    ),
+                    buildDetailedCell(
+                      catOut == 0 ? '-' : '-${catOut.toStringAsFixed(3)}',
+                      align: pw.TextAlign.right,
+                      isBold: true,
+                      color: catOut == 0
+                          ? PdfColor.fromHex('#94A3B8')
+                          : PdfColor.fromHex('#DC2626'),
+                    ),
+                    buildDetailedCell(
+                      catNet.abs() < 0.00001
+                          ? '-'
+                          : (catNet > 0
+                              ? '+${catNet.toStringAsFixed(3)}'
+                              : '-${catNet.abs().toStringAsFixed(3)}'),
+                      align: pw.TextAlign.right,
+                      isBold: true,
+                      color: catNet.abs() < 0.00001
+                          ? PdfColor.fromHex('#94A3B8')
+                          : (catNet < 0
+                              ? PdfColor.fromHex('#DC2626')
+                              : PdfColor.fromHex('#0F172A')),
+                    ),
                   ],
                 ),
               );
@@ -1202,20 +1402,22 @@ class PdfReportService {
                     width: 500,
                     child: pw.Table(
                       border: pw.TableBorder.all(
-                          color: PdfColors.grey200, width: 0.5),
+                        color: PdfColor.fromHex('#CBD5E1'),
+                        width: 0.5,
+                      ),
                       columnWidths: const {
-                        0: pw.FlexColumnWidth(3), // Size Description
-                        1: pw.FlexColumnWidth(2), // Opening (MT)
-                        2: pw.FlexColumnWidth(2), // Inward (MT)
-                        3: pw.FlexColumnWidth(2), // Outward (MT)
-                        4: pw.FlexColumnWidth(2), // Closing (MT)
+                        0: pw.FixedColumnWidth(25), // #
+                        1: pw.FlexColumnWidth(4),   // SIZE & SECTION
+                        2: pw.FlexColumnWidth(2),   // INWARD (MT)
+                        3: pw.FlexColumnWidth(2),   // OUTWARD (MT)
+                        4: pw.FlexColumnWidth(2),   // NET QTY (MT)
                       },
                       children: tableRows,
                     ),
                   ),
                 ),
               );
-              content.add(pw.SizedBox(height: 15));
+              content.add(pw.SizedBox(height: 12));
             }
 
             // Overall Total Row for Detailed Mode
@@ -1225,34 +1427,85 @@ class PdfReportService {
               overallIn += e.inQty.abs();
               overallOut += e.outQty.abs();
             }
+            final double overallNet = overallIn - overallOut;
+            final bool isOverallNetNeg = overallNet < 0;
 
             content.add(
               pw.Center(
                 child: pw.SizedBox(
-                  width: 290,
-                  child: pw.Table(
-                    border: pw.TableBorder.all(
-                        color: PdfColor.fromHex('#94A3B8'), width: 1.0),
-                    columnWidths: const {
-                      0: pw.FixedColumnWidth(150),
-                      1: pw.FixedColumnWidth(70),
-                      2: pw.FixedColumnWidth(70),
-                    },
-                    children: [
-                      pw.TableRow(
-                        decoration: pw.BoxDecoration(
-                          color: PdfColor.fromHex('#F1F5F9'),
+                  width: 500,
+                  child: pw.Container(
+                    margin: const pw.EdgeInsets.only(top: 6, bottom: 8),
+                    padding: const pw.EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 8),
+                    decoration: pw.BoxDecoration(
+                      color: PdfColor.fromHex('#0F172A'),
+                      borderRadius:
+                          const pw.BorderRadius.all(pw.Radius.circular(6)),
+                    ),
+                    child: pw.Row(
+                      children: [
+                        pw.SizedBox(width: 25),
+                        pw.Expanded(
+                          flex: 4,
+                          child: pw.Text(
+                            'OVERALL TOTAL MOVEMENT',
+                            style: pw.TextStyle(
+                              color: PdfColors.white,
+                              fontWeight: pw.FontWeight.bold,
+                              fontSize: 9.5,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
                         ),
-                        children: [
-                          buildSummaryCell('OVERALL TOTAL',
-                              align: pw.TextAlign.left, isBold: true),
-                          buildSummaryCell('${overallIn.toStringAsFixed(3)} MT',
-                              align: pw.TextAlign.right, isBold: true),
-                          buildSummaryCell('${overallOut.toStringAsFixed(3)} MT',
-                              align: pw.TextAlign.right, isBold: true),
-                        ],
-                      ),
-                    ],
+                        pw.Expanded(
+                          flex: 2,
+                          child: pw.Text(
+                            overallIn == 0
+                                ? '-'
+                                : '+${overallIn.toStringAsFixed(3)} MT',
+                            textAlign: pw.TextAlign.right,
+                            style: pw.TextStyle(
+                              color: PdfColor.fromHex('#34D399'),
+                              fontWeight: pw.FontWeight.bold,
+                              fontSize: 9,
+                            ),
+                          ),
+                        ),
+                        pw.Expanded(
+                          flex: 2,
+                          child: pw.Text(
+                            overallOut == 0
+                                ? '-'
+                                : '-${overallOut.toStringAsFixed(3)} MT',
+                            textAlign: pw.TextAlign.right,
+                            style: pw.TextStyle(
+                              color: PdfColor.fromHex('#F87171'),
+                              fontWeight: pw.FontWeight.bold,
+                              fontSize: 9,
+                            ),
+                          ),
+                        ),
+                        pw.Expanded(
+                          flex: 2,
+                          child: pw.Text(
+                            overallNet.abs() < 0.00001
+                                ? '0.000 MT'
+                                : (overallNet > 0
+                                    ? '+${overallNet.toStringAsFixed(3)} MT'
+                                    : '${overallNet.toStringAsFixed(3)} MT'),
+                            textAlign: pw.TextAlign.right,
+                            style: pw.TextStyle(
+                              color: isOverallNetNeg
+                                  ? PdfColor.fromHex('#FCA5A5')
+                                  : PdfColors.white,
+                              fontWeight: pw.FontWeight.bold,
+                              fontSize: 9.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1360,132 +1613,259 @@ class PdfReportService {
 
   static Future<Uint8List> generateLowStockPdf({
     required List<Map<String, dynamic>> lowStockItemsList,
+    String location = 'ALL',
   }) async {
     final doc = _createDocument();
     final logo = await _loadLogo();
     final now = DateTime.now();
     final df = DateFormat('dd MMM yyyy');
 
+    // 1. Group items by canonical category
+    final Map<String, List<Map<String, dynamic>>> grouped = {};
+    for (var item in lowStockItemsList) {
+      final rawCat = (item['category_name'] ??
+              item['category'] ??
+              item['item_name'] ??
+              item['itemName'] ??
+              'General')
+          .toString()
+          .trim();
+      final cat = DataRepository.canonicalizeCategory(rawCat);
+      grouped.putIfAbsent(cat, () => []);
+      grouped[cat]!.add(item);
+    }
+    final categories = grouped.keys.toList()..sort(ItemOrderUtil.compare);
+
+    double grandTotal = 0.0;
+    for (var item in lowStockItemsList) {
+      final qty = double.tryParse((item['net_stock_mt'] ??
+                  item['low_stock_qty'] ??
+                  item['qty'] ??
+                  item['currentStockMT'] ??
+                  0)
+              .toString()) ??
+          0.0;
+      grandTotal += qty;
+    }
+
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.symmetric(horizontal: 24, vertical: 20),
         header: (context) => _buildProfessionalHeader(
-            'LOW STOCK REPORT', 'Generated on ${df.format(now)}', logo),
-        build: (context) => [
-          pw.SizedBox(height: 10),
-          pw.Table(
-            border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
-            children: [
+          'LOW STOCK REPORT',
+          'Period: As of ${df.format(now)} | Location: $location | Generated: ${df.format(now)}',
+          logo,
+        ),
+        build: (context) {
+          final List<pw.Widget> content = [];
+
+          content.add(pw.Center(
+            child: pw.Column(children: [
+              pw.Text('TOTAL LOW STOCK QUANTITY',
+                  style: pw.TextStyle(
+                      fontSize: 9,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.grey700)),
+              pw.SizedBox(height: 2),
+              pw.Text('${grandTotal.toStringAsFixed(3)} MT',
+                  style: pw.TextStyle(
+                      fontSize: 16,
+                      fontWeight: pw.FontWeight.bold,
+                      color: grandTotal < 0 ? PdfColors.red700 : logoRed)),
+            ]),
+          ));
+          content.add(pw.SizedBox(height: 16));
+
+          for (final cat in categories) {
+            final items = grouped[cat]!;
+
+            // Sort: Out of stock (0.000) & Deficit (<0) first, then lowest positive stock, then size
+            items.sort((a, b) {
+              final double qtyA = double.tryParse((a['net_stock_mt'] ??
+                          a['low_stock_qty'] ??
+                          a['qty'] ??
+                          a['currentStockMT'] ??
+                          0)
+                      .toString()) ??
+                  0.0;
+              final double qtyB = double.tryParse((b['net_stock_mt'] ??
+                          b['low_stock_qty'] ??
+                          b['qty'] ??
+                          b['currentStockMT'] ??
+                          0)
+                      .toString()) ??
+                  0.0;
+
+              final bool aCritical = qtyA <= 0.0001;
+              final bool bCritical = qtyB <= 0.0001;
+              if (aCritical && !bCritical) return -1;
+              if (!aCritical && bCritical) return 1;
+
+              final qtyComp = qtyA.compareTo(qtyB);
+              if (qtyComp != 0) return qtyComp;
+
+              final sizeA = (a['size_label'] ?? a['size_description'] ?? a['size'] ?? '').toString();
+              final sizeB = (b['size_label'] ?? b['size_description'] ?? b['size'] ?? '').toString();
+              return SortingUtils.compareSizes(sizeA, sizeB);
+            });
+
+            double catTotal = 0.0;
+            int rowIdx = 1;
+            final List<pw.TableRow> rows = [];
+
+            // Table Header: [ # | Size Description | Current Stock (MT) | Status ]
+            rows.add(
               pw.TableRow(
-                decoration: const pw.BoxDecoration(color: PdfColors.red700),
+                decoration: pw.BoxDecoration(color: logoRed),
                 children: [
-                  pw.Padding(
-                    padding: const pw.EdgeInsets.all(6),
-                    child: pw.Text("Item / Size Description",
-                        style: pw.TextStyle(
-                            color: PdfColors.white,
-                            fontWeight: pw.FontWeight.bold,
-                            fontSize: 10)),
+                  pw.Container(
+                    alignment: pw.Alignment.center,
+                    padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                    child: pw.Text('#',
+                        style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 8)),
                   ),
-                  pw.Padding(
-                    padding: const pw.EdgeInsets.all(6),
-                    child: pw.Text("Category",
-                        style: pw.TextStyle(
-                            color: PdfColors.white,
-                            fontWeight: pw.FontWeight.bold,
-                            fontSize: 10)),
+                  pw.Container(
+                    alignment: pw.Alignment.centerLeft,
+                    padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+                    child: pw.Text('Size Description',
+                        style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 8)),
                   ),
-                  pw.Padding(
-                    padding: const pw.EdgeInsets.all(6),
-                    child: pw.Text("Status",
-                        style: pw.TextStyle(
-                            color: PdfColors.white,
-                            fontWeight: pw.FontWeight.bold,
-                            fontSize: 10)),
+                  pw.Container(
+                    alignment: pw.Alignment.centerRight,
+                    padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+                    child: pw.Text('Current Stock (MT)',
+                        style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 8)),
                   ),
-                  pw.Padding(
-                    padding: const pw.EdgeInsets.all(6),
-                    child: pw.Text("Available Qty",
-                        style: pw.TextStyle(
-                            color: PdfColors.white,
-                            fontWeight: pw.FontWeight.bold,
-                            fontSize: 10)),
+                  pw.Container(
+                    alignment: pw.Alignment.center,
+                    padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                    child: pw.Text('Status',
+                        style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 8)),
                   ),
                 ],
               ),
-              ...lowStockItemsList.map((item) {
-                final qty =
-                    double.tryParse(item['net_stock_mt'].toString()) ?? 0.0;
-                final statusText =
-                    qty == 0.0 ? "Out of Stock" : "Critical Limit";
+            );
 
-                return pw.TableRow(
+            for (final item in items) {
+              final double qty = double.tryParse((item['net_stock_mt'] ??
+                          item['low_stock_qty'] ??
+                          item['qty'] ??
+                          item['currentStockMT'] ??
+                          0)
+                      .toString()) ??
+                  0.0;
+              catTotal += qty;
+
+              final bool isDeficit = qty < -0.0001;
+              final bool isZero = !isDeficit && qty.abs() <= 0.0001;
+              final String status = isDeficit
+                  ? 'DEFICIT'
+                  : (isZero ? 'OUT OF STOCK' : 'LOW STOCK');
+              final PdfColor statusColor = (isDeficit || isZero)
+                  ? PdfColor.fromHex('#DC2626')
+                  : PdfColor.fromHex('#D97706');
+
+              final rawSize = (item['size_label'] ?? item['size_description'] ?? item['size'] ?? '').toString();
+              final itemName = (item['item_name'] ?? item['itemName'] ?? cat).toString();
+              double weight = double.tryParse(item['weight']?.toString() ?? '0') ?? 0.0;
+              if (weight == 0) weight = lookupSizeWeight(rawSize);
+              if (weight == 0) weight = _extractUnitWeight(rawSize);
+              final formattedSize = _pSizeLabel(itemName, rawSize, weight);
+
+              final isEven = (rowIdx % 2 == 0);
+              rows.add(
+                pw.TableRow(
+                  decoration: pw.BoxDecoration(
+                    color: isEven ? PdfColors.grey100 : PdfColors.white,
+                  ),
                   children: [
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(6),
-                      child: pw.Text((() {
-                        final String label = (item['size_label'] ??
-                                item['size_description'] ??
-                                '')
-                            .toString()
-                            .trim();
-                        final String category =
-                            (item['item_name'] ?? 'General').toString();
-                        double weight = double.tryParse(
-                                item['weight']?.toString() ?? '0') ??
-                            0.0;
-                        if (weight == 0) {
-                          weight = lookupSizeWeight(label);
-                        }
-                        if (weight == 0) {
-                          weight = _extractUnitWeight(label);
-                        }
-                        final formattedWeight = weight % 1 == 0
-                            ? weight.toInt().toString()
-                            : weight.toStringAsFixed(1);
-                        final String suffix =
-                            (weight > 0) ? " ${formattedWeight}kg" : "";
-                        return (category.trim() == 'MS Angle')
-                            ? formatSizeLabel(label, category, weight)
-                            : "$label$suffix".trim();
-                      })(),
+                    pw.Container(
+                      alignment: pw.Alignment.center,
+                      padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+                      child: pw.Text('$rowIdx',
+                          style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700)),
+                    ),
+                    pw.Container(
+                      alignment: pw.Alignment.centerLeft,
+                      padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 6),
+                      child: pw.Text('$itemName - $formattedSize',
+                          style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.black)),
+                    ),
+                    pw.Container(
+                      alignment: pw.Alignment.centerRight,
+                      padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 6),
+                      child: pw.Text(qty.toStringAsFixed(3),
                           style: pw.TextStyle(
-                              font: pw.Font.helvetica(),
-                              fontSize: 10,
-                              fontWeight: pw.FontWeight.bold)),
+                              fontSize: 8,
+                              fontWeight: pw.FontWeight.bold,
+                              color: (isDeficit || isZero) ? PdfColor.fromHex('#DC2626') : PdfColors.black)),
                     ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(6),
-                      child: pw.Text(item['item_name'] ?? 'General',
-                          style: pw.TextStyle(fontSize: 10)),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(6),
-                      child: pw.Text(statusText,
-                          style: pw.TextStyle(
-                              fontSize: 10,
-                              color: qty == 0.0
-                                  ? pdf.PdfColors.grey
-                                  : pdf.PdfColors.red)),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(6),
-                      child: pw.Text("${qty.toStringAsFixed(3)} MT",
-                          textAlign: pw.TextAlign.right,
-                          style: pw.TextStyle(fontSize: 10)),
+                    pw.Container(
+                      alignment: pw.Alignment.center,
+                      padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+                      child: pw.Text(status,
+                          style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: statusColor)),
                     ),
                   ],
-                );
-              }).toList(),
-            ],
-          ),
-          pw.SizedBox(height: 20),
-          pw.Text(
-            'Note: Critical status indicates stock level is below 30% of the reorder threshold.',
-            style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
-          ),
-        ],
+                ),
+              );
+              rowIdx++;
+            }
+
+            content.add(
+              pw.Inseparable(
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                  children: [
+                    pw.Container(
+                      padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+                      decoration: pw.BoxDecoration(color: PdfColors.grey200),
+                      child: pw.Text(
+                        cat.toUpperCase(),
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColor.fromHex('#C61A22'),
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Table(
+                      border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+                      columnWidths: {
+                        0: const pw.FixedColumnWidth(28),
+                        1: const pw.FlexColumnWidth(4),
+                        2: const pw.FlexColumnWidth(2),
+                        3: const pw.FlexColumnWidth(2),
+                      },
+                      children: rows,
+                    ),
+                    pw.Container(
+                      padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 6),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColors.grey100,
+                        border: pw.Border.all(color: PdfColors.grey300, width: 0.5),
+                      ),
+                      child: pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                        children: [
+                          pw.Text('TOTAL $cat',
+                              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8)),
+                          pw.Text('${catTotal.toStringAsFixed(3)} MT',
+                              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8)),
+                        ],
+                      ),
+                    ),
+                    pw.SizedBox(height: 12),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          return content;
+        },
         footer: (context) => _buildProfessionalFooter(context, now),
       ),
     );
@@ -2066,7 +2446,7 @@ class PdfReportService {
     final df = DateFormat('dd MMM yyyy');
 
     double totalLowStock =
-        entries.fold(0.0, (sum, e) => sum + e.availableStockMT);
+        entries.fold(0.0, (sum, e) => sum + e.currentStockMT);
 
     Map<String, List<ItemVariant>> grouped = {};
     for (var e in entries) {
@@ -2075,7 +2455,7 @@ class PdfReportService {
       grouped[cat]!.add(e);
     }
     final categories = grouped.keys.toList()
-      ..sort(SortingUtils.compareCategories);
+      ..sort(ItemOrderUtil.compare);
 
     doc.addPage(
       pw.MultiPage(
@@ -2104,165 +2484,206 @@ class PdfReportService {
                     fontWeight: pw.FontWeight.bold,
                     color: totalLowStock < 0 ? PdfColors.red700 : logoRed)),
           ])));
-          content.add(pw.SizedBox(height: 20));
+          content.add(pw.SizedBox(height: 16));
 
           if (isDetailed) {
             for (var cat in categories) {
               final items = grouped[cat]!;
               final uniqueItemsMap = <String, ItemVariant>{};
               for (var item in items) {
-                double unitWeight = lookupSizeWeight(item.size);
-                if (unitWeight == 0) {
-                  unitWeight = _extractUnitWeight(item.size);
-                }
-                String uniqueKey = "${item.itemName}_${item.size}_$unitWeight";
+                final String uniqueKey = "${item.itemName}_${item.size}";
                 if (!uniqueItemsMap.containsKey(uniqueKey)) {
                   uniqueItemsMap[uniqueKey] = item;
                 } else {
-                  if (item.availableStockMT >
-                      uniqueItemsMap[uniqueKey]!.availableStockMT) {
-                    uniqueItemsMap[uniqueKey] = item;
-                  }
+                  final existing = uniqueItemsMap[uniqueKey]!;
+                  uniqueItemsMap[uniqueKey] = ItemVariant(
+                    itemName: existing.itemName,
+                    category: existing.category,
+                    size: existing.size,
+                    currentStockMT: existing.currentStockMT + item.currentStockMT,
+                    minStock: existing.minStock,
+                    location: existing.location == item.location
+                        ? existing.location
+                        : 'ALL',
+                    yardTotal: existing.yardTotal + item.yardTotal,
+                    factoryTotal: existing.factoryTotal + item.factoryTotal,
+                  );
                 }
               }
-              final filteredItems = uniqueItemsMap.values
-                  .where((item) => item.availableStockMT > 0)
-                  .toList();
+              final filteredItems = uniqueItemsMap.values.toList();
+              if (filteredItems.isEmpty) continue;
+
+              // Sort: Out of stock (0.000) & Deficit (<0) first, then lowest positive stock, then size
               filteredItems.sort((a, b) {
-                int cmp =
-                    SortingUtils.compareCategories(a.itemName, b.itemName);
-                if (cmp != 0) return cmp;
+                final bool aCritical = a.currentStockMT <= 0.0001;
+                final bool bCritical = b.currentStockMT <= 0.0001;
+                if (aCritical && !bCritical) return -1;
+                if (!aCritical && bCritical) return 1;
+
+                final qtyComp = a.currentStockMT.compareTo(b.currentStockMT);
+                if (qtyComp != 0) return qtyComp;
+
                 return SortingUtils.compareSizes(a.size, b.size);
               });
-              if (filteredItems.isEmpty) continue;
-              double catTotal =
-                  filteredItems.fold(0.0, (sum, e) => sum + e.availableStockMT);
 
-              List<List<String>> tableData = filteredItems.map((e) {
+              double catTotal =
+                  filteredItems.fold(0.0, (sum, e) => sum + e.currentStockMT);
+
+              int rowIdx = 1;
+              final List<pw.TableRow> rows = [];
+
+              // Table Header: [ # | Size Description | Current Stock (MT) | Status ]
+              rows.add(
+                pw.TableRow(
+                  decoration: pw.BoxDecoration(color: logoRed),
+                  children: [
+                    pw.Container(
+                      alignment: pw.Alignment.center,
+                      padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                      child: pw.Text('#',
+                          style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 8)),
+                    ),
+                    pw.Container(
+                      alignment: pw.Alignment.centerLeft,
+                      padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+                      child: pw.Text('Size Description',
+                          style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 8)),
+                    ),
+                    pw.Container(
+                      alignment: pw.Alignment.centerRight,
+                      padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+                      child: pw.Text('Current Stock (MT)',
+                          style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 8)),
+                    ),
+                    pw.Container(
+                      alignment: pw.Alignment.center,
+                      padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                      child: pw.Text('Status',
+                          style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 8)),
+                    ),
+                  ],
+                ),
+              );
+
+              for (final e in filteredItems) {
                 double unitWeight = lookupSizeWeight(e.size);
                 if (unitWeight == 0) {
                   unitWeight = _extractUnitWeight(e.size);
                 }
                 final String formattedSize =
                     _pSizeLabel(e.itemName, e.size, unitWeight);
-                return [
-                  '${e.itemName} - $formattedSize',
-                  e.availableStockMT.toStringAsFixed(3),
-                ];
-              }).toList();
+
+                final bool isDeficit = e.currentStockMT < -0.0001;
+                final bool isZero = !isDeficit && e.currentStockMT.abs() <= 0.0001;
+                final String status = isDeficit
+                    ? 'DEFICIT'
+                    : (isZero ? 'OUT OF STOCK' : 'LOW STOCK');
+                final PdfColor statusColor = (isDeficit || isZero)
+                    ? PdfColor.fromHex('#DC2626')
+                    : PdfColor.fromHex('#D97706');
+
+                final isEven = (rowIdx % 2 == 0);
+                rows.add(
+                  pw.TableRow(
+                    decoration: pw.BoxDecoration(
+                      color: isEven ? PdfColors.grey100 : PdfColors.white,
+                    ),
+                    children: [
+                      pw.Container(
+                        alignment: pw.Alignment.center,
+                        padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+                        child: pw.Text('$rowIdx',
+                            style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700)),
+                      ),
+                      pw.Container(
+                        alignment: pw.Alignment.centerLeft,
+                        padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 6),
+                        child: pw.Text('${e.itemName} - $formattedSize',
+                            style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.black)),
+                      ),
+                      pw.Container(
+                        alignment: pw.Alignment.centerRight,
+                        padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 6),
+                        child: pw.Text(e.currentStockMT.toStringAsFixed(3),
+                            style: pw.TextStyle(
+                                fontSize: 8,
+                                fontWeight: pw.FontWeight.bold,
+                                color: (isDeficit || isZero) ? PdfColor.fromHex('#DC2626') : PdfColors.black)),
+                      ),
+                      pw.Container(
+                        alignment: pw.Alignment.center,
+                        padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+                        child: pw.Text(status,
+                            style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: statusColor)),
+                      ),
+                    ],
+                  ),
+                );
+                rowIdx++;
+              }
 
               content.add(
                 pw.Inseparable(
                   child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.center,
+                    crossAxisAlignment: pw.CrossAxisAlignment.stretch,
                     children: [
-                      pw.Center(
-                        child: pw.SizedBox(
-                          width:
-                              240, // Matches the data grid envelope perfectly
-                          child: pw.Container(
-                            alignment: pw.Alignment.centerLeft,
-                            decoration: pw.BoxDecoration(
-                              color: PdfColor.fromHex(
-                                  '#F5F5F5'), // Standard light grey background
-                            ),
-                            padding: const pw.EdgeInsets.symmetric(
-                                vertical: 4, horizontal: 6),
-                            child: pw.Text(
-                              cat.toUpperCase(),
-                              style: pw.TextStyle(
-                                fontWeight: pw.FontWeight.bold,
-                                color: PdfColor.fromHex(
-                                    '#C61A22'), // Corporate brand red
-                                fontSize: 11,
-                              ),
-                            ),
+                      pw.Container(
+                        padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+                        decoration: pw.BoxDecoration(color: PdfColors.grey200),
+                        child: pw.Text(
+                          cat.toUpperCase(),
+                          style: pw.TextStyle(
+                            fontWeight: pw.FontWeight.bold,
+                            color: PdfColor.fromHex('#C61A22'),
+                            fontSize: 10,
                           ),
                         ),
                       ),
-                      pw.SizedBox(height: 5),
-                      pw.Center(
-                        child: pw.SizedBox(
-                          width: 240,
-                          child: pw.TableHelper.fromTextArray(
-                            border: pw.TableBorder.all(
-                                color: PdfColors.grey200, width: 0.5),
-                            headerDecoration: pw.BoxDecoration(color: logoRed),
-                            headerStyle: pw.TextStyle(
-                                color: PdfColors.white,
-                                fontWeight: pw.FontWeight.bold,
-                                fontSize: 8),
-                            cellStyle: const pw.TextStyle(fontSize: 8),
-                            cellPadding: const pw.EdgeInsets.symmetric(
-                                vertical: 2, horizontal: 4),
-                            oddRowDecoration: const pw.BoxDecoration(
-                                color: PdfColors.grey100),
-                            rowDecoration:
-                                const pw.BoxDecoration(color: PdfColors.white),
-                            headers: ['Size Description', 'Low Stock Qty'],
-                            data: tableData,
-                            cellAlignments: {
-                              0: pw.Alignment.centerLeft,
-                              1: pw.Alignment.centerRight
-                            },
-                            columnWidths: {
-                              0: const pw.FixedColumnWidth(
-                                  175), // Size Description (Snug layout for items like 'MS Pipe 0.75" 19x19(1.6) 5kg')
-                              1: const pw.FixedColumnWidth(
-                                  65), // Low Stock Qty (MT) (Pulled tight against description text)
-                            },
-                          ),
+                      pw.SizedBox(height: 4),
+                      pw.Table(
+                        border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+                        columnWidths: {
+                          0: const pw.FixedColumnWidth(28),
+                          1: const pw.FlexColumnWidth(4),
+                          2: const pw.FlexColumnWidth(2),
+                          3: const pw.FlexColumnWidth(2),
+                        },
+                        children: rows,
+                      ),
+                      pw.Container(
+                        padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 6),
+                        decoration: pw.BoxDecoration(
+                          color: PdfColors.grey100,
+                          border: pw.Border.all(color: PdfColors.grey300, width: 0.5),
+                        ),
+                        child: pw.Row(
+                          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                          children: [
+                            pw.Text('TOTAL $cat',
+                                style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8)),
+                            pw.Text('${catTotal.toStringAsFixed(3)} MT',
+                                style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8)),
+                          ],
                         ),
                       ),
-                      pw.SizedBox(height: 5),
-                      pw.Center(
-                        child: pw.SizedBox(
-                          width: 240,
-                          child: pw.Container(
-                            padding: const pw.EdgeInsets.symmetric(
-                                vertical: 4, horizontal: 8),
-                            decoration: pw.BoxDecoration(
-                              color: PdfColors.grey100,
-                              border: pw.Border.all(
-                                  color: PdfColors.grey300, width: 0.5),
-                            ),
-                            child: pw.Row(
-                              mainAxisAlignment:
-                                  pw.MainAxisAlignment.spaceBetween,
-                              children: [
-                                pw.Text('TOTAL CATEGORY',
-                                    style: pw.TextStyle(
-                                        fontWeight: pw.FontWeight.bold,
-                                        fontSize: 8,
-                                        color: PdfColors.black)),
-                                pw.Text('${catTotal.toStringAsFixed(3)} MT',
-                                    style: pw.TextStyle(
-                                        fontWeight: pw.FontWeight.bold,
-                                        fontSize: 8,
-                                        color: PdfColors.black)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
+                      pw.SizedBox(height: 12),
                     ],
                   ),
                 ),
               );
-              content.add(pw.SizedBox(height: 15));
             }
           } else {
             // Summary Table
             List<List<String>> summaryData = categories.map((cat) {
               double total =
-                  grouped[cat]!.fold(0.0, (sum, e) => sum + e.availableStockMT);
+                  grouped[cat]!.fold(0.0, (sum, e) => sum + e.currentStockMT);
               return [cat, total.toStringAsFixed(3)];
             }).toList();
 
             content.add(
               pw.Center(
                 child: pw.SizedBox(
-                  width: 250,
+                  width: 320,
                   child: pw.TableHelper.fromTextArray(
                     border: pw.TableBorder.all(
                         color: PdfColors.grey200, width: 0.5),
@@ -2278,16 +2699,15 @@ class PdfReportService {
                         const pw.BoxDecoration(color: PdfColors.grey100),
                     rowDecoration:
                         const pw.BoxDecoration(color: PdfColors.white),
-                    headers: ['Category', 'Total Qty (MT)'],
+                    headers: ['Category', 'Total Low Stock (MT)'],
                     data: summaryData,
                     cellAlignments: {
                       0: pw.Alignment.centerLeft,
                       1: pw.Alignment.centerRight
                     },
                     columnWidths: {
-                      0: const pw.FixedColumnWidth(
-                          160), // Category Name (e.g., MS Pipe, MS Angle)
-                      1: const pw.FixedColumnWidth(90), // Total Qty (MT)
+                      0: const pw.FlexColumnWidth(3),
+                      1: const pw.FlexColumnWidth(2),
                     },
                   ),
                 ),

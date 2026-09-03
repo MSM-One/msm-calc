@@ -19,6 +19,7 @@ class EnterpriseStockMovementTable extends StatefulWidget {
   final Map<String, bool> categoryDownloading;
   final String locationFilter;
   final Widget? emptyState;
+  final bool activeOnly;
 
   const EnterpriseStockMovementTable({
     super.key,
@@ -30,6 +31,7 @@ class EnterpriseStockMovementTable extends StatefulWidget {
     this.categoryDownloading = const {},
     this.locationFilter = 'ALL',
     this.emptyState,
+    this.activeOnly = false,
   });
 
   static double extractUnitWeight(String sizeLabel) {
@@ -120,7 +122,10 @@ class _EnterpriseStockMovementTableState
   Widget _buildDesktopSplitView(List<String> sortedCategories) {
     final activeCat = _selectedCategory ?? sortedCategories.first;
     final categoryItems = widget.groupedReport[activeCat] ?? {};
-    final rowDataList = _flattenCategoryItems(categoryItems);
+    final rawRowDataList = _flattenCategoryItems(categoryItems);
+    final rowDataList = widget.activeOnly
+        ? rawRowDataList.where((r) => r.hasMovement).toList()
+        : rawRowDataList;
 
     final allEntries = categoryItems.values.expand((list) => list).toList();
     final double totalOpening =
@@ -204,14 +209,14 @@ class _EnterpriseStockMovementTableState
                             items.values.expand((list) => list).toList();
                         final double catClosing =
                             entries.fold(0.0, (sum, e) => sum + e.closing);
-                        final int sizeCount = entries.fold(
-                            0,
-                            (sum, e) =>
-                                sum + (e.sizes.isEmpty ? 1 : e.sizes.length));
+                        final rawItems = _flattenCategoryItems(items);
+                        final int activeCount =
+                            rawItems.where((r) => r.hasMovement).length;
 
                         return _buildCategorySidebarRow(
                           category: cat,
-                          sizeCount: sizeCount,
+                          sizeCount: rawItems.length,
+                          activeCount: activeCount,
                           netTonnage: catClosing,
                           isSelected: isSelected,
                           onTap: () {
@@ -239,7 +244,8 @@ class _EnterpriseStockMovementTableState
                   // Active Category Top Header Banner
                   _buildRightPaneCategoryHeader(
                     category: activeCat,
-                    sizeCount: rowDataList.length,
+                    sizeCount: rawRowDataList.length,
+                    activeCount: rowDataList.length,
                     totalOpening: totalOpening,
                     totalInward: totalInward,
                     totalOutward: totalOutward,
@@ -258,12 +264,36 @@ class _EnterpriseStockMovementTableState
                   // Table Body
                   Expanded(
                     child: rowDataList.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'No sizes recorded for this category',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Color(0xFF94A3B8),
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24.0),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF1F5F9),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                                    ),
+                                    child: const Icon(
+                                      Icons.inbox_outlined,
+                                      size: 28,
+                                      color: Color(0xFF94A3B8),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'No stock movements recorded for $activeCat on this date.',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           )
@@ -272,8 +302,11 @@ class _EnterpriseStockMovementTableState
                             itemCount: rowDataList.length,
                             itemBuilder: (context, index) {
                               final row = rowDataList[index];
+                              final reindexedRow = widget.activeOnly
+                                  ? row.copyWith(index: index + 1)
+                                  : row;
                               return _buildDenseTableRow(
-                                row: row,
+                                row: reindexedRow,
                                 isEven: index % 2 == 0,
                               );
                             },
@@ -300,6 +333,7 @@ class _EnterpriseStockMovementTableState
   Widget _buildCategorySidebarRow({
     required String category,
     required int sizeCount,
+    int? activeCount,
     required double netTonnage,
     required bool isSelected,
     required VoidCallback onTap,
@@ -353,7 +387,9 @@ class _EnterpriseStockMovementTableState
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      '$sizeCount sizes',
+                      (widget.activeOnly && activeCount != null)
+                          ? '$activeCount active / $sizeCount sizes'
+                          : '$sizeCount sizes',
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
@@ -398,6 +434,7 @@ class _EnterpriseStockMovementTableState
   Widget _buildRightPaneCategoryHeader({
     required String category,
     required int sizeCount,
+    int? activeCount,
     required double totalOpening,
     required double totalInward,
     required double totalOutward,
@@ -450,7 +487,9 @@ class _EnterpriseStockMovementTableState
               border: Border.all(color: const Color(0xFFE2E8F0)),
             ),
             child: Text(
-              '$sizeCount sizes',
+              (widget.activeOnly && activeCount != null)
+                  ? '$activeCount active / $sizeCount sizes'
+                  : '$sizeCount sizes',
               style: const TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
@@ -706,7 +745,7 @@ class _EnterpriseStockMovementTableState
           SizedBox(
             width: 105,
             child: Text(
-              row.opening == 0 ? '—' : row.opening.toStringAsFixed(3),
+              row.opening == 0 ? '-' : row.opening.toStringAsFixed(3),
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontSize: 11.5,
@@ -724,7 +763,7 @@ class _EnterpriseStockMovementTableState
           SizedBox(
             width: 105,
             child: Text(
-              row.inward == 0 ? '—' : '+${row.inward.toStringAsFixed(3)}',
+              row.inward == 0 ? '-' : '+${row.inward.toStringAsFixed(3)}',
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontSize: 11.5,
@@ -742,7 +781,7 @@ class _EnterpriseStockMovementTableState
           SizedBox(
             width: 105,
             child: Text(
-              row.outward == 0 ? '—' : '-${row.outward.toStringAsFixed(3)}',
+              row.outward == 0 ? '-' : '-${row.outward.toStringAsFixed(3)}',
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontSize: 11.5,
@@ -765,9 +804,11 @@ class _EnterpriseStockMovementTableState
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w900,
-                color: isNegative
-                    ? const Color(0xFFDC2626)
-                    : const Color(0xFF0F172A),
+                color: row.closing == 0
+                    ? const Color(0xFF94A3B8)
+                    : (isNegative
+                        ? const Color(0xFFDC2626)
+                        : const Color(0xFF0F172A)),
                 fontFamily: 'monospace',
               ),
             ),
@@ -884,7 +925,10 @@ class _EnterpriseStockMovementTableState
       itemBuilder: (context, index) {
         final category = sortedCategories[index];
         final categoryItems = widget.groupedReport[category] ?? {};
-        final rowDataList = _flattenCategoryItems(categoryItems);
+        final rawRowDataList = _flattenCategoryItems(categoryItems);
+        final rowDataList = widget.activeOnly
+            ? rawRowDataList.where((r) => r.hasMovement).toList()
+            : rawRowDataList;
         final allEntries =
             categoryItems.values.expand((list) => list).toList();
         final double totalOpening =
@@ -936,7 +980,9 @@ class _EnterpriseStockMovementTableState
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        '${rowDataList.length} sizes',
+                        widget.activeOnly
+                            ? '${rowDataList.length} active / ${rawRowDataList.length} sizes'
+                            : '${rawRowDataList.length} sizes',
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
@@ -970,17 +1016,40 @@ class _EnterpriseStockMovementTableState
 
               // Expanded Detailed Table
               if (isExpanded) ...[
-                _buildDenseTableHeader(),
-                ...rowDataList.map((row) => _buildDenseTableRow(
-                      row: row,
-                      isEven: row.index % 2 == 0,
-                    )),
-                _buildDenseTableFooter(
-                  totalOpening: totalOpening,
-                  totalInward: totalInward,
-                  totalOutward: totalOutward,
-                  totalClosing: totalClosing,
-                ),
+                if (rowDataList.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Center(
+                      child: Text(
+                        'No stock movements recorded for $category on this date.',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ),
+                  )
+                else ...[
+                  _buildDenseTableHeader(),
+                  ...rowDataList.asMap().entries.map((entry) {
+                    final idx = entry.key;
+                    final row = entry.value;
+                    final reindexedRow = widget.activeOnly
+                        ? row.copyWith(index: idx + 1)
+                        : row;
+                    return _buildDenseTableRow(
+                      row: reindexedRow,
+                      isEven: idx % 2 == 0,
+                    );
+                  }),
+                  _buildDenseTableFooter(
+                    totalOpening: totalOpening,
+                    totalInward: totalInward,
+                    totalOutward: totalOutward,
+                    totalClosing: totalClosing,
+                  ),
+                ],
               ],
             ],
           ),
@@ -1057,4 +1126,18 @@ class _MovementRowData {
     required this.outward,
     required this.closing,
   });
+
+  bool get hasMovement => inward.abs() > 0.0001 || outward.abs() > 0.0001;
+
+  _MovementRowData copyWith({int? index}) {
+    return _MovementRowData(
+      index: index ?? this.index,
+      itemName: itemName,
+      sizeLabel: sizeLabel,
+      opening: opening,
+      inward: inward,
+      outward: outward,
+      closing: closing,
+    );
+  }
 }

@@ -21,6 +21,9 @@ class ReportsExportToolbar extends StatelessWidget {
   final bool showViewToggle;
   final bool isDetailedView;
   final ValueChanged<bool>? onViewToggle;
+  final bool showActiveOnlyToggle;
+  final bool activeOnly;
+  final ValueChanged<bool>? onActiveOnlyChanged;
   final String? todayTabMode;
   final ValueChanged<String>? onTodayTabModeChanged;
   final String? todayFlowMode;
@@ -46,6 +49,9 @@ class ReportsExportToolbar extends StatelessWidget {
     this.showViewToggle = false,
     this.isDetailedView = false,
     this.onViewToggle,
+    this.showActiveOnlyToggle = false,
+    this.activeOnly = true,
+    this.onActiveOnlyChanged,
     this.todayTabMode,
     this.onTodayTabModeChanged,
     this.todayFlowMode,
@@ -105,14 +111,12 @@ class ReportsExportToolbar extends StatelessWidget {
                       const SizedBox(width: 8),
                       _buildSummaryDetailedToggle(),
                     ],
+                    if (showActiveOnlyToggle) ...[
+                      const SizedBox(width: 8),
+                      _buildActiveOnlyToggle(),
+                    ],
                   ],
                 ),
-                if (activeTabId == 'today' &&
-                    todayFlowMode != null &&
-                    onTodayFlowModeChanged != null) ...[
-                  const SizedBox(height: 10),
-                  _buildTodayFlowSelector(),
-                ],
                 const SizedBox(height: 10),
                 // Bottom Row: Action Buttons (PDF + CSV)
                 Row(
@@ -175,14 +179,15 @@ class ReportsExportToolbar extends StatelessWidget {
               _buildLocationDropdown(),
               const SizedBox(width: 10),
 
-              // 4. View Toggles (if applicable)
-              if (activeTabId == 'today' &&
-                  todayFlowMode != null &&
-                  onTodayFlowModeChanged != null) ...[
-                _buildTodayFlowSelector(),
-                const SizedBox(width: 10),
-              ] else if (showViewToggle && onViewToggle != null) ...[
+              // 4. View Toggles (Summary | Detailed)
+              if (showViewToggle && onViewToggle != null) ...[
                 _buildSummaryDetailedToggle(),
+                const SizedBox(width: 10),
+              ],
+
+              // 5. Active Movements Only Toggle
+              if (showActiveOnlyToggle) ...[
+                _buildActiveOnlyToggle(),
                 const SizedBox(width: 10),
               ],
 
@@ -366,13 +371,7 @@ class ReportsExportToolbar extends StatelessWidget {
     );
   }
 
-  Widget _buildTodayFlowSelector() {
-    final flows = [
-      {'id': 'Inward', 'label': 'Inward', 'color': const Color(0xFF059669)},
-      {'id': 'Outward', 'label': 'Outward', 'color': const Color(0xFFDC2626)},
-      {'id': 'Net Qty', 'label': 'Net', 'color': const Color(0xFF2563EB)},
-    ];
-
+  Widget _buildActiveOnlyToggle() {
     return Container(
       height: 40,
       padding: const EdgeInsets.all(3),
@@ -383,32 +382,23 @@ class ReportsExportToolbar extends StatelessWidget {
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        children: flows.map((f) {
-          final bool isSelected = todayFlowMode == f['id'];
-          final Color color = f['color'] as Color;
-          return InkWell(
-            onTap: () => onTodayFlowModeChanged?.call(f['id'] as String),
-            borderRadius: BorderRadius.circular(7),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: isSelected ? color : Colors.transparent,
-                borderRadius: BorderRadius.circular(7),
-              ),
-              child: Text(
-                f['label'] as String,
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-                  color: isSelected ? Colors.white : const Color(0xFF475569),
-                ),
-              ),
-            ),
-          );
-        }).toList(),
+        children: [
+          _buildToggleOption(
+            label: 'Active Only',
+            isSelected: activeOnly,
+            onTap: () => onActiveOnlyChanged?.call(true),
+          ),
+          _buildToggleOption(
+            label: 'All Sizes',
+            isSelected: !activeOnly,
+            onTap: () => onActiveOnlyChanged?.call(false),
+          ),
+        ],
       ),
     );
   }
+
+
 
   Widget _buildToggleOption({
     required String label,

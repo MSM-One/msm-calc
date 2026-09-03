@@ -1,12 +1,78 @@
 import 'package:flutter/material.dart';
-import '../../constants/app_colors.dart';
 import '../../models/report_models.dart';
 import '../../services/data_repository.dart';
-import '../../utils/sorting_utils.dart';
-import '../../utils/formatters.dart';
 import '../../utils/item_order_util.dart';
+import '../../utils/sorting_utils.dart';
 import '../../widgets/m_loader.dart';
+import '../../widgets/reports/enterprise_stock_movement_table.dart';
 
+/// Enterprise Data Models for Today's Summary Split View
+class _TodaySizeRowData {
+  final int index;
+  final String itemName;
+  final String sizeLabel;
+  final double opening;
+  final double inward;
+  final double outward;
+  final double closing;
+  final double net;
+
+  _TodaySizeRowData({
+    required this.index,
+    required this.itemName,
+    required this.sizeLabel,
+    required this.opening,
+    required this.inward,
+    required this.outward,
+    required this.closing,
+    required this.net,
+  });
+
+  bool get hasMovement => inward.abs() > 0.0001 || outward.abs() > 0.0001;
+
+  _TodaySizeRowData copyWith({int? index}) {
+    return _TodaySizeRowData(
+      index: index ?? this.index,
+      itemName: itemName,
+      sizeLabel: sizeLabel,
+      opening: opening,
+      inward: inward,
+      outward: outward,
+      closing: closing,
+      net: net,
+    );
+  }
+}
+
+class _CategorySummaryData {
+  final String name;
+  final double totalOpening;
+  final double totalInward;
+  final double totalOutward;
+  final double totalClosing;
+  final double totalNet;
+  final List<_TodaySizeRowData> sizes;
+
+  _CategorySummaryData({
+    required this.name,
+    required this.totalOpening,
+    required this.totalInward,
+    required this.totalOutward,
+    required this.totalClosing,
+    required this.totalNet,
+    required this.sizes,
+  });
+
+  int get activeSizesCount => sizes.where((s) => s.hasMovement).length;
+  bool get hasMovement => totalInward.abs() > 0.0001 || totalOutward.abs() > 0.0001;
+}
+
+/// Today's Summary Sub-Report Tab.
+/// Modernized into an Enterprise 2-Pane Master-Detail Split View matching "Stock Movement":
+/// 1. Desktop Split-View (Width >= 1024px): 300px Left Category Sidebar + Right High-Density Detail Pane.
+/// 2. Mobile/Tablet Responsive View (Width < 1024px): High-density collapsible accordion table.
+/// 3. Standardized High-Density Grid (38px row height):
+///    Columns: [ # | SIZE & SECTION | OPENING | INWARD | OUTWARD | NET / CLOSING ]
 class TodaySummaryTab extends StatefulWidget {
   final bool isLoading;
   final List<DailyMovementEntry> filteredDailyMovement;
@@ -16,6 +82,10 @@ class TodaySummaryTab extends StatefulWidget {
   final String dateRangeLabel;
   final String selectedTab;
   final String selectedFlow;
+  final Function(String category)? onExportCategoryPdf;
+  final Map<String, bool> categoryDownloading;
+  final bool activeOnly;
+  final ValueChanged<bool>? onActiveOnlyChanged;
 
   const TodaySummaryTab({
     super.key,
@@ -25,8 +95,12 @@ class TodaySummaryTab extends StatefulWidget {
     this.onTabChanged,
     this.onFlowChanged,
     this.dateRangeLabel = 'today',
-    this.selectedTab = 'Summary',
+    this.selectedTab = 'Detailed',
     this.selectedFlow = 'Inward',
+    this.onExportCategoryPdf,
+    this.categoryDownloading = const {},
+    this.activeOnly = true,
+    this.onActiveOnlyChanged,
   });
 
   @override
@@ -34,16 +108,13 @@ class TodaySummaryTab extends StatefulWidget {
 }
 
 class _TodaySummaryTabState extends State<TodaySummaryTab> {
-  late String _selectedTab;
-  late String _selectedFlow;
+  String? _selectedCategory;
   final Set<String> _expandedCategories = {};
 
   @override
   void initState() {
     super.initState();
-    _selectedTab = widget.selectedTab;
-    _selectedFlow = widget.selectedFlow;
-    if (_selectedTab == 'Detailed') {
+    if (widget.selectedTab == 'Detailed') {
       _expandAllCategories();
     }
   }
@@ -52,15 +123,11 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
   void didUpdateWidget(covariant TodaySummaryTab oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.selectedTab != widget.selectedTab) {
-      _selectedTab = widget.selectedTab;
-      if (_selectedTab == 'Detailed') {
+      if (widget.selectedTab == 'Detailed') {
         _expandAllCategories();
       } else {
         _expandedCategories.clear();
       }
-    }
-    if (oldWidget.selectedFlow != widget.selectedFlow) {
-      _selectedFlow = widget.selectedFlow;
     }
   }
 
@@ -74,46 +141,104 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
     }
   }
 
-  String formatNumber(double n) => n.toStringAsFixed(3);
-
-  double _extractUnitWeight(String sizeLabel) {
-    if (sizeLabel.isEmpty) return 0.0;
-    try {
-      final RegExp regex = RegExp(r'\(([^)]+)\)');
-      final match = regex.firstMatch(sizeLabel);
-      if (match != null) {
-        final String val = match.group(1)!.replaceAll(RegExp(r'[^0-9.]'), '');
-        if (sizeLabel.contains("1.2")) return 4.0;
-        if (sizeLabel.contains("1.6")) return 4.0;
-        if (sizeLabel.contains("2.0")) return 5.0;
-        return double.tryParse(val) ?? 0.0;
-      }
-    } catch (_) {}
-    return 0.0;
-  }
-
-  Color _getFlowColor(double val) {
-    if (_selectedFlow == 'Inward') return const Color(0xFF16A34A);
-    if (_selectedFlow == 'Outward') return const Color(0xFFDC2626);
-    if (val > 0) return const Color(0xFF16A34A);
-    if (val < 0) return const Color(0xFFDC2626);
-    return const Color(0xFF2563EB);
-  }
-
-  Color _getFlowBgColor(double val) {
-    if (_selectedFlow == 'Inward') return const Color(0xFFDCFCE7);
-    if (_selectedFlow == 'Outward') return const Color(0xFFFEE2E2);
-    if (val > 0) return const Color(0xFFDCFCE7);
-    if (val < 0) return const Color(0xFFFEE2E2);
-    return const Color(0xFFDBEAFE);
-  }
-
-  String _formatSignedNumber(double val) {
-    final String formatted = val.abs().toStringAsFixed(3);
-    if (_selectedFlow == 'Net Qty') {
-      if (val < 0) return "-$formatted";
+  static IconData _getCategoryIcon(String catName) {
+    final lower = catName.toLowerCase();
+    if (lower.contains('pipe')) return Icons.architecture_rounded;
+    if (lower.contains('angle') || lower.contains('channel')) {
+      return Icons.grid_view_rounded;
     }
-    return formatted;
+    if (lower.contains('bar') || lower.contains('flat')) {
+      return Icons.view_in_ar_rounded;
+    }
+    if (lower.contains('wire')) return Icons.cable_rounded;
+    if (lower.contains('nail')) return Icons.build_rounded;
+    if (lower.contains('structure') || lower.contains('ism')) {
+      return Icons.domain_rounded;
+    }
+    return Icons.category_outlined;
+  }
+
+  List<_CategorySummaryData> _processCategories() {
+    final Map<String, Map<String, _TodaySizeRowData>> categoryMap = {};
+
+    for (final e in widget.filteredDailyMovement) {
+      final rawCat = e.itemName.isNotEmpty
+          ? e.itemName
+          : (e.category.isNotEmpty ? e.category : 'Other');
+      final String categoryName = DataRepository.canonicalizeCategory(rawCat);
+      categoryMap.putIfAbsent(categoryName, () => {});
+
+      final sizeKey = e.size;
+      if (categoryMap[categoryName]!.containsKey(sizeKey)) {
+        final prev = categoryMap[categoryName]![sizeKey]!;
+        categoryMap[categoryName]![sizeKey] = _TodaySizeRowData(
+          index: 0,
+          itemName: e.itemName.isNotEmpty ? e.itemName : prev.itemName,
+          sizeLabel: sizeKey,
+          opening: prev.opening + e.openingQty,
+          inward: prev.inward + e.inQty,
+          outward: prev.outward + e.outQty,
+          closing: prev.closing + e.closingQty,
+          net: (prev.inward + e.inQty) - (prev.outward + e.outQty),
+        );
+      } else {
+        categoryMap[categoryName]![sizeKey] = _TodaySizeRowData(
+          index: 0,
+          itemName: e.itemName.isNotEmpty ? e.itemName : e.category,
+          sizeLabel: sizeKey,
+          opening: e.openingQty,
+          inward: e.inQty,
+          outward: e.outQty,
+          closing: e.closingQty,
+          net: e.inQty - e.outQty,
+        );
+      }
+    }
+
+    final List<_CategorySummaryData> categories = [];
+    categoryMap.forEach((catName, sizeMap) {
+      final sortedSizes = sizeMap.values.toList()
+        ..sort((a, b) => SortingUtils.compareSizes(a.sizeLabel, b.sizeLabel));
+
+      final reindexedSizes = <_TodaySizeRowData>[];
+      for (int i = 0; i < sortedSizes.length; i++) {
+        final s = sortedSizes[i];
+        reindexedSizes.add(_TodaySizeRowData(
+          index: i + 1,
+          itemName: s.itemName,
+          sizeLabel: s.sizeLabel,
+          opening: s.opening,
+          inward: s.inward,
+          outward: s.outward,
+          closing: s.closing,
+          net: s.net,
+        ));
+      }
+
+      final double totalOpen =
+          reindexedSizes.fold(0.0, (sum, s) => sum + s.opening);
+      final double totalIn =
+          reindexedSizes.fold(0.0, (sum, s) => sum + s.inward);
+      final double totalOut =
+          reindexedSizes.fold(0.0, (sum, s) => sum + s.outward);
+      final double totalClosing =
+          reindexedSizes.fold(0.0, (sum, s) => sum + s.closing);
+      final double totalNet = totalIn - totalOut;
+
+      categories.add(_CategorySummaryData(
+        name: catName,
+        totalOpening: totalOpen,
+        totalInward: totalIn,
+        totalOutward: totalOut,
+        totalClosing: totalClosing,
+        totalNet: totalNet,
+        sizes: reindexedSizes,
+      ));
+    });
+
+    // Strictly sort categories canonically
+    categories.sort((a, b) => ItemOrderUtil.compare(a.name, b.name));
+    return categories;
   }
 
   @override
@@ -121,1262 +246,1451 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
     if (widget.isLoading) return const Center(child: MLoader());
     if (widget.filteredDailyMovement.isEmpty) return widget.emptyState;
 
-    final double width = MediaQuery.of(context).size.width;
-    final bool isDesktop = width >= 1025;
+    final categories = _processCategories();
+    if (categories.isEmpty) return widget.emptyState;
 
-    // 1. Calculate Grand Totals across all transactions for KPI strip
-    double grandOpening = 0.0;
-    double grandInward = 0.0;
-    double grandOutward = 0.0;
-    double grandClosing = 0.0;
-    final Set<String> activeCategoriesSet = {};
-
-    for (var e in widget.filteredDailyMovement) {
-      grandOpening += e.openingQty;
-      grandInward += e.inQty;
-      grandOutward += e.outQty;
-      grandClosing += e.closingQty;
-      final rawCat = e.itemName.isNotEmpty
-          ? e.itemName
-          : (e.category.isNotEmpty ? e.category : 'Other');
-      activeCategoriesSet.add(DataRepository.canonicalizeCategory(rawCat));
+    // Default selection to first category in canonical sequence
+    if (_selectedCategory == null ||
+        !categories.any((c) => c.name == _selectedCategory)) {
+      _selectedCategory = categories.first.name;
     }
 
-    // 2. Group items by Category for table & views
-    final Map<String, List<Map<String, dynamic>>> categoryMap = {};
-    for (var e in widget.filteredDailyMovement) {
-      final rawCat = e.itemName.isNotEmpty
-          ? e.itemName
-          : (e.category.isNotEmpty ? e.category : 'Other');
-      final String categoryGroup = DataRepository.canonicalizeCategory(rawCat);
-      categoryMap.putIfAbsent(categoryGroup, () => []);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double width = constraints.maxWidth;
 
-      double weight = lookupSizeWeight(e.size);
-      if (weight == 0) {
-        weight = _extractUnitWeight(e.size);
-      }
+        // When 'Summary' is active, render single high-density table of all 10 canonical categories
+        if (widget.selectedTab == 'Summary') {
+          return _buildSummaryTableView(categories, width);
+        }
 
-      categoryMap[categoryGroup]!.add({
-        'size_label': e.size,
-        'weight': weight > 0 ? weight : null,
-        'opening_qty': e.openingQty,
-        'in_qty': e.inQty,
-        'out_qty': e.outQty,
-        'closing_qty': e.closingQty,
-        'net_qty': e.inQty - e.outQty,
-      });
-    }
+        // Detailed Mode:
+        // Desktop Split View (>= 1024px)
+        if (width >= 1024) {
+          return _buildDesktopSplitView(categories);
+        }
 
-    // Process category objects
-    final List<Map<String, dynamic>> processedCategories = [];
-    categoryMap.forEach((categoryName, items) {
-      items.sort((a, b) => SortingUtils.compareSizes(
-          a['size_label'] as String, b['size_label'] as String));
-
-      final double totalOpen =
-          items.fold(0.0, (sum, it) => sum + (it['opening_qty'] as double? ?? 0.0));
-      final double totalIn =
-          items.fold(0.0, (sum, it) => sum + (it['in_qty'] as double? ?? 0.0));
-      final double totalOut =
-          items.fold(0.0, (sum, it) => sum + (it['out_qty'] as double? ?? 0.0));
-      final double totalClosing =
-          items.fold(0.0, (sum, it) => sum + (it['closing_qty'] as double? ?? 0.0));
-      final double totalNet = totalIn - totalOut;
-
-      processedCategories.add({
-        'name': categoryName,
-        'opening_qty': totalOpen,
-        'in_qty': totalIn,
-        'out_qty': totalOut,
-        'closing_qty': totalClosing,
-        'net_qty': totalNet,
-        'items': items,
-      });
-    });
-
-    processedCategories.sort((a, b) => ItemOrderUtil.compare(
-        a['name'] as String, b['name'] as String));
-
-    if (isDesktop) {
-      return _buildDesktopEnterpriseView(
-        grandOpening: grandOpening,
-        grandInward: grandInward,
-        grandOutward: grandOutward,
-        grandClosing: grandClosing,
-        activeCategoriesCount: activeCategoriesSet.length,
-        categories: processedCategories,
-      );
-    }
-
-    final double paddingValue = width >= 641 ? 24.0 : 16.0;
-    return Padding(
-      padding: const EdgeInsets.only(top: 8.0),
-      child: _selectedTab == 'Summary'
-          ? _buildMobileSummaryView(paddingValue, processedCategories)
-          : _buildMobileDetailedView(paddingValue, processedCategories),
+        // Mobile / Tablet View (< 1024px)
+        return _buildMobileTabletView(categories, width);
+      },
     );
   }
 
-  // ===========================================================================
-  // DESKTOP ENTERPRISE VIEW (KPI STRIP + MATERIAL 3 DATA TABLE)
-  // ===========================================================================
-  Widget _buildDesktopEnterpriseView({
-    required double grandOpening,
-    required double grandInward,
-    required double grandOutward,
-    required double grandClosing,
-    required int activeCategoriesCount,
-    required List<Map<String, dynamic>> categories,
-  }) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(32, 16, 32, 48),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // 1. Top KPI Metrics Strip (4 Cards)
-          _buildKpiMetricsStrip(
-            opening: grandOpening,
-            inward: grandInward,
-            outward: grandOutward,
-            closing: grandClosing,
-            activeCount: activeCategoriesCount,
-          ),
-          const SizedBox(height: 24),
+  // ───────────────────────────────────────────────────────────────────────────
+  // SINGLE HIGH-DENSITY SUMMARY TABLE VIEW (Summary Mode)
+  // ───────────────────────────────────────────────────────────────────────────
+  Widget _buildSummaryTableView(
+      List<_CategorySummaryData> categories, double availableWidth) {
+    final double grandInward =
+        categories.fold(0.0, (sum, c) => sum + c.totalInward);
+    final double grandOutward =
+        categories.fold(0.0, (sum, c) => sum + c.totalOutward);
+    final double grandNet = grandInward - grandOutward;
 
-          // 2. Enterprise Data Table Container
-          _buildEnterpriseTableCard(categories),
-        ],
-      ),
-    );
-  }
+    const double minTableWidth = 720.0;
+    final bool needsHorizontalScroll = availableWidth < minTableWidth;
 
-  Widget _buildKpiMetricsStrip({
-    required double opening,
-    required double inward,
-    required double outward,
-    required double closing,
-    required int activeCount,
-  }) {
-    return LayoutBuilder(builder: (context, constraints) {
-      final double cardWidth = (constraints.maxWidth - 48) / 4;
-
-      return Wrap(
-        spacing: 16,
-        runSpacing: 16,
-        children: [
-          _buildKpiCard(
-            width: cardWidth.clamp(220.0, 380.0),
-            title: "Total Opening Stock",
-            value: "${opening.toStringAsFixed(3)} MT",
-            badgeText: "Opening Balance",
-            badgeColor: const Color(0xFF475569),
-            badgeBg: const Color(0xFFF1F5F9),
-            icon: Icons.inventory_2_outlined,
-            accentColor: const Color(0xFF475569),
+    final Widget tableContent = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Summary Table Header Banner
+        Container(
+          height: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(
+              bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1.0),
+            ),
           ),
-          _buildKpiCard(
-            width: cardWidth.clamp(220.0, 380.0),
-            title: "Total Inward Movement",
-            value: "${inward.toStringAsFixed(3)} MT",
-            badgeText: "Stock Inflow",
-            badgeColor: const Color(0xFF059669),
-            badgeBg: const Color(0xFFDCFCE7),
-            icon: Icons.south_west_rounded,
-            accentColor: const Color(0xFF059669),
-          ),
-          _buildKpiCard(
-            width: cardWidth.clamp(220.0, 380.0),
-            title: "Total Outward Movement",
-            value: "${outward.toStringAsFixed(3)} MT",
-            badgeText: "Dispatched",
-            badgeColor: const Color(0xFFD32F2F),
-            badgeBg: const Color(0xFFFEE2E2),
-            icon: Icons.north_east_rounded,
-            accentColor: const Color(0xFFD32F2F),
-          ),
-          _buildKpiCard(
-            width: cardWidth.clamp(220.0, 380.0),
-            title: "Total Closing Stock",
-            value: "${closing.toStringAsFixed(3)} MT",
-            badgeText: "Current Balance",
-            badgeColor: const Color(0xFFC81E1E),
-            badgeBg: const Color(0xFFFEE2E2),
-            icon: Icons.account_balance_wallet_rounded,
-            accentColor: const Color(0xFFC81E1E),
-          ),
-        ],
-      );
-    });
-  }
-
-  Widget _buildKpiCard({
-    required double width,
-    required String title,
-    required String value,
-    required String badgeText,
-    required Color badgeColor,
-    required Color badgeBg,
-    required IconData icon,
-    required Color accentColor,
-  }) {
-    return Container(
-      width: width,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: accentColor, size: 20),
-              ),
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: badgeBg,
-                  borderRadius: BorderRadius.circular(12),
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.table_chart_rounded,
+                        size: 14, color: Color(0xFFD32F2F)),
+                    SizedBox(width: 6),
+                    Text(
+                      'DAILY CATEGORY SUMMARY',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF0F172A),
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
                 ),
                 child: Text(
-                  badgeText,
-                  style: TextStyle(
+                  '${categories.length} categories',
+                  style: const TextStyle(
                     fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: badgeColor,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF64748B),
                   ),
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-              color: textDark,
-              fontFamily: 'monospace',
-              letterSpacing: -0.5,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-              color: textGrey.withValues(alpha: 0.9),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEnterpriseTableCard(List<Map<String, dynamic>> categories) {
-    if (categories.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(48),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.inbox_rounded, size: 48, color: Colors.grey.shade400),
-              const SizedBox(height: 16),
-              Text(
-                "No $_selectedFlow movement records found for ${widget.dateRangeLabel}.",
-                style: TextStyle(
-                  color: Colors.grey.shade600,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              const Spacer(),
+              _buildPillSummaryItem(
+                  'In',
+                  '+${grandInward.toStringAsFixed(3)} MT',
+                  const Color(0xFF059669)),
+              const SizedBox(width: 10),
+              _buildPillSummaryItem(
+                  'Out',
+                  '-${grandOutward.toStringAsFixed(3)} MT',
+                  const Color(0xFFDC2626)),
+              const SizedBox(width: 10),
+              _buildPillSummaryItem(
+                  'Net',
+                  '${grandNet.abs() < 0.00001 ? "0.000" : grandNet.toStringAsFixed(3)} MT',
+                  grandNet < 0
+                      ? const Color(0xFFDC2626)
+                      : const Color(0xFF0F172A),
+                  isBold: true),
             ],
           ),
         ),
-      );
-    }
 
-    final double grandIn = categories.fold(
-        0.0, (sum, cat) => sum + (cat['in_qty'] as double? ?? 0.0));
-    final double grandOut = categories.fold(
-        0.0, (sum, cat) => sum + (cat['out_qty'] as double? ?? 0.0));
+        // Dense Summary Table Header (5 columns)
+        _buildDenseSummaryTableHeader(),
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Table Header: Strictly [ # | CATEGORY / MATERIAL | INWARD (MT) | OUTWARD (MT) | NET QTY (MT) ]
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            decoration: const BoxDecoration(
-              color: Color(0xFFF8FAFC),
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(16),
-                topRight: Radius.circular(16),
-              ),
-              border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
-            ),
-            child: const Row(
-              children: [
-                SizedBox(
-                  width: 48,
-                  child: Text(
-                    "#",
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: textGrey,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 4,
-                  child: Text(
-                    "CATEGORY / MATERIAL",
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: textGrey,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 150,
-                  child: Text(
-                    "INWARD (MT)",
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF059669),
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 150,
-                  child: Text(
-                    "OUTWARD (MT)",
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFFD32F2F),
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 160,
-                  child: Text(
-                    "NET QTY (MT)",
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF334155),
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Table Rows
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
+        // Dense Summary Table Rows
+        Expanded(
+          child: ListView.builder(
+            physics: const BouncingScrollPhysics(),
             itemCount: categories.length,
-            separatorBuilder: (context, idx) =>
-                const Divider(height: 1, color: Color(0xFFF1F5F9)),
             itemBuilder: (context, index) {
               final cat = categories[index];
-              final String catName = (cat['name'] as String? ?? '').toUpperCase();
-              final double inQty = cat['in_qty'] as double? ?? 0.0;
-              final double outQty = cat['out_qty'] as double? ?? 0.0;
-              final double netQty = cat['net_qty'] as double? ?? (inQty - outQty);
-              final List items = cat['items'] as List? ?? [];
-              final bool isExpanded = _expandedCategories.contains(cat['name']);
-
-              return _EnterpriseTableRow(
+              return _buildDenseSummaryTableRow(
+                cat: cat,
                 index: index + 1,
-                categoryName: catName,
-                rawCategoryName: cat['name'] as String,
-                inQty: inQty,
-                outQty: outQty,
-                netQty: netQty,
-                items: items,
-                isExpanded: isExpanded,
-                onToggleExpand: () {
-                  setState(() {
-                    if (isExpanded) {
-                      _expandedCategories.remove(cat['name']);
-                    } else {
-                      _expandedCategories.add(cat['name'] as String);
-                    }
-                  });
+                isEven: index % 2 == 0,
+                onTap: () {
+                  setState(() => _selectedCategory = cat.name);
+                  widget.onTabChanged?.call('Detailed');
                 },
               );
             },
           ),
+        ),
 
-          // Grand Total Pinned Bottom Row
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
-            decoration: const BoxDecoration(
-              color: Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(16),
-                bottomRight: Radius.circular(16),
+        // Dense Summary Table Footer
+        _buildDenseSummaryTableFooter(
+          grandInward: grandInward,
+          grandOutward: grandOutward,
+          grandNet: grandNet,
+        ),
+      ],
+    );
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: needsHorizontalScroll
+          ? SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(width: minTableWidth, child: tableContent),
+            )
+          : tableContent,
+    );
+  }
+
+  Widget _buildDenseSummaryTableHeader() {
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF8FAFC),
+        border: Border(
+          bottom: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+        ),
+      ),
+      child: const Row(
+        children: [
+          SizedBox(
+            width: 44,
+            child: Text(
+              '#',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF475569),
               ),
-              border: Border(top: BorderSide(color: Color(0xFFCBD5E1), width: 1.5)),
             ),
-            child: Row(
-              children: [
-                const SizedBox(width: 48),
-                const Expanded(
-                  flex: 4,
-                  child: Text(
-                    "TOTAL MOVEMENT SUMMARY",
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w900,
-                      color: textDark,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 150,
-                  child: Text(
-                    grandIn > 0
-                        ? "+${grandIn.toStringAsFixed(3)} MT"
-                        : "${grandIn.toStringAsFixed(3)} MT",
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w900,
-                      color: Color(0xFF059669),
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 150,
-                  child: Text(
-                    grandOut > 0
-                        ? "-${grandOut.toStringAsFixed(3)} MT"
-                        : "${grandOut.toStringAsFixed(3)} MT",
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w900,
-                      color: Color(0xFFD32F2F),
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 160,
-                  child: Text(
-                    "${(grandIn - grandOut).toStringAsFixed(3)} MT",
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w900,
-                      color: Color(0xFF334155),
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ),
-              ],
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            flex: 4,
+            child: Text(
+              'CATEGORY / MATERIAL',
+              textAlign: TextAlign.left,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF1E293B),
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+          SizedBox(width: 12),
+          SizedBox(
+            width: 130,
+            child: Text(
+              'INWARD (MT)',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF059669),
+              ),
+            ),
+          ),
+          SizedBox(width: 12),
+          SizedBox(
+            width: 130,
+            child: Text(
+              'OUTWARD (MT)',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFFDC2626),
+              ),
+            ),
+          ),
+          SizedBox(width: 12),
+          SizedBox(
+            width: 140,
+            child: Text(
+              'NET QTY (MT)',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF0F172A),
+              ),
             ),
           ),
         ],
       ),
     );
-
   }
 
-  // ===========================================================================
-  // MOBILE VIEWS (SUMMARY & DETAILED)
-  // ===========================================================================
-  Widget _buildMobileSummaryView(
-      double paddingValue, List<Map<String, dynamic>> categories) {
-    final double grandClosingMt = categories.fold(
-        0.0, (sum, cat) => sum + (cat['closing_qty'] as double? ?? 0.0));
+  Widget _buildDenseSummaryTableRow({
+    required _CategorySummaryData cat,
+    required int index,
+    required bool isEven,
+    required VoidCallback onTap,
+  }) {
+    final double netQty = cat.totalNet;
+    final bool isNegative = netQty < 0;
 
-    return ListView.builder(
-      padding: EdgeInsets.only(
-        left: paddingValue,
-        right: paddingValue,
-        top: 8.0,
-        bottom: 88.0,
-      ),
-      itemCount: categories.length + 1,
-      itemBuilder: (context, index) {
-        if (index == categories.length) {
-          return Container(
-            margin: const EdgeInsets.only(top: 4, bottom: 12),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFCBD5E1), width: 1.5),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'TOTAL CLOSING',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 14.5,
-                    color: textDark,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEE2E2),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: msmRed.withValues(alpha: 0.4),
-                    ),
-                  ),
-                  child: Text(
-                    "${grandClosingMt.toStringAsFixed(3)} MT",
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 13.5,
-                      color: msmRed,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
+    final String inwardText =
+        cat.totalInward == 0 ? '-' : '+${cat.totalInward.toStringAsFixed(3)}';
+    final String outwardText =
+        cat.totalOutward == 0 ? '-' : '-${cat.totalOutward.toStringAsFixed(3)}';
+    final String netText =
+        netQty.abs() < 0.00001 ? '0.000' : netQty.toStringAsFixed(3);
 
-        final cat = categories[index];
-        final String catName = (cat['name'] as String? ?? '').toUpperCase();
-        final double openQty = cat['opening_qty'] as double? ?? 0.0;
-        final double inQty = cat['in_qty'] as double? ?? 0.0;
-        final double outQty = cat['out_qty'] as double? ?? 0.0;
-        final double closingQty = cat['closing_qty'] as double? ?? 0.0;
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
-              ),
-            ],
+    return InkWell(
+      onTap: onTap,
+      hoverColor: const Color(0xFFF1F5F9),
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: isEven ? Colors.white : const Color(0xFFF8FAFC),
+          border: const Border(
+            bottom: BorderSide(color: Color(0xFFF1F5F9), width: 1.0),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        ),
+        child: Row(
+          children: [
+            // 1. Index #
+            SizedBox(
+              width: 44,
+              child: Text(
+                '$index',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF94A3B8),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+
+            // 2. Category / Material with Icon + Name + Size count pill
+            Expanded(
+              flex: 4,
+              child: Row(
                 children: [
-                  Text(
-                    catName,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14.5,
-                      color: textDark,
-                      letterSpacing: -0.2,
+                  Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF2F2),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Icon(
+                      _getCategoryIcon(cat.name),
+                      size: 14,
+                      color: const Color(0xFFD32F2F),
                     ),
                   ),
+                  const SizedBox(width: 10),
+                  Text(
+                    cat.name.toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFEE2E2),
-                      borderRadius: BorderRadius.circular(16),
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      "${closingQty.toStringAsFixed(3)} MT",
+                      '${cat.sizes.length} sizes',
                       style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 13,
-                        color: msmRed,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF64748B),
                       ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    "Open: ${openQty.toStringAsFixed(3)}",
-                    style: TextStyle(
-                        fontSize: 11.5,
-                        color: Colors.grey.shade600,
-                        fontWeight: FontWeight.w600),
-                  ),
-                  Text(
-                    "In: +${inQty.toStringAsFixed(3)}",
-                    style: const TextStyle(
-                        fontSize: 11.5,
-                        color: Color(0xFF16A34A),
-                        fontWeight: FontWeight.w700),
-                  ),
-                  Text(
-                    "Out: -${outQty.toStringAsFixed(3)}",
-                    style: const TextStyle(
-                        fontSize: 11.5,
-                        color: Color(0xFFDC2626),
-                        fontWeight: FontWeight.w700),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildMobileDetailedView(
-      double paddingValue, List<Map<String, dynamic>> categories) {
-    final double grandTotalMt = categories.fold(0.0, (sum, cat) {
-      final inQty = cat['in_qty'] as double? ?? 0.0;
-      final outQty = cat['out_qty'] as double? ?? 0.0;
-      final qty = _selectedFlow == 'Inward'
-          ? inQty
-          : _selectedFlow == 'Outward'
-              ? outQty
-              : (inQty - outQty);
-      return sum + qty;
-    });
-
-    return ListView.builder(
-      padding: EdgeInsets.only(
-        left: paddingValue,
-        right: paddingValue,
-        top: 8.0,
-        bottom: 88.0,
-      ),
-      itemCount: categories.length + 1,
-      itemBuilder: (context, index) {
-        if (index == categories.length) {
-          return Container(
-            margin: const EdgeInsets.only(top: 4, bottom: 16),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFCBD5E1), width: 1.5),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'TOTAL',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 14.5,
-                    color: textDark,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: _getFlowBgColor(grandTotalMt),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: _getFlowColor(grandTotalMt).withValues(alpha: 0.4),
-                    ),
-                  ),
-                  child: Text(
-                    "${_formatSignedNumber(grandTotalMt)} MT",
-                    style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 13.5,
-                      color: _getFlowColor(grandTotalMt),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
+            const SizedBox(width: 12),
 
-        final cat = categories[index];
-        final String catName = (cat['name'] as String? ?? '').toUpperCase();
-        final inQty = cat['in_qty'] as double? ?? 0.0;
-        final outQty = cat['out_qty'] as double? ?? 0.0;
-        final double displayQty = _selectedFlow == 'Inward'
-            ? inQty
-            : _selectedFlow == 'Outward'
-                ? outQty
-                : (inQty - outQty);
-        final List items = cat['items'] as List? ?? [];
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(12),
-                    topRight: Radius.circular(12),
-                  ),
-                  border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
-                ),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      catName,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        color: msmRed,
-                        fontSize: 14,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: _getFlowBgColor(displayQty),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Text(
-                        "${_formatSignedNumber(displayQty)} MT",
-                        style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          color: _getFlowColor(displayQty),
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: items.length,
-                separatorBuilder: (context, idx) =>
-                    Divider(height: 1, color: Colors.grey.shade100),
-                itemBuilder: (context, idx) {
-                  final item = items[idx] as Map<String, dynamic>;
-                  final String sizeLabel = item['size_label'] ?? '';
-                  final parsedWeight =
-                      double.tryParse(item['weight']?.toString() ?? '');
-                  final double w = parsedWeight != null && parsedWeight > 0
-                      ? parsedWeight
-                      : lookupSizeWeight(sizeLabel);
-                  final String formattedWeight =
-                      w % 1 == 0 ? w.toInt().toString() : w.toStringAsFixed(1);
-                  final String weightStr =
-                      w != 0 ? "${formattedWeight}kg" : "";
-                  final String itemDescription = (catName.toUpperCase() == 'MS ANGLE' || catName.toUpperCase() == 'ANGLE')
-                      ? formatSizeLabel(sizeLabel, catName, w)
-                      : (weightStr.isNotEmpty && !sizeLabel.toLowerCase().contains('kg')
-                          ? "$sizeLabel $weightStr"
-                          : sizeLabel);
-                  final double itemIn = item['in_qty'] as double? ?? 0.0;
-                  final double itemOut = item['out_qty'] as double? ?? 0.0;
-                  final double itemQty = _selectedFlow == 'Inward'
-                      ? itemIn
-                      : _selectedFlow == 'Outward'
-                          ? itemOut
-                          : (itemIn - itemOut);
-
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 18, vertical: 13),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          itemDescription,
-                          style: const TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w600,
-                            color: textDark,
-                          ),
-                        ),
-                        Text(
-                          "${_formatSignedNumber(itemQty)} MT",
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.bold,
-                            color: _getFlowColor(itemQty),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-// =============================================================================
-// ENTERPRISE DATA TABLE ROW WITH ACCORDION SIZE BREAKDOWN
-// =============================================================================
-class _EnterpriseTableRow extends StatefulWidget {
-  final int index;
-  final String categoryName;
-  final String rawCategoryName;
-  final double inQty;
-  final double outQty;
-  final double netQty;
-  final List items;
-  final bool isExpanded;
-  final VoidCallback onToggleExpand;
-
-  const _EnterpriseTableRow({
-    required this.index,
-    required this.categoryName,
-    required this.rawCategoryName,
-    required this.inQty,
-    required this.outQty,
-    required this.netQty,
-    required this.items,
-    required this.isExpanded,
-    required this.onToggleExpand,
-  });
-
-  @override
-  State<_EnterpriseTableRow> createState() => _EnterpriseTableRowState();
-}
-
-class _EnterpriseTableRowState extends State<_EnterpriseTableRow> {
-  bool _isHovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: Container(
-        color: _isHovered ? const Color(0xFFF8FAFC) : Colors.white,
-        child: Column(
-          children: [
-            InkWell(
-              onTap: widget.onToggleExpand,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                child: Row(
-                  children: [
-                    // Column 1: # index
-                    SizedBox(
-                      width: 48,
-                      child: Text(
-                        "${widget.index}",
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: textGrey.withValues(alpha: 0.8),
-                        ),
-                      ),
-                    ),
-                    // Column 2: Category Name with size variant count & expand indicator
-                    Expanded(
-                      flex: 4,
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: msmRed.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Icon(
-                              Icons.category_rounded,
-                              size: 16,
-                              color: msmRed,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Text(
-                                      widget.categoryName,
-                                      style: const TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w800,
-                                        color: textDark,
-                                        letterSpacing: -0.2,
-                                      ),
-                                    ),
-                                    if (widget.items.isNotEmpty) ...[
-                                      const SizedBox(width: 6),
-                                      Icon(
-                                        widget.isExpanded
-                                            ? Icons.keyboard_arrow_up_rounded
-                                            : Icons.keyboard_arrow_down_rounded,
-                                        size: 16,
-                                        color: widget.isExpanded ? msmRed : textGrey,
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                                if (widget.items.isNotEmpty) ...[
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    "${widget.items.length} size variants",
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w500,
-                                      color: textGrey.withValues(alpha: 0.8),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Column 3: INWARD (MT) formatted as +X.XXX MT (bold emerald green #059669, or — if 0.000)
-                    SizedBox(
-                      width: 150,
-                      child: Text(
-                        widget.inQty > 0
-                            ? "+${widget.inQty.toStringAsFixed(3)} MT"
-                            : "—",
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w800,
-                          color: widget.inQty > 0
-                              ? const Color(0xFF059669)
-                              : Colors.grey.shade400,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                    // Column 4: OUTWARD (MT) formatted as -X.XXX MT (bold brand red #D32F2F, or — if 0.000)
-                    SizedBox(
-                      width: 150,
-                      child: Text(
-                        widget.outQty > 0
-                            ? "-${widget.outQty.toStringAsFixed(3)} MT"
-                            : "—",
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w800,
-                          color: widget.outQty > 0
-                              ? const Color(0xFFD32F2F)
-                              : Colors.grey.shade400,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                    // Column 5: NET QTY (MT) calculated as (inwardMt - outwardMt) formatted as X.XXX MT in high-contrast slate bold text
-                    SizedBox(
-                      width: 160,
-                      child: Text(
-                        "${(widget.inQty - widget.outQty).toStringAsFixed(3)} MT",
-                        textAlign: TextAlign.right,
-                        style: const TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w900,
-                          color: Color(0xFF334155),
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                  ],
+            // 3. Inward (width: 130, right-aligned)
+            SizedBox(
+              width: 130,
+              child: Text(
+                inwardText,
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight:
+                      cat.totalInward == 0 ? FontWeight.w500 : FontWeight.w800,
+                  color: cat.totalInward == 0
+                      ? const Color(0xFF94A3B8)
+                      : const Color(0xFF059669),
+                  fontFamily: 'monospace',
                 ),
               ),
             ),
+            const SizedBox(width: 12),
 
-            // Inline Nested Size Breakdown Table
-            if (widget.isExpanded && widget.items.isNotEmpty)
-              Container(
-                margin: const EdgeInsets.fromLTRB(52, 0, 24, 16),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Subheader
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Row(
-                        children: [
-                          Icon(Icons.straighten_rounded,
-                              size: 16, color: Colors.grey.shade700),
-                          const SizedBox(width: 8),
-                          Text(
-                            "SIZE BREAKDOWN FOR ${widget.categoryName}",
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w900,
-                              color: Colors.grey.shade800,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFEDE9FE),
-                        borderRadius: BorderRadius.only(
-                          topLeft: Radius.circular(8),
-                          topRight: Radius.circular(8),
-                        ),
-                      ),
-                      child: const Row(
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: Text(
-                              "SIZE / SPECIFICATION",
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFF5B21B6)),
-                            ),
-                          ),
-                          Expanded(
-                            flex: 2,
-                            child: Text(
-                              "UNIT WT (KG)",
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFF5B21B6)),
-                            ),
-                          ),
-                          Expanded(
-                            flex: 2,
-                            child: Text(
-                              "INWARD (MT)",
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFF059669)),
-                            ),
-                          ),
-                          Expanded(
-                            flex: 2,
-                            child: Text(
-                              "OUTWARD (MT)",
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFFD32F2F)),
-                            ),
-                          ),
-                          Expanded(
-                            flex: 2,
-                            child: Text(
-                              "NET QTY (MT)",
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFF334155)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    ListView.separated(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: widget.items.length,
-                      separatorBuilder: (context, idx) =>
-                          Divider(height: 1, color: Colors.grey.shade200),
-                      itemBuilder: (context, idx) {
-                        final it = widget.items[idx] as Map<String, dynamic>;
-                        final String sizeLabel = it['size_label'] ?? '';
-                        final parsedW =
-                            double.tryParse(it['weight']?.toString() ?? '');
-                        final double w = parsedW != null && parsedW > 0
-                            ? parsedW
-                            : lookupSizeWeight(sizeLabel);
-                        final double inM = it['in_qty'] as double? ?? 0.0;
-                        final double outM = it['out_qty'] as double? ?? 0.0;
-                        final double netM = it['net_qty'] as double? ?? (inM - outM);
-
-                        return Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 10),
-                          color: idx % 2 == 1
-                              ? Colors.white
-                              : const Color(0xFFFAFAFA),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                flex: 3,
-                                child: Text(
-                                  sizeLabel,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: textDark,
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text(
-                                  w > 0 ? "${w.toStringAsFixed(1)} kg" : "—",
-                                  textAlign: TextAlign.right,
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.grey.shade700,
-                                    fontFamily: 'monospace',
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text(
-                                  inM > 0
-                                      ? "+${inM.toStringAsFixed(3)}"
-                                      : "—",
-                                  textAlign: TextAlign.right,
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: inM > 0
-                                        ? const Color(0xFF059669)
-                                        : Colors.grey.shade400,
-                                    fontFamily: 'monospace',
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text(
-                                  outM > 0
-                                      ? "-${outM.toStringAsFixed(3)}"
-                                      : "—",
-                                  textAlign: TextAlign.right,
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: outM > 0
-                                        ? const Color(0xFFD32F2F)
-                                        : Colors.grey.shade400,
-                                    fontFamily: 'monospace',
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text(
-                                  netM.toStringAsFixed(3),
-                                  textAlign: TextAlign.right,
-                                  style: const TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w800,
-                                    color: Color(0xFF334155),
-                                    fontFamily: 'monospace',
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ],
+            // 4. Outward (width: 130, right-aligned)
+            SizedBox(
+              width: 130,
+              child: Text(
+                outwardText,
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight:
+                      cat.totalOutward == 0 ? FontWeight.w500 : FontWeight.w800,
+                  color: cat.totalOutward == 0
+                      ? const Color(0xFF94A3B8)
+                      : const Color(0xFFDC2626),
+                  fontFamily: 'monospace',
                 ),
               ),
+            ),
+            const SizedBox(width: 12),
+
+            // 5. Net Qty (width: 140, right-aligned)
+            SizedBox(
+              width: 140,
+              child: Text(
+                netText,
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: netQty.abs() < 0.00001
+                      ? const Color(0xFF94A3B8)
+                      : (isNegative
+                          ? const Color(0xFFDC2626)
+                          : const Color(0xFF0F172A)),
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildDenseSummaryTableFooter({
+    required double grandInward,
+    required double grandOutward,
+    required double grandNet,
+  }) {
+    final bool isNegative = grandNet < 0;
+    final String inwardText =
+        grandInward == 0 ? '-' : '+${grandInward.toStringAsFixed(3)}';
+    final String outwardText =
+        grandOutward == 0 ? '-' : '-${grandOutward.toStringAsFixed(3)}';
+    final String netText = grandNet.abs() < 0.00001
+        ? '0.000 MT'
+        : '${grandNet.toStringAsFixed(3)} MT';
+
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF1F5F9),
+        border: Border(
+          top: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+        ),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 44,
+            child: SizedBox.shrink(),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            flex: 4,
+            child: Text(
+              'TOTAL',
+              textAlign: TextAlign.left,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF0F172A),
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 130,
+            child: Text(
+              inwardText,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF059669),
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 130,
+            child: Text(
+              outwardText,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFFDC2626),
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 140,
+            child: Text(
+              netText,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w900,
+                color: isNegative
+                    ? const Color(0xFFDC2626)
+                    : const Color(0xFF0F172A),
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // DESKTOP MASTER-DETAIL SPLIT VIEW (>= 1024px)
+  // ───────────────────────────────────────────────────────────────────────────
+  Widget _buildDesktopSplitView(List<_CategorySummaryData> categories) {
+    final activeCat = categories.firstWhere(
+      (c) => c.name == _selectedCategory,
+      orElse: () => categories.first,
+    );
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Left Sidebar (300px fixed) ──
+          SizedBox(
+            width: 300,
+            child: Container(
+              color: const Color(0xFFFAFAFA),
+              child: Column(
+                children: [
+                  // Sidebar Header: "CATEGORIES" + Count Pill
+                  Container(
+                    height: 44,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      border: Border(
+                        bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1.0),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'CATEGORIES',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF475569),
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '${categories.length}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Category Scrollable List
+                  Expanded(
+                    child: ListView.builder(
+                      physics: const BouncingScrollPhysics(),
+                      itemCount: categories.length,
+                      itemBuilder: (context, index) {
+                        final catData = categories[index];
+                        final isSelected = catData.name == activeCat.name;
+
+                        return _buildCategorySidebarRow(
+                          categoryData: catData,
+                          isSelected: isSelected,
+                          onTap: () {
+                            setState(() => _selectedCategory = catData.name);
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // ── Divider ──
+          const VerticalDivider(width: 1, thickness: 1, color: Color(0xFFE2E8F0)),
+
+          // ── Right Data Pane (Expanded) ──
+          Expanded(
+            child: Container(
+              color: Colors.white,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Active Category Top Header Banner
+                  _buildRightPaneCategoryHeader(
+                    category: activeCat,
+                    onExportPdf: widget.onExportCategoryPdf != null
+                        ? () => widget.onExportCategoryPdf!(activeCat.name)
+                        : null,
+                    isDownloading:
+                        widget.categoryDownloading[activeCat.name] == true,
+                  ),
+
+                  // Table Header
+                  _buildDenseTableHeader(),
+
+                  // Table Body
+                  Expanded(
+                    child: Builder(
+                      builder: (context) {
+                        final displaySizes = widget.activeOnly
+                            ? activeCat.sizes.where((s) => s.hasMovement).toList()
+                            : activeCat.sizes;
+
+                        if (displaySizes.isEmpty) {
+                          return Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24.0),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF1F5F9),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                                    ),
+                                    child: const Icon(
+                                      Icons.inbox_outlined,
+                                      size: 28,
+                                      color: Color(0xFF94A3B8),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'No stock movements recorded for ${activeCat.name} on this date.',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF64748B),
+                                    ),
+                                  ),
+                                  if (widget.activeOnly && activeCat.sizes.isNotEmpty) ...[
+                                    const SizedBox(height: 10),
+                                    TextButton.icon(
+                                      onPressed: () => widget.onActiveOnlyChanged?.call(false),
+                                      icon: const Icon(Icons.visibility_outlined, size: 14),
+                                      label: Text(
+                                        'View all ${activeCat.sizes.length} catalog sizes',
+                                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                                      ),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: const Color(0xFFD32F2F),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          );
+                        }
+
+                        return ListView.builder(
+                          physics: const BouncingScrollPhysics(),
+                          itemCount: displaySizes.length,
+                          itemBuilder: (context, index) {
+                            final row = displaySizes[index];
+                            final reindexedRow = widget.activeOnly
+                                ? row.copyWith(index: index + 1)
+                                : row;
+                            return _buildDenseTableRow(
+                              row: reindexedRow,
+                              isEven: index % 2 == 0,
+                              categoryName: activeCat.name,
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+
+                  // Table Footer (Totals)
+                  _buildDenseTableFooter(
+                    totalInward: activeCat.totalInward,
+                    totalOutward: activeCat.totalOutward,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Left Pane Category Tile
+  Widget _buildCategorySidebarRow({
+    required _CategorySummaryData categoryData,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    final double netMovement = categoryData.totalNet;
+    final bool hasMovement =
+        categoryData.totalInward != 0 || categoryData.totalOutward != 0;
+    final bool isNegative = netMovement < 0;
+
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFFFEF2F2) : Colors.transparent,
+          border: Border(
+            left: BorderSide(
+              color: isSelected
+                  ? const Color(0xFFD32F2F)
+                  : Colors.transparent,
+              width: 3.5,
+            ),
+            bottom: const BorderSide(color: Color(0xFFF1F5F9), width: 1.0),
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    categoryData.name.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight:
+                          isSelected ? FontWeight.w800 : FontWeight.w700,
+                      color: isSelected
+                          ? const Color(0xFFD32F2F)
+                          : const Color(0xFF1E293B),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? const Color(0xFFFEE2E2)
+                          : const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      widget.activeOnly
+                          ? '${categoryData.activeSizesCount} active / ${categoryData.sizes.length} sizes'
+                          : '${categoryData.sizes.length} sizes',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: isSelected
+                            ? const Color(0xFFB91C1C)
+                            : const Color(0xFF64748B),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (hasMovement) ...[
+              const SizedBox(width: 8),
+              Text(
+                '${netMovement.toStringAsFixed(3)} MT',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: isNegative
+                      ? const Color(0xFFDC2626)
+                      : (isSelected
+                          ? const Color(0xFF0F172A)
+                          : const Color(0xFF475569)),
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
+            const SizedBox(width: 4),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 16,
+              color: isSelected
+                  ? const Color(0xFFD32F2F)
+                  : const Color(0xFFCBD5E1),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Right Pane Category Header
+  Widget _buildRightPaneCategoryHeader({
+    required _CategorySummaryData category,
+    required VoidCallback? onExportPdf,
+    required bool isDownloading,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(
+          bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1.0),
+        ),
+      ),
+      child: Row(
+        children: [
+          // Category Title & Count
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: const Color(0xFFCBD5E1)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(_getCategoryIcon(category.name),
+                    size: 14, color: const Color(0xFF475569)),
+                const SizedBox(width: 6),
+                Text(
+                  category.name.toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF0F172A),
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Text(
+              widget.activeOnly
+                  ? '${category.activeSizesCount} active / ${category.sizes.length} sizes'
+                  : '${category.sizes.length} sizes',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF64748B),
+              ),
+            ),
+          ),
+
+          // Summary breakdown strip alongside inline PDF button
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildPillSummaryItem(
+                      'In',
+                      '+${category.totalInward.toStringAsFixed(3)} MT',
+                      const Color(0xFF059669)),
+                  const SizedBox(width: 10),
+                  _buildPillSummaryItem(
+                      'Out',
+                      '-${category.totalOutward.toStringAsFixed(3)} MT',
+                      const Color(0xFFDC2626)),
+                  const SizedBox(width: 10),
+                  _buildPillSummaryItem(
+                      'Net',
+                      '${category.totalNet.abs() < 0.00001 ? "0.000" : category.totalNet.toStringAsFixed(3)} MT',
+                      category.totalNet < 0
+                          ? const Color(0xFFDC2626)
+                          : const Color(0xFF0F172A),
+                      isBold: true),
+
+                  // Inline red [PDF] Quick Action
+                  if (onExportPdf != null) ...[
+                    const SizedBox(width: 12),
+                    if (isDownloading)
+                      const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Color(0xFFD32F2F),
+                        ),
+                      )
+                    else
+                      Tooltip(
+                        message: 'Export ${category.name} PDF',
+                        child: InkWell(
+                          onTap: onExportPdf,
+                          borderRadius: BorderRadius.circular(6),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFEF2F2),
+                              borderRadius: BorderRadius.circular(6),
+                              border:
+                                  Border.all(color: const Color(0xFFFECACA)),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.picture_as_pdf_outlined,
+                                    size: 14, color: Color(0xFFD32F2F)),
+                                SizedBox(width: 4),
+                                Text(
+                                  'PDF',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFFD32F2F),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPillSummaryItem(String label, String value, Color color,
+      {bool isBold = false}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '$label: ',
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF64748B),
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: isBold ? FontWeight.w800 : FontWeight.w700,
+            color: color,
+            fontFamily: 'monospace',
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // HIGH-DENSITY TABLE GRID (36px–38px Row Heights)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  Widget _buildDenseTableHeader() {
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF8FAFC),
+        border: Border(
+          bottom: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+        ),
+      ),
+      child: const Row(
+        children: [
+          SizedBox(
+            width: 32,
+            child: Text(
+              '#',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF475569),
+              ),
+            ),
+          ),
+          SizedBox(width: 8),
+          Expanded(
+            flex: 4,
+            child: Text(
+              'SIZE & SECTION',
+              textAlign: TextAlign.left,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF1E293B),
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+          SizedBox(width: 12),
+          SizedBox(
+            width: 110,
+            child: Text(
+              'INWARD',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF059669),
+              ),
+            ),
+          ),
+          SizedBox(width: 12),
+          SizedBox(
+            width: 110,
+            child: Text(
+              'OUTWARD',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFFDC2626),
+              ),
+            ),
+          ),
+          SizedBox(width: 12),
+          SizedBox(
+            width: 120,
+            child: Text(
+              'NET QTY',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF0F172A),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDenseTableRow({
+    required _TodaySizeRowData row,
+    required bool isEven,
+    required String categoryName,
+  }) {
+    final double netQty = row.inward - row.outward;
+    final bool isNegative = netQty < 0;
+    final displayLabel =
+        EnterpriseStockMovementTable.appendKgSuffix(categoryName, row.sizeLabel);
+
+    final String inwardText =
+        row.inward == 0 ? '-' : '+${row.inward.toStringAsFixed(3)}';
+    final String outwardText =
+        row.outward == 0 ? '-' : '-${row.outward.toStringAsFixed(3)}';
+    final String netQtyText =
+        netQty.abs() < 0.00001 ? '0.000' : netQty.toStringAsFixed(3);
+
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: BoxDecoration(
+        color: isNegative
+            ? const Color(0xFFFEF2F2)
+            : (isEven ? Colors.white : const Color(0xFFF8FAFC)),
+        border: const Border(
+          bottom: BorderSide(color: Color(0xFFF1F5F9), width: 1.0),
+        ),
+      ),
+      child: Row(
+        children: [
+          // 1. Index # (width: 32, text-align: center)
+          SizedBox(
+            width: 32,
+            child: Text(
+              '${row.index}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF94A3B8),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+
+          // 2. Size & Section (Expanded flex: 4, text-align: left, bold dark slate #1E293B)
+          Expanded(
+            flex: 4,
+            child: Text(
+              displayLabel,
+              textAlign: TextAlign.left,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: isNegative
+                    ? const Color(0xFFDC2626)
+                    : const Color(0xFF1E293B),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // 3. Inward (width: 110, text-align: right, emerald green #059669)
+          SizedBox(
+            width: 110,
+            child: Text(
+              inwardText,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+                color: row.inward == 0
+                    ? const Color(0xFF94A3B8)
+                    : const Color(0xFF059669),
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // 4. Outward (width: 110, text-align: right, crimson red #DC2626)
+          SizedBox(
+            width: 110,
+            child: Text(
+              outwardText,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+                color: row.outward == 0
+                    ? const Color(0xFF94A3B8)
+                    : const Color(0xFFDC2626),
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // 5. Net Qty (width: 120, text-align: right, bold dark slate #0F172A)
+          SizedBox(
+            width: 120,
+            child: Text(
+              netQtyText,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: isNegative
+                    ? const Color(0xFFDC2626)
+                    : const Color(0xFF0F172A),
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDenseTableFooter({
+    required double totalInward,
+    required double totalOutward,
+  }) {
+    final double totalNet = totalInward - totalOutward;
+    final bool isNegative = totalNet < 0;
+
+    final String inwardText =
+        totalInward == 0 ? '-' : '+${totalInward.toStringAsFixed(3)}';
+    final String outwardText =
+        totalOutward == 0 ? '-' : '-${totalOutward.toStringAsFixed(3)}';
+    final String netText =
+        totalNet.abs() < 0.00001 ? '0.000 MT' : '${totalNet.toStringAsFixed(3)} MT';
+
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF1F5F9),
+        border: Border(
+          top: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+        ),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 32),
+          const SizedBox(width: 8),
+          const Expanded(
+            flex: 4,
+            child: Text(
+              'TOTAL',
+              textAlign: TextAlign.left,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF0F172A),
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 110,
+            child: Text(
+              inwardText,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF059669),
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 110,
+            child: Text(
+              outwardText,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFFDC2626),
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 120,
+            child: Text(
+              netText,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w900,
+                color: isNegative
+                    ? const Color(0xFFDC2626)
+                    : const Color(0xFF0F172A),
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // MOBILE / TABLET COLLAPSIBLE VIEW (< 1024px)
+  // ───────────────────────────────────────────────────────────────────────────
+  Widget _buildMobileTabletView(
+      List<_CategorySummaryData> sortedCategories, double availableWidth) {
+    const double minTableWidth = 720.0;
+    final bool needsHorizontalScroll = availableWidth < minTableWidth;
+
+    final Widget content = ListView.builder(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      itemCount: sortedCategories.length,
+      itemBuilder: (context, index) {
+        final categoryData = sortedCategories[index];
+        final bool isExpanded = _expandedCategories.contains(categoryData.name);
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Sticky Category Header Card
+              InkWell(
+                onTap: () {
+                  setState(() {
+                    if (isExpanded) {
+                      _expandedCategories.remove(categoryData.name);
+                    } else {
+                      _expandedCategories.add(categoryData.name);
+                    }
+                  });
+                },
+                child: Container(
+                  height: 44,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  color: const Color(0xFFF8FAFC),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFFCBD5E1)),
+                        ),
+                        child: Text(
+                          categoryData.name.toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        widget.activeOnly
+                            ? '${categoryData.activeSizesCount} active / ${categoryData.sizes.length} sizes'
+                            : '${categoryData.sizes.length} sizes',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                      const Spacer(),
+                      if (categoryData.totalInward != 0 ||
+                          categoryData.totalOutward != 0) ...[
+                        Text(
+                          '${categoryData.totalNet.toStringAsFixed(3)} MT',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w900,
+                            color: categoryData.totalNet < 0
+                                ? const Color(0xFFDC2626)
+                                : const Color(0xFF0F172A),
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Icon(
+                        isExpanded
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        color: const Color(0xFF64748B),
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Expanded Detailed Table
+              if (isExpanded) ...[
+                Builder(
+                  builder: (context) {
+                    final displaySizes = widget.activeOnly
+                        ? categoryData.sizes.where((s) => s.hasMovement).toList()
+                        : categoryData.sizes;
+
+                    if (displaySizes.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Center(
+                          child: Text(
+                            'No stock movements recorded for ${categoryData.name} on this date.',
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildDenseTableHeader(),
+                        ...displaySizes.asMap().entries.map((entry) {
+                          final idx = entry.key;
+                          final row = entry.value;
+                          final reindexedRow = widget.activeOnly
+                              ? row.copyWith(index: idx + 1)
+                              : row;
+                          return _buildDenseTableRow(
+                            row: reindexedRow,
+                            isEven: idx % 2 == 0,
+                            categoryName: categoryData.name,
+                          );
+                        }),
+                        _buildDenseTableFooter(
+                          totalInward: categoryData.totalInward,
+                          totalOutward: categoryData.totalOutward,
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+
+    if (needsHorizontalScroll) {
+      return SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: SizedBox(
+          width: minTableWidth,
+          child: content,
+        ),
+      );
+    }
+
+    return content;
   }
 }

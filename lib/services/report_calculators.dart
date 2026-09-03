@@ -23,7 +23,47 @@ class ReportCalculators {
 
     Map<String, Map<String, StockMovementEntry>> map = {};
 
-    // 1. Pre-populate map from active inventory list to preserve all catalog items
+    // 1. Pre-populate map from master item_sizes catalog to preserve all registered catalog sizes
+    for (final s in DataRepository.itemSizesNotifier.value) {
+      final matName = s['material_name']?.toString() ??
+          s['materialName']?.toString() ??
+          '';
+      final catName = DataRepository.canonicalizeCategory(matName);
+      if (['Binding Wire', 'Nails', 'Barbed Wire', 'Heavy Structure ISMB']
+          .contains(catName)) {
+        continue;
+      }
+      final sizeLabel = s['size_label']?.toString() ??
+          s['sizeLabel']?.toString() ??
+          s['label']?.toString() ??
+          '';
+      if (sizeLabel.isEmpty) continue;
+
+      final String key =
+          "${catName.toUpperCase()}_${matName.toUpperCase()}";
+      map.putIfAbsent(
+          key,
+          () => {
+                matName: StockMovementEntry(
+                  category: catName,
+                  item: matName,
+                  sizes: [],
+                )
+              });
+
+      final entry = map[key]![matName]!;
+      if (!entry.sizes.any((existing) => existing.label == sizeLabel)) {
+        entry.sizes.add(StockSizeMovement(
+          label: sizeLabel,
+          opening: 0,
+          inQty: 0,
+          outQty: 0,
+          closing: 0,
+        ));
+      }
+    }
+
+    // Also include any items from active inventory list
     for (final v in DataRepository.inventoryListNotifier.value) {
       if (locationFilter != 'ALL' &&
           v.location.toUpperCase() != locationFilter.toUpperCase()) {
@@ -327,6 +367,35 @@ class ReportCalculators {
         }
       }
     } else {
+      // Pre-populate with all master catalog sizes so zero-movement sizes are preserved
+      for (final s in DataRepository.itemSizesNotifier.value) {
+        final matName = s['material_name']?.toString() ??
+            s['materialName']?.toString() ??
+            '';
+        final catName = DataRepository.canonicalizeCategory(matName);
+        if (['Binding Wire', 'Nails', 'Barbed Wire', 'Heavy Structure ISMB']
+            .contains(catName)) {
+          continue;
+        }
+        final sizeLabel = s['size_label']?.toString() ??
+            s['sizeLabel']?.toString() ??
+            s['label']?.toString() ??
+            '';
+        if (sizeLabel.isEmpty) continue;
+
+        final String key =
+            "${catName.toUpperCase()}_${matName.toUpperCase()}_${sizeLabel.toUpperCase()}";
+        map[key] = DailyMovementEntry(
+          category: catName,
+          itemName: matName,
+          size: sizeLabel,
+          openingQty: 0,
+          inQty: 0,
+          outQty: 0,
+          closingQty: 0,
+        );
+      }
+
       for (var tx in allTxs) {
         if (tx.isReversed) continue;
         if (tx.txnId.startsWith('S-17')) continue;
@@ -386,5 +455,92 @@ class ReportCalculators {
       return SortingUtils.compareSizes(a.size, b.size);
     });
     return list;
+  }
+
+  /// Centralized calculation of low stock variants across the inventory catalog.
+  /// Includes zero-balance (0.000 MT) and negative deficit stock items (stock <= threshold).
+  /// Sorts by canonical category, placing Out of Stock and Deficit items at the top of each category.
+  static List<ItemVariant> calculateLowStock({
+    required List<ItemVariant> inventory,
+    double defaultMinStock = 5.0,
+    String locationFilter = 'ALL',
+    String searchQuery = '',
+  }) {
+    final query = searchQuery.trim().toLowerCase();
+
+    // 1. Filter by location and search query
+    final filtered = inventory.where((item) {
+      if (locationFilter != 'ALL') {
+        final itemLoc = item.location.trim().toUpperCase();
+        final filterLoc = locationFilter.trim().toUpperCase();
+        if (itemLoc != filterLoc) return false;
+      }
+
+      if (query.isNotEmpty) {
+        final matchName = item.itemName.toLowerCase().contains(query);
+        final matchCat = item.category.toLowerCase().contains(query);
+        final matchSize = item.size.toLowerCase().contains(query);
+        if (!matchName && !matchCat && !matchSize) return false;
+      }
+
+      return true;
+    }).toList();
+
+    // 2. Aggregate across locations if locationFilter == 'ALL'
+    final Map<String, ItemVariant> aggregatedMap = {};
+    for (final item in filtered) {
+      final key = '${item.itemName}|${item.size}';
+      final double effectiveMin =
+          item.minStock > 0 ? item.minStock : defaultMinStock;
+
+      if (!aggregatedMap.containsKey(key)) {
+        aggregatedMap[key] = ItemVariant(
+          itemName: item.itemName,
+          category: item.category,
+          size: item.size,
+          currentStockMT: item.currentStockMT,
+          minStock: effectiveMin,
+          location: item.location,
+          yardTotal: item.yardTotal,
+          factoryTotal: item.factoryTotal,
+        );
+      } else {
+        final existing = aggregatedMap[key]!;
+        aggregatedMap[key] = ItemVariant(
+          itemName: existing.itemName,
+          category: existing.category,
+          size: existing.size,
+          currentStockMT: existing.currentStockMT + item.currentStockMT,
+          minStock: effectiveMin,
+          location:
+              existing.location == item.location ? existing.location : 'ALL',
+          yardTotal: existing.yardTotal + item.yardTotal,
+          factoryTotal: existing.factoryTotal + item.factoryTotal,
+        );
+      }
+    }
+
+    // 3. Filter items where currentStockMT <= minStock (INCLUDING zero and deficit stock!)
+    final List<ItemVariant> result = aggregatedMap.values.where((item) {
+      return item.currentStockMT <= item.minStock;
+    }).toList();
+
+    // 4. Sort: Canonical category order -> Out of stock (0.000) & Deficit (<0) first -> ascending stock -> size order
+    result.sort((a, b) {
+      int catComp = ItemOrderUtil.compare(a.category, b.category);
+      if (catComp != 0) return catComp;
+
+      final bool aZeroOrDeficit = a.currentStockMT <= 0.0001;
+      final bool bZeroOrDeficit = b.currentStockMT <= 0.0001;
+      if (aZeroOrDeficit && !bZeroOrDeficit) return -1;
+      if (!aZeroOrDeficit && bZeroOrDeficit) return 1;
+
+      int qtyComp = a.currentStockMT.compareTo(b.currentStockMT);
+      if (qtyComp != 0) return qtyComp;
+
+      return SortingUtils.compareSizes(a.size, b.size);
+    });
+
+    return result;
   }
 }

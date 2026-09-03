@@ -155,14 +155,14 @@ class ReportsRepository {
   ///  - Raw `transactions` table rows (have `created_at`, `date_time`, etc.)
   static DateTime parseRowDateTime(dynamic row) {
     if (row == null) return DateTime.now();
+    if (row is Map<String, dynamic>) {
+      return parseTransactionTimestamp(row);
+    }
+    if (row is Map) {
+      return parseTransactionTimestamp(Map<String, dynamic>.from(row));
+    }
 
-    final rawTs = row['created_at'] ??
-        row['date_time'] ??
-        row['effective_timestamp'] ??
-        row['transaction_date'] ??
-        row['date'];
-
-    return parseSupabaseDateTime(rawTs);
+    return parseSupabaseDateTime(row);
   }
 
   /// Transaction History query using 'vw_daily_transactions'

@@ -63,8 +63,9 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
 
   // View Modes
   bool _isDetailedView = true;
-  String _todaySummaryTabMode = 'Summary';
-  String _todaySummaryFlowMode = 'Inward';
+  String _todaySummaryTabMode = 'Detailed';
+  String _todaySummaryFlowMode = 'Summary';
+  bool _activeOnlyFilter = true;
 
   // Expansion Sets
   final Set<String> _expandedMovementCategories = {};
@@ -282,6 +283,7 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
     setState(() => _isLoading = true);
 
     try {
+      await DataRepository.ensureMasterLookupData();
       final erpData = await DataRepository.getERPStockAsync(null);
       final locations = erpData['locations'] as List<dynamic>? ?? [];
 
@@ -375,17 +377,12 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
     _kpiOutwardMT =
         _stockReport.fold(0.0, (sum, item) => sum + item.outQty);
 
-    // Count negative closing balances + low stock items
-    int negativeCount = 0;
-    for (final entry in _stockReport) {
-      for (final size in entry.sizes) {
-        if (size.closing < 0) negativeCount++;
-      }
-    }
-
-    final invProvider = Provider.of<InventoryProvider>(context, listen: false);
-    final lowStockCount = invProvider.lowStockItems.length;
-    _kpiCriticalAlertsCount = negativeCount + (lowStockCount > 0 ? 1 : 0);
+    // Synchronize top Alerts KPI with low stock count matching locationFilter
+    final lowStockForLocation = ReportCalculators.calculateLowStock(
+      inventory: DataRepository.inventoryListNotifier.value,
+      locationFilter: _locationFilter,
+    );
+    _kpiCriticalAlertsCount = lowStockForLocation.length;
 
     // Expand all categories by default for high visual density
     if (_expandedMovementCategories.isEmpty) {
@@ -410,46 +407,11 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
         ReportCalculators.groupStocksByCategoryAndItem(_filteredStockReport);
 
     // Low Stock Filtering
-    final invProvider = Provider.of<InventoryProvider>(context, listen: false);
-    final rawLowStock = invProvider.lowStockItems.where((item) {
-      final matchesSearch = query.isEmpty ||
-          item.itemName.toLowerCase().contains(query) ||
-          item.category.toLowerCase().contains(query) ||
-          item.size.toLowerCase().contains(query);
-
-      if (_locationFilter == 'ALL') return matchesSearch;
-      return matchesSearch &&
-          item.location.trim().toUpperCase() ==
-              _locationFilter.trim().toUpperCase();
-    }).toList();
-
-    final Map<String, ItemVariant> uniqueLowStockMap = {};
-    for (var item in rawLowStock) {
-      final key = '${item.itemName}|${item.size}';
-      if (!uniqueLowStockMap.containsKey(key)) {
-        uniqueLowStockMap[key] = item;
-      } else {
-        final existing = uniqueLowStockMap[key]!;
-        uniqueLowStockMap[key] = ItemVariant(
-          itemName: existing.itemName,
-          category: existing.category,
-          size: existing.size,
-          currentStockMT: existing.currentStockMT + item.currentStockMT,
-          minStock: existing.minStock,
-          location: existing.location,
-          yardTotal: existing.yardTotal,
-          factoryTotal: existing.factoryTotal,
-        );
-      }
-    }
-    _filteredLowStock = uniqueLowStockMap.values.toList()
-      ..sort((a, b) {
-        int catComp = ItemOrderUtil.compare(a.category, b.category);
-        if (catComp != 0) return catComp;
-        int qtyComp = b.currentStockMT.compareTo(a.currentStockMT);
-        if (qtyComp != 0) return qtyComp;
-        return SortingUtils.compareSizes(a.size, b.size);
-      });
+    _filteredLowStock = ReportCalculators.calculateLowStock(
+      inventory: DataRepository.inventoryListNotifier.value,
+      locationFilter: _locationFilter,
+      searchQuery: query,
+    );
 
     // Non-Moving Filtering
     _filteredDeadStock = _deadStockReport.where((e) {
@@ -513,14 +475,23 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
           date: _startDate,
           entries: _filteredDailyMovement,
           selectedMode: _todaySummaryTabMode,
-          isOutward: _todaySummaryFlowMode == 'Outward',
-          flowMode: _todaySummaryFlowMode,
+          isOutward: false,
+          flowMode: _todaySummaryTabMode,
           startDate: _startDate,
           endDate: _endDate,
+          location: _locationFilter,
+          activeOnly: _activeOnlyFilter,
         );
-        final filename =
-            'MSM_Daily_Summary_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf';
-        await _saveAndSharePdf(bytes, filename, 'MSM Daily Summary Report');
+        final isDetailed = _todaySummaryTabMode == 'Detailed';
+        final filename = isDetailed
+            ? 'MSM_Daily_Movement_Detailed_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf'
+            : 'MSM_Daily_Summary_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf';
+        await _saveAndSharePdf(
+            bytes,
+            filename,
+            isDetailed
+                ? 'MSM Detailed Stock Movement Report'
+                : 'MSM Daily Summary Report');
       } else if (_activeTabId == 'low') {
         if (_filteredLowStock.isEmpty) {
           MotionToast.show(context, 'No low stock data to export',
@@ -713,6 +684,52 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
     }
   }
 
+  Future<void> _exportCategoryDailySummaryPdf(String category) async {
+    if (_categoryDownloading[category] == true) return;
+    setState(() => _categoryDownloading[category] = true);
+
+    try {
+      final catEntries = _filteredDailyMovement.where((e) {
+        final rawCat = e.itemName.isNotEmpty
+            ? e.itemName
+            : (e.category.isNotEmpty ? e.category : 'Other');
+        return DataRepository.canonicalizeCategory(rawCat).toLowerCase() ==
+            category.toLowerCase();
+      }).toList();
+
+      if (catEntries.isEmpty) {
+        MotionToast.show(context, 'No data to export for $category', isError: true);
+        return;
+      }
+
+      final bytes = await PdfReportService.generateDailySummaryPdf(
+        date: _startDate,
+        entries: catEntries,
+        selectedMode: 'Detailed',
+        isOutward: false,
+        flowMode: 'Detailed',
+        startDate: _startDate,
+        endDate: _endDate,
+        location: _locationFilter,
+        activeOnly: _activeOnlyFilter,
+      );
+
+      final safeName = category.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase();
+      final filename = 'MSM_${safeName}_daily_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf';
+      await _saveAndSharePdf(bytes, filename, 'MSM $category Daily Summary Report');
+    } catch (e, st) {
+      debugPrint('[ReportsDashboardScreen] category daily PDF error: $e');
+      debugPrint('[ReportsDashboardScreen] stackTrace: $st');
+      if (mounted) {
+        MotionToast.show(context, 'Failed to export $category report', isError: true);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _categoryDownloading[category] = false);
+      }
+    }
+  }
+
   Future<void> _saveAndSharePdf(
       Uint8List bytes, String filename, String shareText) async {
     if (kIsWeb) {
@@ -811,8 +828,17 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
                     showViewToggle: _activeTabId == 'movement' ||
                         _activeTabId == 'low' ||
                         _activeTabId == 'today',
-                    isDetailedView: _isDetailedView,
-                    onViewToggle: (val) => setState(() => _isDetailedView = val),
+                    isDetailedView: _activeTabId == 'today'
+                        ? _todaySummaryTabMode == 'Detailed'
+                        : _isDetailedView,
+                    onViewToggle: (val) {
+                      setState(() {
+                        _isDetailedView = val;
+                        if (_activeTabId == 'today') {
+                          _todaySummaryTabMode = val ? 'Detailed' : 'Summary';
+                        }
+                      });
+                    },
                     todayTabMode: _todaySummaryTabMode,
                     onTodayTabModeChanged: (val) {
                       setState(() {
@@ -823,6 +849,11 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
                     todayFlowMode: _todaySummaryFlowMode,
                     onTodayFlowModeChanged: (val) =>
                         setState(() => _todaySummaryFlowMode = val),
+                    showActiveOnlyToggle: _activeTabId == 'today' ||
+                        _activeTabId == 'movement',
+                    activeOnly: _activeOnlyFilter,
+                    onActiveOnlyChanged: (val) =>
+                        setState(() => _activeOnlyFilter = val),
                     activeTabId: _activeTabId,
                   ),
                 ],
@@ -871,6 +902,11 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
           onFlowChanged: (flow) {
             setState(() => _todaySummaryFlowMode = flow);
           },
+          onExportCategoryPdf: _exportCategoryDailySummaryPdf,
+          categoryDownloading: _categoryDownloading,
+          activeOnly: _activeOnlyFilter,
+          onActiveOnlyChanged: (val) =>
+              setState(() => _activeOnlyFilter = val),
         );
 
       case 'movement':
@@ -890,6 +926,7 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
           onExportCategoryPdf: _exportCategoryPdf,
           categoryDownloading: _categoryDownloading,
           locationFilter: _locationFilter,
+          activeOnly: _activeOnlyFilter,
           emptyState: _buildEmptyState(
             title: 'No stock movement records',
             subtitle: 'No transactions found for the selected period & location',

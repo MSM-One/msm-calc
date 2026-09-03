@@ -37,17 +37,24 @@ class LowStockItemCard extends StatelessWidget {
             0.0) as num)
         .toDouble();
 
-    final bool isZero = qty == 0.0;
+    final bool isDeficit = qty < -0.0001;
+    final bool isZero = !isDeficit && qty.abs() <= 0.0001;
+    final bool isZeroOrDeficit = isDeficit || isZero;
 
     // Enterprise Visual Rules & Style Mapping
-    final Color textColor = isZero ? Colors.grey.shade500 : Colors.black87;
+    // Zero & Deficit in Crimson Red (#DC2626), Low Stock in Amber/Orange (#D97706)
     final Color badgeColor =
-        isZero ? Colors.grey.shade100 : const Color(0xFFFEE2E2);
+        isZeroOrDeficit ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7);
     final Color iconColor =
-        isZero ? Colors.grey.shade500 : const Color(0xFFB71C1C);
-    final IconData statusIcon =
-        isZero ? Icons.inventory_2_outlined : Icons.warning_amber_rounded;
-    final String statusText = isZero ? "Out of Stock" : "Critical Limit";
+        isZeroOrDeficit ? const Color(0xFFDC2626) : const Color(0xFFD97706);
+    final IconData statusIcon = isDeficit
+        ? Icons.error_outline_rounded
+        : (isZero ? Icons.cancel_outlined : Icons.warning_amber_rounded);
+    final String statusText = isDeficit
+        ? "DEFICIT"
+        : (isZero ? "OUT OF STOCK" : "LOW STOCK");
+    final Color qtyColor =
+        isZeroOrDeficit ? const Color(0xFFDC2626) : const Color(0xFF0F172A);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -63,7 +70,9 @@ class LowStockItemCard extends StatelessWidget {
           ),
         ],
         border: Border.all(
-          color: Colors.grey.shade100,
+          color: isZeroOrDeficit
+              ? const Color(0xFFFECACA)
+              : Colors.grey.shade100,
           width: 1,
         ),
       ),
@@ -93,7 +102,7 @@ class LowStockItemCard extends StatelessWidget {
                 Text(
                   itemName,
                   style: TextStyle(
-                    color: isZero ? Colors.grey.shade400 : Colors.grey.shade600,
+                    color: Colors.grey.shade600,
                     fontWeight: FontWeight.bold,
                     fontSize: 12,
                   ),
@@ -103,8 +112,8 @@ class LowStockItemCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   sizeDescription,
-                  style: TextStyle(
-                    color: isZero ? Colors.grey.shade500 : Colors.black87,
+                  style: const TextStyle(
+                    color: Color(0xFF0F172A),
                     fontWeight: FontWeight.w600,
                     fontSize: 14,
                   ),
@@ -112,12 +121,21 @@ class LowStockItemCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  statusText,
-                  style: TextStyle(
-                    color: iconColor,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: badgeColor,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    statusText,
+                    style: TextStyle(
+                      color: iconColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.3,
+                    ),
                   ),
                 ),
               ],
@@ -130,7 +148,7 @@ class LowStockItemCard extends StatelessWidget {
             style: TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 15,
-              color: isZero ? Colors.grey.shade500 : Colors.black87,
+              color: qtyColor,
             ),
           ),
         ],
@@ -236,7 +254,7 @@ class LowStockReportScreen extends StatelessWidget {
                 final categoryName = sortedCategories[index];
                 final categoryProducts = groupedItems[categoryName]!;
 
-                // Sort items within category by descending tonnage (higher stock first)
+                // Sort items within category: Out of stock (0.000) & Deficit (<0) first, then lowest stock
                 categoryProducts.sort((a, b) {
                   final double qtyA = ((a['closing_qty'] ??
                           a['low_stock_qty'] ??
@@ -252,7 +270,26 @@ class LowStockReportScreen extends StatelessWidget {
                           b['currentStockMT'] ??
                           0.0) as num)
                       .toDouble();
-                  return qtyB.compareTo(qtyA);
+
+                  final bool aZeroOrDeficit = qtyA <= 0.0001;
+                  final bool bZeroOrDeficit = qtyB <= 0.0001;
+                  if (aZeroOrDeficit && !bZeroOrDeficit) return -1;
+                  if (!aZeroOrDeficit && bZeroOrDeficit) return 1;
+
+                  final qtyComp = qtyA.compareTo(qtyB);
+                  if (qtyComp != 0) return qtyComp;
+
+                  final sizeA = (a['size_label'] ??
+                          a['size_description'] ??
+                          a['size'] ??
+                          '')
+                      .toString();
+                  final sizeB = (b['size_label'] ??
+                          b['size_description'] ??
+                          b['size'] ??
+                          '')
+                      .toString();
+                  return SortingUtils.compareSizes(sizeA, sizeB);
                 });
 
                 // Calculate subtotal
@@ -349,17 +386,50 @@ class LowStockReportScreen extends StatelessWidget {
                         child: ListTile(
                           contentPadding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 2),
-                          title: Text(
-                            "$itemName - $sizeLabelFormatted",
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 13),
+                          title: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  "$itemName - $sizeLabelFormatted",
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold, fontSize: 13),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: qty <= 0.0001
+                                      ? const Color(0xFFFEE2E2)
+                                      : const Color(0xFFFEF3C7),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  qty < -0.0001
+                                      ? "DEFICIT"
+                                      : (qty.abs() <= 0.0001
+                                          ? "OUT OF STOCK"
+                                          : "LOW STOCK"),
+                                  style: TextStyle(
+                                    color: qty <= 0.0001
+                                        ? const Color(0xFFDC2626)
+                                        : const Color(0xFFD97706),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                           trailing: Text(
                             "${qty.toStringAsFixed(3)} MT",
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600,
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
                                 fontSize: 13,
-                                color: Colors.black87),
+                                color: qty <= 0.0001
+                                    ? const Color(0xFFDC2626)
+                                    : Colors.black87),
                           ),
                         ),
                       );

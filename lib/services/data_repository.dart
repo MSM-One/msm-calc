@@ -1199,7 +1199,6 @@ class DataRepository {
                 location: location,
               );
             })
-            .where((v) => v.currentStockMT != 0)
             .toList();
       }
 
@@ -1397,6 +1396,8 @@ class DataRepository {
     required DateTime endDate,
     String location = 'ALL',
   }) async {
+    await ensureMasterLookupData();
+
     final rows = await fetchStockMovementReport(
       startDate: startDate,
       endDate: endDate,
@@ -1430,13 +1431,63 @@ class DataRepository {
         ),
       );
 
-      itemMap[key]!.sizes.add(StockSizeMovement(
-        label: size,
-        opening: op,
-        inQty: pIn,
-        outQty: pOut,
-        closing: cl,
-      ));
+      final existingIdx =
+          itemMap[key]!.sizes.indexWhere((s) => s.label == size);
+      if (existingIdx >= 0) {
+        final prev = itemMap[key]!.sizes[existingIdx];
+        itemMap[key]!.sizes[existingIdx] = StockSizeMovement(
+          label: size,
+          opening: prev.opening + op,
+          inQty: prev.inQty + pIn,
+          outQty: prev.outQty + pOut,
+          closing: prev.closing + cl,
+        );
+      } else {
+        itemMap[key]!.sizes.add(StockSizeMovement(
+          label: size,
+          opening: op,
+          inQty: pIn,
+          outQty: pOut,
+          closing: cl,
+        ));
+      }
+    }
+
+    // Comprehensive catalog inclusion: Guarantee all registered sizes from master item_sizes exist
+    for (final s in itemSizesNotifier.value) {
+      final matName = s['material_name']?.toString() ??
+          s['materialName']?.toString() ??
+          '';
+      final cat = canonicalizeCategory(matName);
+      if (['Binding Wire', 'Nails', 'Barbed Wire', 'Heavy Structure ISMB']
+          .contains(cat)) {
+        continue;
+      }
+      final sizeLabel = s['size_label']?.toString() ??
+          s['sizeLabel']?.toString() ??
+          s['label']?.toString() ??
+          '';
+      if (sizeLabel.isEmpty) continue;
+
+      final key = "${cat.toUpperCase()}_${matName.toUpperCase()}";
+      itemMap.putIfAbsent(
+        key,
+        () => StockMovementEntry(
+          category: cat,
+          item: matName,
+          sizes: [],
+        ),
+      );
+
+      if (!itemMap[key]!.sizes.any((existing) => existing.label == sizeLabel)) {
+        itemMap[key]!.sizes.add(StockSizeMovement(
+          label: sizeLabel,
+          opening: 0.0,
+          inQty: 0.0,
+          outQty: 0.0,
+          closing: 0.0,
+        ));
+      }
     }
 
     final list = itemMap.values.toList();

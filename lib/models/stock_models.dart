@@ -258,25 +258,20 @@ class StockTransaction {
     return 0.0;
   }
 
+  /// Parses timestamps stored as local wall-clock IST time tagged with UTC (+00 or Z).
+  /// Strips the UTC timezone suffix (+00:00, +00, Z) so DateTime.tryParse treats it as wall-clock time,
+  /// preventing the double +05:30 offset bug.
+  static DateTime parseIstDateTime(dynamic value) {
+    if (value == null) return DateTime.now();
+    if (value is DateTime) return value.isUtc ? value.toLocal() : value;
+    final raw = value.toString().trim();
+    if (raw.isEmpty) return DateTime.now();
+
+    final cleaned = raw.replaceAll(RegExp(r'(\+00(:?00)?|Z)$'), '').trim();
+    return DateTime.tryParse(cleaned) ?? DateTime.now();
+  }
+
   factory StockTransaction.fromJson(Map<String, dynamic> json) {
-    DateTime parseDate(dynamic d, String txnId) {
-      if (d != null && d.toString().trim().isNotEmpty) {
-        return parseSupabaseDateTime(d);
-      }
-
-      // 1. Fast path: txnId contains a Unix ms timestamp (app-generated entries)
-      try {
-        final firstPart = txnId.split('_')[0];
-        if (firstPart.length >= 13) {
-          final ms = int.tryParse(firstPart.substring(0, 13));
-          if (ms != null && ms > 1600000000000 && ms < 2000000000000) {
-            return DateTime.fromMillisecondsSinceEpoch(ms);
-          }
-        }
-      } catch (_) {}
-
-      return DateTime.now();
-    }
 
     // Stable ID for manual entries: If no ID exists, create one from content
     final itemName = (json['itemName'] ??
@@ -320,15 +315,7 @@ class StockTransaction {
 
     return StockTransaction(
       txnId: id,
-      dateTime: parseDate(
-          json['dateTime'] ??
-              json['date_time'] ??
-              json['created_at'] ??
-              json['date'] ??
-              json['Date'] ??
-              json['Timestamp'] ??
-              json['DateTime'],
-          id),
+      dateTime: parseTransactionTimestamp(json),
       itemName: (json['itemName'] ??
                   json['item_name'] ??
                   json['Item Name'] ??
@@ -358,38 +345,68 @@ class StockTransaction {
       reason: (json['reason'] ?? json['Reason'] ?? json['REASON'])?.toString(),
       note: (json['note'] ?? json['Note'] ?? json['Remark'] ?? json['NOTE'])
           ?.toString(),
-      invoiceNo: (json['invoiceNo'] ??
+      invoiceNo: (json['invoice_no'] ??
+              json['bill_no'] ??
+              json['invoiceNo'] ??
               json['Invoice No'] ??
               json['INVOICE NO'] ??
               json['billNo'] ??
               json['Bill No'])
           ?.toString(),
-      lorryNo:
-          (json['lorryNo'] ?? json['Lorry No'] ?? json['LORRY NO'])?.toString(),
-      transportCo:
-          (json['transportCo'] ?? json['Transport'] ?? json['TRANSPORT'])
-              ?.toString(),
-      driverName: (json['driverName'] ?? json['Driver Name'] ?? json['DRIVER'])
+      lorryNo: (json['lorry_no'] ??
+              json['lorryNo'] ??
+              json['Lorry No'] ??
+              json['LORRY NO'])
           ?.toString(),
-      driverPhone:
-          (json['driverPhone'] ?? json['Driver Phone'] ?? json['PHONE'])
-              ?.toString(),
-      partyName: (json['partyName'] ??
+      transportCo: (json['transport_co'] ??
+              json['transport_name'] ??
+              json['transportCo'] ??
+              json['Transport'] ??
+              json['TRANSPORT'])
+          ?.toString(),
+      driverName: (json['driver_name'] ??
+              json['driverName'] ??
+              json['Driver Name'] ??
+              json['DRIVER'])
+          ?.toString(),
+      driverPhone: (json['driver_phone'] ??
+              json['driverPhone'] ??
+              json['Driver Phone'] ??
+              json['PHONE'])
+          ?.toString(),
+      partyName: (json['party_name'] ??
+              json['partyName'] ??
               json['Party Name'] ??
               json['Party'] ??
               json['PARTY'])
           ?.toString(),
-      contactNo: (json['contactNo'] ?? json['Contact No'])?.toString(),
-      batchId:
-          (json['batchId'] ?? json['Batch ID'] ?? json['Batch'])?.toString(),
+      contactNo: (json['contact_no'] ??
+              json['contactNo'] ??
+              json['Contact No'])
+          ?.toString(),
+      batchId: (json['batch_id'] ??
+              json['batchId'] ??
+              json['Batch ID'] ??
+              json['Batch'])
+          ?.toString(),
       region: (json['region'] ??
               json['Region'] ??
               json['Purchase Region'] ??
               json['REGION'])
           ?.toString(),
-      handMT: json['handMT'] == null ? null : _safeDouble(json['handMT']),
-      craneMT: json['craneMT'] == null ? null : _safeDouble(json['craneMT']),
-      user: (json['user'] ?? json['User'] ?? json['USER'])?.toString(),
+      handMT: _safeDouble(json['hand_mt'] ??
+          json['handMT'] ??
+          json['Hand (MT)'] ??
+          json['HAND (MT)']),
+      craneMT: _safeDouble(json['crane_mt'] ??
+          json['craneMT'] ??
+          json['Crane (MT)'] ??
+          json['CRANE (MT)']),
+      user: (json['user_name'] ??
+              json['user'] ??
+              json['User'] ??
+              json['USER'])
+          ?.toString(),
       isReversed: (json['isReversed'] ?? json['Reversed'] ?? json['REVERSED'])
               ?.toString()
               .toLowerCase() ==

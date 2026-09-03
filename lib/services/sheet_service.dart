@@ -471,7 +471,7 @@ class SheetService {
         'location': location,
         'region': region,
         'note': remark,
-        'date_time': DateTime.now().toUtc().toIso8601String(),
+        'date_time': DateTime.now().toIso8601String(),
         'is_reversed': false,
         'material_id': materialId,
         'size_id': sizeId,

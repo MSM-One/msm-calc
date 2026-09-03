@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../services/data_repository.dart';
 import '../models/stock_models.dart';
 import '../models/user_model.dart';
+import '../services/report_calculators.dart';
 import '../utils/sorting_utils.dart';
 
 class InventoryProvider extends ChangeNotifier {
@@ -28,50 +29,7 @@ class InventoryProvider extends ChangeNotifier {
 
   List<ItemVariant> get lowStockItems {
     final inventory = DataRepository.inventoryListNotifier.value;
-    final Map<String, ItemVariant> uniqueSizesMap = {};
-
-    for (var item in inventory) {
-      final key = '${item.itemName}|${item.size}';
-      if (!uniqueSizesMap.containsKey(key)) {
-        uniqueSizesMap[key] = ItemVariant(
-          itemName: item.itemName,
-          category: item.category,
-          size: item.size,
-          currentStockMT: item.currentStockMT,
-          minStock: item.minStock,
-          location: item.location,
-          yardTotal: item.yardTotal,
-          factoryTotal: item.factoryTotal,
-        );
-      } else {
-        final existing = uniqueSizesMap[key]!;
-        uniqueSizesMap[key] = ItemVariant(
-          itemName: existing.itemName,
-          category: existing.category,
-          size: existing.size,
-          currentStockMT: existing.currentStockMT + item.currentStockMT,
-          minStock: existing.minStock,
-          location:
-              existing.location == item.location ? existing.location : 'ALL',
-          yardTotal: existing.yardTotal + item.yardTotal,
-          factoryTotal: existing.factoryTotal + item.factoryTotal,
-        );
-      }
-    }
-
-    final List<ItemVariant> result = uniqueSizesMap.values
-        .where((item) => item.currentStockMT <= item.minStock)
-        .toList();
-
-    result.sort((a, b) {
-      int catComp = SortingUtils.compareCategories(a.category, b.category);
-      if (catComp != 0) return catComp;
-      int qtyComp = b.currentStockMT.compareTo(a.currentStockMT);
-      if (qtyComp != 0) return qtyComp;
-      return SortingUtils.compareSizes(a.size, b.size);
-    });
-
-    return result;
+    return ReportCalculators.calculateLowStock(inventory: inventory);
   }
 
   bool get isDesktopOrWeb =>
