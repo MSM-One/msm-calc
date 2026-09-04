@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { 
   Search, 
+  ArrowLeft,
   ArrowUpRight, 
   ArrowDownRight, 
   Filter, 
@@ -56,7 +57,7 @@ const chartData = [
   { name: 'Sun', value: 700 },
 ];
 
-const InventoryReports = () => {
+const InventoryReports = ({ onBack }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [sortConfig, setSortConfig] = useState({ key: 'itemName', direction: 'asc' });
@@ -115,7 +116,18 @@ const InventoryReports = () => {
     <div className="flex flex-col gap-8 w-full p-1 animate-in fade-in slide-in-from-bottom-6 duration-700">
       {/* Search & Filter Header */}
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-        <div className="relative w-full md:w-96 group">
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="p-3 rounded-2xl bg-white/50 backdrop-blur-md border border-white/30 hover:bg-white/80 text-slate-700 hover:text-slate-950 transition-all shadow-sm flex items-center justify-center cursor-pointer group"
+              title="Back to Dashboard"
+              aria-label="Back to Dashboard"
+            >
+              <ArrowLeft size={20} className="group-hover:-translate-x-0.5 transition-transform" />
+            </button>
+          )}
+          <div className="relative w-full md:w-96 group">
           <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
             <Search className="w-5 h-5 text-slate-400 group-hover:text-red-500 transition-colors" />
           </div>
@@ -129,6 +141,7 @@ const InventoryReports = () => {
               setCurrentPage(1);
             }}
           />
+          </div>
         </div>
         <div className="flex gap-3 w-full md:w-auto">
           <button className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 bg-white/40 backdrop-blur-md border border-white/20 rounded-2xl hover:bg-white/60 transition-all text-slate-600 font-semibold shadow-sm">

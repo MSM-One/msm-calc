@@ -2,13 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/app_permissions.dart';
 import '../models/stock_models.dart';
 import '../providers/inventory_provider.dart';
 import '../services/access_guard.dart';
-import '../services/data_repository.dart';
 import '../utils/formatters.dart';
 import '../utils/item_order_util.dart';
 import '../utils/sorting_utils.dart';
@@ -24,12 +23,7 @@ class SampleRateCalcScreen extends StatefulWidget {
 }
 
 class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
-  bool _ncDiscountEnabled = false;
   String? _selectedCategory;
-
-  double _gstRate = 0.18;
-  double _lcRate = 255.0;
-  double _ncDiscount = 3000.0;
 
   // Controllers for Master Rate Panel
   final TextEditingController _pipeBasicCtrl = TextEditingController();
@@ -43,7 +37,6 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
   @override
   void initState() {
     super.initState();
-    _loadCharges();
 
     // --- Hard Navigation Guard ---
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -64,27 +57,6 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     _channelBasicCtrl.addListener(_onRateChanged);
     _sqrBarBasicCtrl.addListener(_onRateChanged);
     _roundFlatsBasicCtrl.addListener(_onRateChanged);
-  }
-
-  Future<void> _loadCharges() async {
-    try {
-      final data = await DataRepository.getSheetDataAsync(null);
-      final meta = data['meta'] as Map<String, dynamic>? ?? {};
-      if (mounted) {
-        setState(() {
-          _gstRate =
-              double.tryParse(meta['gst_rate']?.toString() ?? '0.18') ?? 0.18;
-          _lcRate =
-              double.tryParse(meta['loading_charge']?.toString() ?? '255') ??
-                  255.0;
-          _ncDiscount =
-              double.tryParse(meta['nc_discount']?.toString() ?? '3000') ??
-                  3000.0;
-        });
-      }
-    } catch (e) {
-      debugPrint("Error loading charges in SampleRateCalcScreen: $e");
-    }
   }
 
   void _onRateChanged() {
@@ -126,13 +98,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     }
 
     if (basic == 0.0) return 0.0;
-
-    double loading = _lcRate;
-    double subtotal = (basic + sd + loading).toDouble();
-    if (_ncDiscountEnabled) {
-      subtotal -= _ncDiscount;
-    }
-    return subtotal * (1 + _gstRate);
+    return (basic + sd).toDouble();
   }
 
   void _applyToAll(String sourceCategory) {
@@ -153,21 +119,48 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     MotionToast.show(context, "Rate ₹$sourceRate applied to all base categories!");
   }
 
-  /// Checks if a category should be excluded from the Sample Rate Calculator.
-  /// Explicitly filters out 'Binding Wire', 'Nails', 'HR Pipe', and 'MS Structure' / 'MS Structure ISMC'.
-  static bool isExcludedCategory(String cat) {
+  /// Allowed canonical categories whitelist (strictly 6 structural categories)
+  static const List<String> allowedCategories = [
+    'MS PIPE',
+    'MS ANGLE',
+    'MS CHANNEL',
+    'SQR BAR',
+    'ROUND BAR',
+    'FLATS',
+  ];
+
+  /// Checks if a category is part of the 6 allowed structural categories whitelist.
+  static bool isAllowedCategory(String cat) {
     final upper = cat.toUpperCase().trim();
-    return upper == 'BINDING WIRE' ||
-        upper == 'NAILS' ||
-        upper == 'HR PIPE' ||
-        upper == 'MS STRUCTURE' ||
-        upper == 'MS STRUCTURE ISMC' ||
-        upper == 'MS STRUCTURE (ISMC)' ||
-        upper.startsWith('MS STRUCTURE') ||
-        upper == 'STRUCTURE ISMC';
+    if (upper.contains('HR PIPE') ||
+        upper.contains('CR PIPE') ||
+        upper.contains('ISMB') ||
+        upper.contains('ISMC') ||
+        upper.contains('STRUCTURE') ||
+        upper.contains('BEAM') ||
+        upper.contains('BARBED') ||
+        upper.contains('GATE') ||
+        upper.contains('BINDING') ||
+        upper.contains('NAIL') ||
+        upper.contains('ERW')) {
+      return false;
+    }
+    return allowedCategories.any((allowed) =>
+        upper == allowed ||
+        (allowed == 'MS PIPE' && upper.contains('PIPE')) ||
+        (allowed == 'MS ANGLE' && upper.contains('ANGLE')) ||
+        (allowed == 'MS CHANNEL' && upper.contains('CHANNEL')) ||
+        (allowed == 'SQR BAR' &&
+            (upper.contains('SQR') || upper.contains('SQUARE'))) ||
+        (allowed == 'ROUND BAR' && upper.contains('ROUND')) ||
+        (allowed == 'FLATS' &&
+            (upper.contains('FLAT') || upper.contains('FLATS'))));
   }
 
-  String _generateRateMessage() {
+  /// Checks if a category should be excluded from the Sample Rate Calculator.
+  static bool isExcludedCategory(String cat) => !isAllowedCategory(cat);
+
+  String _generateRateMessage({String? specificCategory}) {
     StringBuffer sb = StringBuffer();
     String formattedDate = DateFormat('dd/MM/yyyy').format(DateTime.now());
 
@@ -179,6 +172,15 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
 
     final sortedCategoryKeys = _categories.keys
         .where((cat) => !isExcludedCategory(cat))
+        .where((cat) {
+          if (specificCategory != null &&
+              specificCategory.isNotEmpty &&
+              specificCategory != 'ALL') {
+            return cat.toUpperCase().trim() ==
+                specificCategory.toUpperCase().trim();
+          }
+          return true;
+        })
         .toList()
       ..sort(ItemOrderUtil.compare);
 
@@ -213,163 +215,361 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     sb.writeln("\n───────────────────────");
     sb.writeln("*Terms & Conditions*");
     sb.writeln("• Payment Advance");
-    sb.writeln("• Loading Charge - (Inclusive)");
     sb.writeln("• Transport (Extra)");
-    if (!_ncDiscountEnabled) {
-      sb.writeln(
-          "• GST - ${(_gstRate * 100).toStringAsFixed(2)} % (Inclusive)");
-    }
     sb.writeln("• Weight Tolerance - +/-5kg per MT");
 
     return sb.toString();
   }
 
-  void _showRatePreview() {
-    String message = _generateRateMessage();
-    if (message.isEmpty) {
-      MotionToast.show(context, "Enter at least one basic rate to preview.",
-          isError: true);
-      return;
-    }
+  void _shareSampleRates({String? initialCategory}) {
+    _showRatePreview(initialCategory: initialCategory);
+  }
 
+  Future<void> _launchWhatsApp(String text) async {
+    final encoded = Uri.encodeComponent(text);
+    final whatsappUrl = Uri.parse("whatsapp://send?text=$encoded");
+    final webUrl = Uri.parse("https://api.whatsapp.com/send?text=$encoded");
+
+    try {
+      if (await canLaunchUrl(whatsappUrl)) {
+        await launchUrl(whatsappUrl, mode: LaunchMode.externalApplication);
+      } else if (await canLaunchUrl(webUrl)) {
+        await launchUrl(webUrl, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) safeShare(context, text, subject: "MSM Steel Rates");
+      }
+    } catch (e) {
+      debugPrint("Error launching WhatsApp: $e");
+      if (mounted) safeShare(context, text, subject: "MSM Steel Rates");
+    }
+  }
+
+  void _showRatePreview({String? initialCategory}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final availableCategories = _categories.keys
+        .where((cat) => !isExcludedCategory(cat))
+        .toList()
+      ..sort(ItemOrderUtil.compare);
+
+    String currentFilter = (initialCategory != null &&
+            availableCategories.any((c) =>
+                c.toUpperCase().trim() == initialCategory.toUpperCase().trim()))
+        ? initialCategory
+        : 'ALL';
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.85,
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF0F172A) : Colors.white,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-          border: Border.all(
-            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-          ),
-        ),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          String message = _generateRateMessage(
+            specificCategory: currentFilter == 'ALL' ? null : currentFilter,
+          );
+
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.88,
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF0F172A) : Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              border: Border.all(
+                color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+              ),
+            ),
+            child: Column(
+              children: [
+                // Modal Drag Handle
+                Center(
+                  child: Container(
+                    margin: const EdgeInsets.only(top: 8, bottom: 4),
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+
+                // Modal Header
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFD32F2F).withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.bolt_rounded,
-                            color: Color(0xFFD32F2F), size: 18),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(7),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFD32F2F).withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.share_rounded,
+                                color: Color(0xFFD32F2F), size: 18),
+                          ),
+                          const SizedBox(width: 10),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "Share Rates Preview",
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: isDark ? Colors.white : const Color(0xFF1E293B),
+                                ),
+                              ),
+                              Text(
+                                "Formatted for WhatsApp & SMS quotation",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 10),
-                      Text(
-                        "Sample Rates Preview",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: isDark ? Colors.white : const Color(0xFF1E293B),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Category Filter Pills
+                Container(
+                  height: 40,
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    physics: const BouncingScrollPhysics(),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8.0),
+                        child: ChoiceChip(
+                          label: const Text("All Active Categories"),
+                          selected: currentFilter == 'ALL',
+                          labelStyle: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: currentFilter == 'ALL'
+                                ? Colors.white
+                                : (isDark ? Colors.white70 : const Color(0xFF475569)),
+                          ),
+                          selectedColor: const Color(0xFFD32F2F),
+                          backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                          onSelected: (selected) {
+                            if (selected) {
+                              setModalState(() => currentFilter = 'ALL');
+                            }
+                          },
+                        ),
+                      ),
+                      ...availableCategories.map((cat) {
+                        final isSelected = currentFilter == cat;
+                        final ctrl = _getControllerForCategory(cat);
+                        final hasRate = (double.tryParse(ctrl.text) ?? 0) > 0;
+
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: ChoiceChip(
+                            label: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(cat.toUpperCase()),
+                                if (hasRate) ...[
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF10B981),
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            selected: isSelected,
+                            labelStyle: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: isSelected
+                                  ? Colors.white
+                                  : (isDark ? Colors.white70 : const Color(0xFF475569)),
+                            ),
+                            selectedColor: const Color(0xFFD32F2F),
+                            backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                            onSelected: (selected) {
+                              if (selected) {
+                                setModalState(() => currentFilter = cat);
+                              }
+                            },
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+
+                Divider(
+                  height: 1,
+                  color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                ),
+
+                // Preview Content Area
+                Expanded(
+                  child: message.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24.0),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.info_outline_rounded,
+                                    size: 40, color: Color(0xFF94A3B8)),
+                                const SizedBox(height: 12),
+                                Text(
+                                  currentFilter == 'ALL'
+                                      ? "No basic rates configured yet.\nPlease enter at least one basic rate in Base Rates Config."
+                                      : "No basic rate set for $currentFilter.\nPlease enter a rate in the Base Rates Config panel.",
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                    color: Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : SingleChildScrollView(
+                          padding: const EdgeInsets.all(16),
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? const Color(0xFF1E293B)
+                                  : const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isDark
+                                    ? const Color(0xFF334155)
+                                    : const Color(0xFFE2E8F0),
+                              ),
+                            ),
+                            child: SelectableText(
+                              message,
+                              style: TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 13,
+                                color: isDark ? Colors.white : const Color(0xFF1E293B),
+                                height: 1.45,
+                              ),
+                            ),
+                          ),
+                        ),
+                ),
+
+                // Bottom Action Buttons
+                Padding(
+                  padding: EdgeInsets.fromLTRB(
+                      16, 10, 16, 10 + MediaQuery.of(context).padding.bottom),
+                  child: Row(
+                    children: [
+                      // Copy Button
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: message.isEmpty
+                              ? null
+                              : () {
+                                  Clipboard.setData(ClipboardData(text: message));
+                                  MotionToast.show(context, "Rate sheet copied to clipboard!");
+                                },
+                          icon: const Icon(Icons.copy_rounded, size: 16),
+                          label: const Text(
+                            "Copy Text",
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            side: BorderSide(
+                              color: isDark
+                                  ? const Color(0xFF334155)
+                                  : const Color(0xFFCBD5E1),
+                            ),
+                            foregroundColor:
+                                isDark ? Colors.white : const Color(0xFF1E293B),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+
+                      // System Share
+                      IconButton.filledTonal(
+                        onPressed: message.isEmpty
+                            ? null
+                            : () {
+                                safeShare(context, message,
+                                    subject: "MSM Steel Rates");
+                              },
+                        tooltip: "System Share",
+                        icon: const Icon(Icons.share_outlined, size: 18),
+                        style: IconButton.styleFrom(
+                          padding: const EdgeInsets.all(14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+
+                      // WhatsApp Button
+                      Expanded(
+                        flex: 2,
+                        child: ElevatedButton.icon(
+                          onPressed: message.isEmpty
+                              ? null
+                              : () {
+                                  Navigator.pop(context);
+                                  _launchWhatsApp(message);
+                                },
+                          icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                          label: const Text(
+                            "Share to WhatsApp",
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            backgroundColor: const Color(0xFF25D366),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded, size: 20),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-            ),
-            Divider(
-              height: 1,
-              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF1E293B)
-                        : const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isDark
-                          ? const Color(0xFF334155)
-                          : const Color(0xFFE2E8F0),
-                    ),
-                  ),
-                  child: SelectableText(
-                    message,
-                    style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 13,
-                      color: isDark ? Colors.white : const Color(0xFF1E293B),
-                      height: 1.45,
-                    ),
-                  ),
                 ),
-              ),
+              ],
             ),
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                  20, 10, 20, 10 + MediaQuery.of(context).padding.bottom),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: message));
-                        MotionToast.show(context, "Copied to Clipboard");
-                      },
-                      icon: const Icon(Icons.copy_rounded, size: 18),
-                      label: const Text("Copy Text"),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(
-                          color: isDark
-                              ? const Color(0xFF334155)
-                              : const Color(0xFFCBD5E1),
-                        ),
-                        foregroundColor:
-                            isDark ? Colors.white : const Color(0xFF1E293B),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Share.share(message);
-                        Navigator.pop(context);
-                      },
-                      icon: const Icon(Icons.share_rounded, size: 18),
-                      label: const Text("Share to WhatsApp"),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        backgroundColor: const Color(0xFF25D366),
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -385,6 +585,18 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
         backgroundColor:
             isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
         appBar: AppBar(
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back_rounded,
+                color: isDark ? Colors.white : const Color(0xFF0F172A), size: 22),
+            tooltip: 'Back to Dashboard',
+            onPressed: () {
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              } else {
+                Navigator.of(context).pushReplacementNamed('/home');
+              }
+            },
+          ),
           title: Text(
             "Sample Rate Calc",
             style: TextStyle(
@@ -411,18 +623,61 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
               tooltip: "Refresh Master Data",
               onPressed: () {
                 context.read<InventoryProvider>().fetchSampleRateData(force: true);
-                _loadCharges();
                 MotionToast.show(context, "Refreshing sample rates...");
               },
             ),
-            IconButton(
-              icon: const Icon(Icons.share_rounded, size: 20),
-              tooltip: "Preview & Share",
-              onPressed: _showRatePreview,
-            ),
+            if (isDesktop)
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
+                child: ElevatedButton.icon(
+                  onPressed: _shareSampleRates,
+                  icon: const Icon(Icons.share_rounded, size: 16),
+                  label: const Text(
+                    "Share Rates",
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFD32F2F),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              )
+            else
+              IconButton(
+                icon: Container(
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD32F2F).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Icon(Icons.share_rounded,
+                      size: 18, color: Color(0xFFD32F2F)),
+                ),
+                tooltip: 'Share Sample Rates',
+                onPressed: _shareSampleRates,
+              ),
             const SizedBox(width: 8),
           ],
         ),
+        floatingActionButton: isDesktop
+            ? null
+            : FloatingActionButton.extended(
+                onPressed: _shareSampleRates,
+                backgroundColor: const Color(0xFFD32F2F),
+                foregroundColor: Colors.white,
+                elevation: 4,
+                icon: const Icon(Icons.share_rounded, size: 18),
+                label: const Text(
+                  "Share Rates",
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                ),
+              ),
         body: Consumer<InventoryProvider>(
           builder: (context, inv, _) {
             if (inv.isLoadingSampleRates && inv.sampleRateCategories.isEmpty) {
@@ -612,15 +867,33 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                                 ? const Color(0xFF334155)
                                 : const Color(0xFFE2E8F0),
                           ),
-                          const SizedBox(height: 10),
-
-                          // NC Discount Toggle Card
-                          _buildNcDiscountToggle(isDark),
-
                           const SizedBox(height: 14),
 
-                          // Calculation Meta Strip
-                          _buildChargesMetaCard(isDark),
+                          // Desktop Primary Share Button
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: _shareSampleRates,
+                              icon: const Icon(Icons.share_rounded, size: 16),
+                              label: const Text(
+                                "Preview & Share Rates",
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                                backgroundColor: const Color(0xFFD32F2F),
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -800,9 +1073,31 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                                   ? const Color(0xFF334155)
                                   : const Color(0xFFE2E8F0),
                             ),
-                            _buildNcDiscountToggle(isDark),
-                            const SizedBox(height: 8),
-                            _buildChargesMetaCard(isDark),
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: _shareSampleRates,
+                                icon: const Icon(Icons.share_rounded, size: 16),
+                                label: const Text(
+                                  "Preview & Share Rates",
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 10),
+                                  backgroundColor: const Color(0xFFD32F2F),
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -896,134 +1191,6 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     );
   }
 
-  // ── NC DISCOUNT TOGGLE CARD ──
-  Widget _buildNcDiscountToggle(bool isDark) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-        ),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        "NC Discount (-₹${_ncDiscount.toStringAsFixed(0)})",
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: isDark ? Colors.white : const Color(0xFF0F172A),
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (_ncDiscountEnabled) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFDC2626).withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          "ACTIVE",
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFFDC2626),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  "Deduct ₹${_ncDiscount.toStringAsFixed(0)} before GST",
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    color: isDark
-                        ? const Color(0xFF94A3B8)
-                        : const Color(0xFF64748B),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Transform.scale(
-            scale: 0.8,
-            child: Switch.adaptive(
-              value: _ncDiscountEnabled,
-              activeTrackColor: const Color(0xFFD32F2F),
-              onChanged: (val) => setState(() => _ncDiscountEnabled = val),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── CHARGES META CARD ──
-  Widget _buildChargesMetaCard(bool isDark) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: isDark
-            ? const Color(0xFF0F172A).withValues(alpha: 0.5)
-            : const Color(0xFFF1F5F9).withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              Text(
-                "GST Rate: ${(_gstRate * 100).toStringAsFixed(1)}%",
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                ),
-              ),
-              Text(
-                "Loading: ₹${_lcRate.toStringAsFixed(0)}/MT",
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            "Formula: (Base + SD + LC${_ncDiscountEnabled ? ' - NC' : ''}) × ${(1 + _gstRate).toStringAsFixed(2)}",
-            style: TextStyle(
-              fontSize: 10,
-              fontStyle: FontStyle.italic,
-              color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ── CATEGORY SECTION & HIGH-DENSITY PRICING TABLE ──
   Widget _buildCategorySection(
       String title, List<SampleRateSize> sizes, bool isDark) {
@@ -1083,35 +1250,74 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                   ),
                 ],
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: hasBasic
-                      ? const Color(0xFFECFDF5)
-                      : (isDark
-                          ? const Color(0xFF334155)
-                          : const Color(0xFFF1F5F9)),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: hasBasic
-                        ? const Color(0xFFA7F3D0)
-                        : (isDark
-                            ? const Color(0xFF475569)
-                            : const Color(0xFFE2E8F0)),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: hasBasic
+                          ? const Color(0xFFECFDF5)
+                          : (isDark
+                              ? const Color(0xFF334155)
+                              : const Color(0xFFF1F5F9)),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: hasBasic
+                            ? const Color(0xFFA7F3D0)
+                            : (isDark
+                                ? const Color(0xFF475569)
+                                : const Color(0xFFE2E8F0)),
+                      ),
+                    ),
+                    child: Text(
+                      hasBasic
+                          ? "Base: ₹${formatIndianCurrency(basic.round())}/MT"
+                          : "Base Rate Not Set",
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: hasBasic
+                            ? const Color(0xFF059669)
+                            : const Color(0xFF94A3B8),
+                      ),
+                    ),
                   ),
-                ),
-                child: Text(
-                  hasBasic
-                      ? "Base: ₹${formatIndianCurrency(basic.round())}/MT"
-                      : "Base Rate Not Set",
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: hasBasic
-                        ? const Color(0xFF059669)
-                        : const Color(0xFF94A3B8),
+                  const SizedBox(width: 8),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: () => _shareSampleRates(initialCategory: title),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD32F2F).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: const Color(0xFFD32F2F).withValues(alpha: 0.3),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.share_rounded,
+                              size: 12, color: Color(0xFFD32F2F)),
+                          SizedBox(width: 4),
+                          Text(
+                            "Share",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFFD32F2F),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
             ],
           ),

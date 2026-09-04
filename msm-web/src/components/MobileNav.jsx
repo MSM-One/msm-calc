@@ -1,14 +1,14 @@
 import React from 'react';
-import { LayoutDashboard, Box, BookOpen, BarChart3, Users } from 'lucide-react';
+import { LayoutDashboard, Calculator, Box, BookOpen, BarChart3, Users } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const MobileNav = ({ activeTab, setActiveTab }) => {
   const items = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Dash' },
+    { id: 'rates', icon: Calculator, label: 'Rates' },
     { id: 'inventory', icon: Box, label: 'Inv' },
     { id: 'sauda', icon: BookOpen, label: 'Book' },
     { id: 'reports', icon: BarChart3, label: 'Rep' },
-    { id: 'users', icon: Users, label: 'User' },
   ];
 
   return (

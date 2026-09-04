@@ -233,8 +233,15 @@ class LowStockReportScreen extends StatelessWidget {
         title: const Text("Low Stock Alert Details"),
         backgroundColor: const Color(0xFFB71C1C),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded),
-          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
+          tooltip: 'Back',
+          onPressed: () {
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).pop();
+            } else {
+              Navigator.of(context).pushReplacementNamed('/home');
+            }
+          },
         ),
       ),
       body: items.isEmpty

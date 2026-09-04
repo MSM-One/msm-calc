@@ -398,6 +398,42 @@ class _CalculatorScreenState extends State<CalculatorScreen>
     return "assets/msm_icon.jpg";
   }
 
+  static const List<String> allowedCategories = [
+    'MS PIPE',
+    'MS ANGLE',
+    'MS CHANNEL',
+    'SQR BAR',
+    'ROUND BAR',
+    'FLATS',
+  ];
+
+  static bool isAllowedCategory(String cat) {
+    final upper = cat.toUpperCase().trim();
+    if (upper.contains('HR PIPE') ||
+        upper.contains('CR PIPE') ||
+        upper.contains('ISMB') ||
+        upper.contains('ISMC') ||
+        upper.contains('STRUCTURE') ||
+        upper.contains('BEAM') ||
+        upper.contains('BARBED') ||
+        upper.contains('GATE') ||
+        upper.contains('BINDING') ||
+        upper.contains('NAIL') ||
+        upper.contains('ERW')) {
+      return false;
+    }
+    return allowedCategories.any((allowed) =>
+        upper == allowed ||
+        (allowed == 'MS PIPE' && upper.contains('PIPE')) ||
+        (allowed == 'MS ANGLE' && upper.contains('ANGLE')) ||
+        (allowed == 'MS CHANNEL' && upper.contains('CHANNEL')) ||
+        (allowed == 'SQR BAR' &&
+            (upper.contains('SQR') || upper.contains('SQUARE'))) ||
+        (allowed == 'ROUND BAR' && upper.contains('ROUND')) ||
+        (allowed == 'FLATS' &&
+            (upper.contains('FLAT') || upper.contains('FLATS'))));
+  }
+
   Future<void> _loadSheetData() async {
     final data = await DataRepository.getSheetDataAsync(null);
     if (!mounted) return;
@@ -418,6 +454,8 @@ class _CalculatorScreenState extends State<CalculatorScreen>
 
     for (var itemObj in rawItems) {
       String name = itemObj['name'].toString().trim();
+      if (!isAllowedCategory(name)) continue;
+
       List<dynamic> rawSizes = itemObj['sizes'] ?? [];
 
       List<SizeEntry> sizeEntries = rawSizes.map((s) {
@@ -802,13 +840,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   }
 
   double netRate(ItemEntry item, SizeEntry size) {
-    double gross = item.basic + size.sd + globalFreight + globalOB + loading;
-    double finalVal = gross;
-    if (ncDiscountEnabled) {
-      finalVal -= ncDiscount;
-    }
-    if (gstEnabled) finalVal += (finalVal * gstRate);
-    return finalVal;
+    return item.basic + size.sd + globalFreight + globalOB;
   }
 
   double grandTotal() {
@@ -831,16 +863,11 @@ class _CalculatorScreenState extends State<CalculatorScreen>
     return total;
   }
 
-  String buildTermsAndConditions(bool ncDiscountEnabled) {
+  String buildTermsAndConditions([bool ncDiscountEnabled = false]) {
     StringBuffer terms = StringBuffer();
     terms.writeln("*Terms & Conditions*");
     terms.writeln("• Payment Advance");
-    terms.writeln("• Loading Charge - (Inclusive)");
     terms.writeln("• Transport (Extra)");
-    if (!ncDiscountEnabled) {
-      final gstPct = (gstRate * 100).toStringAsFixed(2);
-      terms.writeln("• GST - $gstPct % (Inclusive)");
-    }
     terms.writeln("• Weight Tolerance - +/-5kg per MT");
     return terms.toString();
   }
@@ -1174,34 +1201,22 @@ class _CalculatorScreenState extends State<CalculatorScreen>
           color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
         ),
       ),
+      leading: IconButton(
+        icon: Icon(Icons.arrow_back_rounded,
+            color: isDark ? Colors.white : const Color(0xFF0F172A), size: 22),
+        tooltip: 'Back to Dashboard',
+        onPressed: () {
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          } else {
+            Navigator.of(context).pushReplacementNamed('/home');
+          }
+        },
+      ),
       title: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.only(right: 16),
         child: Row(
           children: [
-            InkWell(
-              onTap: () => Navigator.pop(context),
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.05)
-                      : const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: isDark
-                        ? const Color(0xFF334155)
-                        : const Color(0xFFE2E8F0),
-                  ),
-                ),
-                child: Icon(
-                  Icons.arrow_back_ios_new_rounded,
-                  color: isDark ? Colors.white : const Color(0xFF1E293B),
-                  size: 16,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1266,6 +1281,18 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         centerTitle: false,
         toolbarHeight: 68,
         surfaceTintColor: Colors.transparent,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_rounded,
+              color: isDark ? Colors.white : const Color(0xFF0F172A), size: 22),
+          tooltip: 'Back to Dashboard',
+          onPressed: () {
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).pop();
+            } else {
+              Navigator.of(context).pushReplacementNamed('/home');
+            }
+          },
+        ),
         shape: Border(
           bottom: BorderSide(
             color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
@@ -1464,75 +1491,8 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isNarrow = constraints.maxWidth < 450;
-              final pill = Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0284C7).withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: const Color(0xFF0284C7).withValues(alpha: 0.2),
-                  ),
-                ),
-                child: Text(
-                  "LC: ₹${loading.toInt()} • NC: -₹${ncDiscount.toInt()} • GST: ${(gstRate * 100).toStringAsFixed(0)}%",
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF0284C7),
-                  ),
-                ),
-              );
-
-              if (isNarrow) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _sectionHeader(Icons.tune_rounded, "Pricing & Charges",
-                        brandRed, isDark),
-                    const SizedBox(height: 8),
-                    pill,
-                  ],
-                );
-              }
-
-              return Row(
-                children: [
-                  _sectionHeader(
-                      Icons.tune_rounded, "Pricing & Charges", brandRed, isDark),
-                  const Spacer(),
-                  pill,
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _buildMinimalSwitch(
-                  "GST (18% Bill)",
-                  gstEnabled,
-                  (v) => setState(() => gstEnabled = v),
-                  brandRed,
-                  isDark,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildMinimalSwitch(
-                  "NC Discount",
-                  ncDiscountEnabled,
-                  (v) => setState(() => ncDiscountEnabled = v),
-                  brandRed,
-                  isDark,
-                ),
-              ),
-            ],
-          ),
+          _sectionHeader(
+              Icons.tune_rounded, "Pricing & Charges", brandRed, isDark),
           const SizedBox(height: 14),
           Row(
             children: [
@@ -1779,17 +1739,10 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           _summaryRow(
-                            "Sub-total",
-                            "₹ ${formatIndianCurrency(totalAmt / (gstEnabled ? 1.18 : 1))}",
-                            isDark,
-                            false,
-                          ),
-                          const SizedBox(height: 10),
-                          _summaryRow(
-                            "GST (18%)",
-                            gstEnabled
-                                ? "₹ ${formatIndianCurrency(totalAmt - (totalAmt / 1.18))}"
-                                : "Exempt / ₹ 0",
+                            widget.isQuotationMode
+                                ? "Quotation Total"
+                                : "Total Computed Rate",
+                            "₹ ${formatIndianCurrency(totalAmt)}",
                             isDark,
                             false,
                           ),
@@ -2050,51 +2003,6 @@ class _CalculatorScreenState extends State<CalculatorScreen>
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildMinimalSwitch(String title, bool value, Function(bool) onChanged,
-      Color brandRed, bool isDark) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.03)
-            : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-        ),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Text(
-              title,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: isDark ? Colors.white : const Color(0xFF374151),
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          Transform.scale(
-            scale: 0.85,
-            child: Switch(
-              value: value,
-              activeThumbColor: Colors.white,
-              activeTrackColor: brandRed,
-              inactiveTrackColor:
-                  isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
-              inactiveThumbColor: Colors.white,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              onChanged: onChanged,
-            ),
-          ),
-        ],
-      ),
     );
   }
 

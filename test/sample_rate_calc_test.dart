@@ -27,31 +27,14 @@ void main() {
   });
 
   group('Sample Rate Formula Calculations', () {
-    test('calculates basic net rate without NC discount', () {
+    test('calculates basic net rate: Base + Size Difference', () {
       const double basic = 50000.0;
       const double sd = 500.0;
-      const double lc = 255.0;
-      const double gst = 0.18;
 
-      const double subtotal = basic + sd + lc;
-      const double finalRate = subtotal * (1 + gst);
+      const double finalRate = basic + sd;
 
-      expect(finalRate, closeTo(59890.90, 0.01));
-      expect(finalRate.round(), equals(59891));
-    });
-
-    test('calculates net rate with NC discount enabled', () {
-      const double basic = 50000.0;
-      const double sd = 500.0;
-      const double lc = 255.0;
-      const double nc = 3000.0;
-      const double gst = 0.18;
-
-      const double subtotal = basic + sd + lc - nc;
-      const double finalRate = subtotal * (1 + gst);
-
-      expect(finalRate, closeTo(56350.90, 0.01));
-      expect(finalRate.round(), equals(56351));
+      expect(finalRate, equals(50500.0));
+      expect(finalRate.round(), equals(50500));
     });
   });
 
@@ -95,9 +78,6 @@ void main() {
       expect(find.text('Round/Flats Basic'), findsOneWidget);
       expect(find.text('Apply Pipe Rate to All'), findsOneWidget);
 
-      // Verify NC Discount Toggle
-      expect(find.textContaining('NC Discount'), findsOneWidget);
-
       // Verify Canonical Category Tabs
       expect(find.text('MS PIPE'), findsWidgets);
       expect(find.text('MS ANGLE'), findsWidgets);
@@ -116,8 +96,8 @@ void main() {
       await tester.enterText(pipeInput.first, '50000');
       await tester.pump();
 
-      // Net rate should now be displayed (59,891)
-      expect(find.textContaining('59,891'), findsOneWidget);
+      // Net rate should now be displayed (50,500)
+      expect(find.textContaining('50,500'), findsOneWidget);
     });
 
     testWidgets('filters out Binding Wire, Nails, HR Pipe, and MS Structure ISMC and falls back gracefully',

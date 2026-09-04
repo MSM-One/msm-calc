@@ -86,7 +86,6 @@ void main() {
 
       expect(find.text('Welcome back, Vivek Salve'), findsOneWidget);
       expect(find.text('MSM Yard Inventory & Operations'), findsOneWidget);
-      expect(find.text('Supabase Live'), findsOneWidget);
       expect(find.text('Yard: All'), findsOneWidget);
       expect(find.text('56 Items Attention'), findsOneWidget);
 

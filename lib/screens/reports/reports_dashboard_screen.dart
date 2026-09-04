@@ -751,6 +751,44 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC), // Slate 50
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded,
+              color: Color(0xFF0F172A), size: 22),
+          tooltip: 'Back to Dashboard',
+          onPressed: () {
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).pop();
+            } else {
+              Navigator.of(context).pushReplacementNamed('/home');
+            }
+          },
+        ),
+        title: const Text(
+          "Stock & Inventory Reports",
+          style: TextStyle(
+            color: Color(0xFF0F172A),
+            fontWeight: FontWeight.w800,
+            fontSize: 18,
+            letterSpacing: -0.2,
+          ),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        shape: const Border(
+          bottom: BorderSide(
+            color: Color(0xFFE2E8F0),
+          ),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, color: Color(0xFF0F172A), size: 20),
+            tooltip: "Refresh Reports",
+            onPressed: () => _loadReports(forceRefresh: true),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -864,7 +902,12 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
             // Main Sub-Report Body
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                padding: EdgeInsets.fromLTRB(
+                  MediaQuery.of(context).size.width < 600 ? 6 : 16,
+                  0,
+                  MediaQuery.of(context).size.width < 600 ? 6 : 16,
+                  MediaQuery.of(context).size.width < 600 && _activeTabId == 'today' ? 0 : 12,
+                ),
                 child: _isLoading
                     ? const Center(
                         child: CircularProgressIndicator(
@@ -903,6 +946,8 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
             setState(() => _todaySummaryFlowMode = flow);
           },
           onExportCategoryPdf: _exportCategoryDailySummaryPdf,
+          onExportPdf: _handleExportPdf,
+          isPdfLoading: _isPdfExporting,
           categoryDownloading: _categoryDownloading,
           activeOnly: _activeOnlyFilter,
           onActiveOnlyChanged: (val) =>

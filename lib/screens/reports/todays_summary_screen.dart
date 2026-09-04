@@ -6,6 +6,8 @@ import '../../utils/sorting_utils.dart';
 import '../../widgets/m_loader.dart';
 import '../../widgets/reports/enterprise_stock_movement_table.dart';
 
+enum TransactionFlowFilter { inward, outward, net }
+
 /// Enterprise Data Models for Today's Summary Split View
 class _TodaySizeRowData {
   final int index;
@@ -27,6 +29,9 @@ class _TodaySizeRowData {
     required this.closing,
     required this.net,
   });
+
+  double? get inwardMT => inward;
+  double? get outwardMT => outward;
 
   bool get hasMovement => inward.abs() > 0.0001 || outward.abs() > 0.0001;
 
@@ -83,6 +88,8 @@ class TodaySummaryTab extends StatefulWidget {
   final String selectedTab;
   final String selectedFlow;
   final Function(String category)? onExportCategoryPdf;
+  final VoidCallback? onExportPdf;
+  final bool isPdfLoading;
   final Map<String, bool> categoryDownloading;
   final bool activeOnly;
   final ValueChanged<bool>? onActiveOnlyChanged;
@@ -96,8 +103,10 @@ class TodaySummaryTab extends StatefulWidget {
     this.onFlowChanged,
     this.dateRangeLabel = 'today',
     this.selectedTab = 'Detailed',
-    this.selectedFlow = 'Inward',
+    this.selectedFlow = 'Net Qty',
     this.onExportCategoryPdf,
+    this.onExportPdf,
+    this.isPdfLoading = false,
     this.categoryDownloading = const {},
     this.activeOnly = true,
     this.onActiveOnlyChanged,
@@ -110,18 +119,34 @@ class TodaySummaryTab extends StatefulWidget {
 class _TodaySummaryTabState extends State<TodaySummaryTab> {
   String? _selectedCategory;
   final Set<String> _expandedCategories = {};
+  TransactionFlowFilter _selectedFlow = TransactionFlowFilter.net;
 
   @override
   void initState() {
     super.initState();
+    _syncFlowFilterFromWidget();
     if (widget.selectedTab == 'Detailed') {
       _expandAllCategories();
+    }
+  }
+
+  void _syncFlowFilterFromWidget() {
+    final flow = widget.selectedFlow.toLowerCase().trim();
+    if (flow == 'inward') {
+      _selectedFlow = TransactionFlowFilter.inward;
+    } else if (flow == 'outward') {
+      _selectedFlow = TransactionFlowFilter.outward;
+    } else {
+      _selectedFlow = TransactionFlowFilter.net;
     }
   }
 
   @override
   void didUpdateWidget(covariant TodaySummaryTab oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedFlow != widget.selectedFlow) {
+      _syncFlowFilterFromWidget();
+    }
     if (oldWidget.selectedTab != widget.selectedTab) {
       if (widget.selectedTab == 'Detailed') {
         _expandAllCategories();
@@ -156,6 +181,46 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
       return Icons.domain_rounded;
     }
     return Icons.category_outlined;
+  }
+
+  List<_TodaySizeRowData> _filterSizesByFlow(List<_TodaySizeRowData> sizes) {
+    if (!widget.activeOnly) return sizes;
+    switch (_selectedFlow) {
+      case TransactionFlowFilter.inward:
+        return sizes.where((item) => (item.inwardMT ?? 0.0) > 0.0001).toList();
+      case TransactionFlowFilter.outward:
+        return sizes.where((item) => (item.outwardMT ?? 0.0) > 0.0001).toList();
+      case TransactionFlowFilter.net:
+        return sizes.where((item) => item.hasMovement).toList();
+    }
+  }
+
+  String _getFlowCategorySubtitle(_CategorySummaryData categoryData) {
+    final filtered = _filterSizesByFlow(categoryData.sizes);
+    if (widget.activeOnly) {
+      switch (_selectedFlow) {
+        case TransactionFlowFilter.inward:
+          return '${filtered.length} inward';
+        case TransactionFlowFilter.outward:
+          return '${filtered.length} outward';
+        case TransactionFlowFilter.net:
+          return '${filtered.length} active';
+      }
+    }
+    return '${categoryData.sizes.length} sizes';
+  }
+
+  List<_CategorySummaryData> _filterCategoriesByFlow(
+      List<_CategorySummaryData> categories) {
+    if (!widget.activeOnly) return categories;
+    switch (_selectedFlow) {
+      case TransactionFlowFilter.inward:
+        return categories.where((c) => c.totalInward > 0.0001).toList();
+      case TransactionFlowFilter.outward:
+        return categories.where((c) => c.totalOutward > 0.0001).toList();
+      case TransactionFlowFilter.net:
+        return categories.where((c) => c.hasMovement).toList();
+    }
   }
 
   List<_CategorySummaryData> _processCategories() {
@@ -258,9 +323,32 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final double width = constraints.maxWidth;
+        final bool isSmallScreen = width < 1024;
 
-        // When 'Summary' is active, render single high-density table of all 10 canonical categories
+        // When 'Summary' is active:
         if (widget.selectedTab == 'Summary') {
+          if (isSmallScreen) {
+            final filteredCategories = _filterCategoriesByFlow(categories);
+            final double grandInward =
+                filteredCategories.fold(0.0, (sum, c) => sum + c.totalInward);
+            final double grandOutward =
+                filteredCategories.fold(0.0, (sum, c) => sum + c.totalOutward);
+            final double grandNet = grandInward - grandOutward;
+
+            return Column(
+              children: [
+                Expanded(
+                  child: _buildMobileSummaryTableView(
+                    filteredCategories,
+                    grandInward: grandInward,
+                    grandOutward: grandOutward,
+                    grandNet: grandNet,
+                  ),
+                ),
+                _buildMobileBottomActionBar(grandNet),
+              ],
+            );
+          }
           return _buildSummaryTableView(categories, width);
         }
 
@@ -270,8 +358,22 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
           return _buildDesktopSplitView(categories);
         }
 
-        // Mobile / Tablet View (< 1024px)
-        return _buildMobileTabletView(categories, width);
+        // Mobile & Tablet Detailed Accordion View (< 1024px)
+        final filteredCategories = _filterCategoriesByFlow(categories);
+        final double grandInward =
+            filteredCategories.fold(0.0, (sum, c) => sum + c.totalInward);
+        final double grandOutward =
+            filteredCategories.fold(0.0, (sum, c) => sum + c.totalOutward);
+        final double grandNet = grandInward - grandOutward;
+
+        return Column(
+          children: [
+            Expanded(
+              child: _buildMobileDetailedAccordionView(filteredCategories),
+            ),
+            _buildMobileBottomActionBar(grandNet),
+          ],
+        );
       },
     );
   }
@@ -510,12 +612,14 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
     final double netQty = cat.totalNet;
     final bool isNegative = netQty < 0;
 
-    final String inwardText =
-        cat.totalInward == 0 ? '-' : '+${cat.totalInward.toStringAsFixed(3)}';
-    final String outwardText =
-        cat.totalOutward == 0 ? '-' : '-${cat.totalOutward.toStringAsFixed(3)}';
+    final String inwardText = cat.totalInward.abs() < 0.0001
+        ? '-'
+        : '+${cat.totalInward.toStringAsFixed(3)}';
+    final String outwardText = cat.totalOutward.abs() < 0.0001
+        ? '-'
+        : '-${cat.totalOutward.toStringAsFixed(3)}';
     final String netText =
-        netQty.abs() < 0.00001 ? '0.000' : netQty.toStringAsFixed(3);
+        netQty.abs() < 0.0001 ? '-' : netQty.toStringAsFixed(3);
 
     return InkWell(
       onTap: onTap,
@@ -663,12 +767,14 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
     required double grandNet,
   }) {
     final bool isNegative = grandNet < 0;
-    final String inwardText =
-        grandInward == 0 ? '-' : '+${grandInward.toStringAsFixed(3)}';
-    final String outwardText =
-        grandOutward == 0 ? '-' : '-${grandOutward.toStringAsFixed(3)}';
-    final String netText = grandNet.abs() < 0.00001
-        ? '0.000 MT'
+    final String inwardText = grandInward.abs() < 0.0001
+        ? '-'
+        : '+${grandInward.toStringAsFixed(3)}';
+    final String outwardText = grandOutward.abs() < 0.0001
+        ? '-'
+        : '-${grandOutward.toStringAsFixed(3)}';
+    final String netText = grandNet.abs() < 0.0001
+        ? '-'
         : '${grandNet.toStringAsFixed(3)} MT';
 
     return Container(
@@ -868,9 +974,7 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                   Expanded(
                     child: Builder(
                       builder: (context) {
-                        final displaySizes = widget.activeOnly
-                            ? activeCat.sizes.where((s) => s.hasMovement).toList()
-                            : activeCat.sizes;
+                        final displaySizes = _filterSizesByFlow(activeCat.sizes);
 
                         if (displaySizes.isEmpty) {
                           return Center(
@@ -1321,16 +1425,16 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
     required String categoryName,
   }) {
     final double netQty = row.inward - row.outward;
-    final bool isNegative = netQty < 0;
+    final bool isNegative = netQty < -0.0001;
     final displayLabel =
         EnterpriseStockMovementTable.appendKgSuffix(categoryName, row.sizeLabel);
 
     final String inwardText =
-        row.inward == 0 ? '-' : '+${row.inward.toStringAsFixed(3)}';
+        row.inward.abs() < 0.0001 ? '-' : '+${row.inward.toStringAsFixed(3)}';
     final String outwardText =
-        row.outward == 0 ? '-' : '-${row.outward.toStringAsFixed(3)}';
+        row.outward.abs() < 0.0001 ? '-' : '-${row.outward.toStringAsFixed(3)}';
     final String netQtyText =
-        netQty.abs() < 0.00001 ? '0.000' : netQty.toStringAsFixed(3);
+        netQty.abs() < 0.0001 ? '-' : netQty.toStringAsFixed(3);
 
     return Container(
       height: 38,
@@ -1441,14 +1545,17 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
     required double totalOutward,
   }) {
     final double totalNet = totalInward - totalOutward;
-    final bool isNegative = totalNet < 0;
+    final bool isNegative = totalNet < -0.0001;
 
-    final String inwardText =
-        totalInward == 0 ? '-' : '+${totalInward.toStringAsFixed(3)}';
-    final String outwardText =
-        totalOutward == 0 ? '-' : '-${totalOutward.toStringAsFixed(3)}';
-    final String netText =
-        totalNet.abs() < 0.00001 ? '0.000 MT' : '${totalNet.toStringAsFixed(3)} MT';
+    final String inwardText = totalInward.abs() < 0.0001
+        ? '-'
+        : '+${totalInward.toStringAsFixed(3)}';
+    final String outwardText = totalOutward.abs() < 0.0001
+        ? '-'
+        : '-${totalOutward.toStringAsFixed(3)}';
+    final String netText = totalNet.abs() < 0.0001
+        ? '-'
+        : '${totalNet.toStringAsFixed(3)} MT';
 
     return Container(
       height: 38,
@@ -1526,27 +1633,869 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // MOBILE / TABLET COLLAPSIBLE VIEW (< 1024px)
+  // MOBILE (< 1024px) COMPACT 4-COLUMN SUMMARY TABLE
   // ───────────────────────────────────────────────────────────────────────────
-  Widget _buildMobileTabletView(
-      List<_CategorySummaryData> sortedCategories, double availableWidth) {
-    const double minTableWidth = 720.0;
-    final bool needsHorizontalScroll = availableWidth < minTableWidth;
+  Widget _buildMobileSummaryTableView(
+    List<_CategorySummaryData> categories, {
+    required double grandInward,
+    required double grandOutward,
+    required double grandNet,
+  }) {
+    if (categories.isEmpty) {
+      final String emptyMsg = _selectedFlow == TransactionFlowFilter.inward
+          ? 'No inward stock movements recorded on this date.'
+          : (_selectedFlow == TransactionFlowFilter.outward
+              ? 'No outward stock movements recorded on this date.'
+              : 'No stock movements recorded on this date.');
 
-    final Widget content = ListView.builder(
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Text(
+            emptyMsg,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF64748B),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      itemCount: sortedCategories.length,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      itemCount: categories.length,
       itemBuilder: (context, index) {
-        final categoryData = sortedCategories[index];
+        final cat = categories[index];
+        final String subtitleText = widget.activeOnly
+            ? '${cat.activeSizesCount} active / ${cat.sizes.length} sizes'
+            : '${cat.sizes.length} sizes';
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          elevation: 0,
+          color: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: const BorderSide(color: Color(0xFFE2E8F0)),
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () {
+              setState(() => _selectedCategory = cat.name);
+              widget.onTabChanged?.call('Detailed');
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '#${index + 1}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          cat.name.toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF0F172A),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Text(
+                          subtitleText,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        color: Color(0xFF94A3B8),
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildMetricBadge(
+                          label: 'INWARD',
+                          value: cat.totalInward > 0.0001
+                              ? '+${cat.totalInward.toStringAsFixed(3)} MT'
+                              : '-',
+                          color: const Color(0xFF059669),
+                          bgColor: const Color(0xFFECFDF5),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildMetricBadge(
+                          label: 'OUTWARD',
+                          value: cat.totalOutward > 0.0001
+                              ? '-${cat.totalOutward.toStringAsFixed(3)} MT'
+                              : '-',
+                          color: const Color(0xFFDC2626),
+                          bgColor: const Color(0xFFFEF2F2),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildMetricBadge(
+                          label: 'NET',
+                          value: cat.totalNet.abs() < 0.0001
+                              ? '0.000 MT'
+                              : '${cat.totalNet.toStringAsFixed(3)} MT',
+                          color: cat.totalNet < -0.0001
+                              ? const Color(0xFFDC2626)
+                              : const Color(0xFF0F172A),
+                          bgColor: const Color(0xFFF8FAFC),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMetricBadge({
+    required String label,
+    required String value,
+    required Color color,
+    required Color bgColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.15)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 9.5,
+              fontWeight: FontWeight.w700,
+              color: color,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: color,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
+  Widget _buildMobileSummaryTableHeader() {
+    if (_selectedFlow == TransactionFlowFilter.inward) {
+      return Container(
+        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: const BoxDecoration(
+          color: Color(0xFFF8FAFC),
+          border: Border(
+            bottom: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+          ),
+        ),
+        child: const Row(
+          children: [
+            Expanded(
+              flex: 6,
+              child: Text(
+                'Item Name',
+                textAlign: TextAlign.left,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF0F172A),
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: Text(
+                'Inward (MT)',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF059669),
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_selectedFlow == TransactionFlowFilter.outward) {
+      return Container(
+        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: const BoxDecoration(
+          color: Color(0xFFF8FAFC),
+          border: Border(
+            bottom: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+          ),
+        ),
+        child: const Row(
+          children: [
+            Expanded(
+              flex: 6,
+              child: Text(
+                'Item Name',
+                textAlign: TextAlign.left,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF0F172A),
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: Text(
+                'Outward (MT)',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFFDC2626),
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Net Qty (4 columns)
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF8FAFC),
+        border: Border(
+          bottom: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+        ),
+      ),
+      child: const Row(
+        children: [
+          Expanded(
+            flex: 4,
+            child: Text(
+              'Item Name',
+              textAlign: TextAlign.left,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF0F172A),
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+          SizedBox(width: 4),
+          Expanded(
+            flex: 2,
+            child: Text(
+              'Inward',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF059669),
+              ),
+            ),
+          ),
+          SizedBox(width: 4),
+          Expanded(
+            flex: 2,
+            child: Text(
+              'Outward',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFFDC2626),
+              ),
+            ),
+          ),
+          SizedBox(width: 4),
+          Expanded(
+            flex: 2,
+            child: Text(
+              'Net Qty',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF0F172A),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileSummaryTableRow({
+    required _CategorySummaryData cat,
+    required bool isEven,
+    required VoidCallback onTap,
+  }) {
+    final double netQty = cat.totalNet;
+    final bool isNegative = netQty < -0.0001;
+
+    final String inwardText = cat.totalInward.abs() < 0.0001
+        ? '-'
+        : '+${cat.totalInward.toStringAsFixed(3)} MT';
+    final String outwardText = cat.totalOutward.abs() < 0.0001
+        ? '-'
+        : '-${cat.totalOutward.toStringAsFixed(3)} MT';
+    final String netText = netQty.abs() < 0.0001
+        ? '-'
+        : '${netQty.toStringAsFixed(3)} MT';
+
+    if (_selectedFlow == TransactionFlowFilter.inward) {
+      return Material(
+        color: isEven ? const Color(0xFFF8FAFC) : Colors.white,
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1.0),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 6,
+                  child: Row(
+                    children: [
+                      Icon(
+                        _getCategoryIcon(cat.name),
+                        size: 15,
+                        color: const Color(0xFFD32F2F),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          cat.name.toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF0F172A),
+                            letterSpacing: 0.1,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  flex: 4,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      inwardText,
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: cat.totalInward.abs() < 0.0001
+                            ? const Color(0xFF94A3B8)
+                            : const Color(0xFF059669),
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_selectedFlow == TransactionFlowFilter.outward) {
+      return Material(
+        color: isEven ? const Color(0xFFF8FAFC) : Colors.white,
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1.0),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 6,
+                  child: Row(
+                    children: [
+                      Icon(
+                        _getCategoryIcon(cat.name),
+                        size: 15,
+                        color: const Color(0xFFD32F2F),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          cat.name.toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF0F172A),
+                            letterSpacing: 0.1,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  flex: 4,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      outwardText,
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: cat.totalOutward.abs() < 0.0001
+                            ? const Color(0xFF94A3B8)
+                            : const Color(0xFFDC2626),
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Net Qty (4 columns)
+    return Material(
+      color: isEven ? const Color(0xFFF8FAFC) : Colors.white,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 38,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: const BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1.0),
+            ),
+          ),
+          child: Row(
+            children: [
+              // 1. Item Name (flex: 4)
+              Expanded(
+                flex: 4,
+                child: Row(
+                  children: [
+                    Icon(
+                      _getCategoryIcon(cat.name),
+                      size: 13,
+                      color: const Color(0xFFD32F2F),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        cat.name.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0F172A),
+                          letterSpacing: 0.1,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+
+              // 2. Inward (flex: 2)
+              Expanded(
+                flex: 2,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    inwardText,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: cat.totalInward.abs() < 0.0001
+                          ? const Color(0xFF94A3B8)
+                          : const Color(0xFF059669),
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+
+              // 3. Outward (flex: 2)
+              Expanded(
+                flex: 2,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    outwardText,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: cat.totalOutward.abs() < 0.0001
+                          ? const Color(0xFF94A3B8)
+                          : const Color(0xFFDC2626),
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+
+              // 4. Net Qty (flex: 2)
+              Expanded(
+                flex: 2,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    netText,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      color: netQty.abs() < 0.0001
+                          ? const Color(0xFF94A3B8)
+                          : (isNegative
+                              ? const Color(0xFFDC2626)
+                              : const Color(0xFF0F172A)),
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileSummaryTableFooter({
+    required double grandInward,
+    required double grandOutward,
+    required double grandNet,
+  }) {
+    final bool isNegative = grandNet < -0.0001;
+
+    final String inwardText = grandInward.abs() < 0.0001
+        ? '-'
+        : '+${grandInward.toStringAsFixed(3)} MT';
+    final String outwardText = grandOutward.abs() < 0.0001
+        ? '-'
+        : '-${grandOutward.toStringAsFixed(3)} MT';
+    final String netText = grandNet.abs() < 0.0001
+        ? '-'
+        : '${grandNet.toStringAsFixed(3)} MT';
+
+    if (_selectedFlow == TransactionFlowFilter.inward) {
+      return Container(
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: const BoxDecoration(
+          color: Color(0xFFF1F5F9),
+          border: Border(
+            top: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Expanded(
+              flex: 6,
+              child: Text(
+                'TOTAL',
+                textAlign: TextAlign.left,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF0F172A),
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  inwardText,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF059669),
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_selectedFlow == TransactionFlowFilter.outward) {
+      return Container(
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: const BoxDecoration(
+          color: Color(0xFFF1F5F9),
+          border: Border(
+            top: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Expanded(
+              flex: 6,
+              child: Text(
+                'TOTAL',
+                textAlign: TextAlign.left,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF0F172A),
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  outwardText,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFFDC2626),
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Net Qty: 4 columns
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF1F5F9),
+        border: Border(
+          top: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+        ),
+      ),
+      child: Row(
+        children: [
+          // TOTAL (flex: 4)
+          const Expanded(
+            flex: 4,
+            child: Text(
+              'TOTAL',
+              textAlign: TextAlign.left,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF0F172A),
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+
+          // Inward (flex: 2)
+          Expanded(
+            flex: 2,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                inwardText,
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF059669),
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+
+          // Outward (flex: 2)
+          Expanded(
+            flex: 2,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                outwardText,
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFFDC2626),
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+
+          // Net Qty (flex: 2)
+          Expanded(
+            flex: 2,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                netText,
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  color: grandNet.abs() < 0.0001
+                      ? const Color(0xFF94A3B8)
+                      : (isNegative
+                          ? const Color(0xFFDC2626)
+                          : const Color(0xFF0F172A)),
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Mobile Detailed View: Sticky Accordions with Dense Tables
+  Widget _buildMobileDetailedAccordionView(
+      List<_CategorySummaryData> categories) {
+    return ListView.builder(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
+      itemCount: categories.length,
+      itemBuilder: (context, index) {
+        final categoryData = categories[index];
         final bool isExpanded = _expandedCategories.contains(categoryData.name);
 
         return Container(
-          margin: const EdgeInsets.only(bottom: 12),
+          margin: const EdgeInsets.only(bottom: 10),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(color: const Color(0xFFE2E8F0)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.02),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           clipBehavior: Clip.antiAlias,
           child: Column(
@@ -1565,54 +2514,85 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                 },
                 child: Container(
                   height: 44,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
                   color: const Color(0xFFF8FAFC),
                   child: Row(
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.white,
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: BorderRadius.circular(5),
                           border: Border.all(color: const Color(0xFFCBD5E1)),
                         ),
                         child: Text(
+                          '#${index + 1}',
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF475569),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(_getCategoryIcon(categoryData.name),
+                          size: 14, color: const Color(0xFFD32F2F)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
                           categoryData.name.toUpperCase(),
                           style: const TextStyle(
-                            fontSize: 12,
+                            fontSize: 12.5,
                             fontWeight: FontWeight.w900,
                             color: Color(0xFF0F172A),
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        widget.activeOnly
-                            ? '${categoryData.activeSizesCount} active / ${categoryData.sizes.length} sizes'
-                            : '${categoryData.sizes.length} sizes',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF64748B),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Text(
+                          _getFlowCategorySubtitle(categoryData),
+                          style: const TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF64748B),
+                          ),
                         ),
                       ),
-                      const Spacer(),
                       if (categoryData.totalInward != 0 ||
                           categoryData.totalOutward != 0) ...[
+                        const SizedBox(width: 6),
                         Text(
-                          '${categoryData.totalNet.toStringAsFixed(3)} MT',
+                          _selectedFlow == TransactionFlowFilter.inward
+                              ? '+${categoryData.totalInward.toStringAsFixed(3)} MT'
+                              : (_selectedFlow == TransactionFlowFilter.outward
+                                  ? '-${categoryData.totalOutward.toStringAsFixed(3)} MT'
+                                  : '${categoryData.totalNet.toStringAsFixed(3)} MT'),
                           style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w900,
-                            color: categoryData.totalNet < 0
-                                ? const Color(0xFFDC2626)
-                                : const Color(0xFF0F172A),
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w800,
+                            color: _selectedFlow == TransactionFlowFilter.inward
+                                ? const Color(0xFF059669)
+                                : (_selectedFlow == TransactionFlowFilter.outward
+                                    ? const Color(0xFFDC2626)
+                                    : (categoryData.totalNet < 0
+                                        ? const Color(0xFFDC2626)
+                                        : const Color(0xFF0F172A))),
                             fontFamily: 'monospace',
                           ),
                         ),
-                        const SizedBox(width: 8),
                       ],
+                      const SizedBox(width: 4),
                       Icon(
                         isExpanded
                             ? Icons.keyboard_arrow_up_rounded
@@ -1625,22 +2605,26 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                 ),
               ),
 
-              // Expanded Detailed Table
+              // Expanded Detailed Table (4 columns: [ Item Name | Inward | Outward | Net Qty ])
               if (isExpanded) ...[
                 Builder(
                   builder: (context) {
-                    final displaySizes = widget.activeOnly
-                        ? categoryData.sizes.where((s) => s.hasMovement).toList()
-                        : categoryData.sizes;
+                    final displaySizes = _filterSizesByFlow(categoryData.sizes);
 
                     if (displaySizes.isEmpty) {
+                      final String emptyMsg = _selectedFlow == TransactionFlowFilter.inward
+                          ? 'No inward stock movements recorded for ${categoryData.name} on this date.'
+                          : (_selectedFlow == TransactionFlowFilter.outward
+                              ? 'No outward stock movements recorded for ${categoryData.name} on this date.'
+                              : 'No stock movements recorded for ${categoryData.name} on this date.');
+
                       return Padding(
-                        padding: const EdgeInsets.all(20),
+                        padding: const EdgeInsets.all(16),
                         child: Center(
                           child: Text(
-                            'No stock movements recorded for ${categoryData.name} on this date.',
+                            emptyMsg,
                             style: const TextStyle(
-                              fontSize: 12.5,
+                              fontSize: 12,
                               fontWeight: FontWeight.w600,
                               color: Color(0xFF64748B),
                             ),
@@ -1649,27 +2633,34 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                       );
                     }
 
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _buildDenseTableHeader(),
-                        ...displaySizes.asMap().entries.map((entry) {
-                          final idx = entry.key;
-                          final row = entry.value;
-                          final reindexedRow = widget.activeOnly
-                              ? row.copyWith(index: idx + 1)
-                              : row;
-                          return _buildDenseTableRow(
-                            row: reindexedRow,
-                            isEven: idx % 2 == 0,
-                            categoryName: categoryData.name,
-                          );
-                        }),
-                        _buildDenseTableFooter(
-                          totalInward: categoryData.totalInward,
-                          totalOutward: categoryData.totalOutward,
+                    return SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      child: SizedBox(
+                        width: 580,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildDenseTableHeader(),
+                            ...displaySizes.asMap().entries.map((entry) {
+                              final idx = entry.key;
+                              final row = entry.value;
+                              final reindexedRow = widget.activeOnly
+                                  ? row.copyWith(index: idx + 1)
+                                  : row;
+                              return _buildDenseTableRow(
+                                row: reindexedRow,
+                                isEven: idx % 2 == 0,
+                                categoryName: categoryData.name,
+                              );
+                            }),
+                            _buildDenseTableFooter(
+                              totalInward: categoryData.totalInward,
+                              totalOutward: categoryData.totalOutward,
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     );
                   },
                 ),
@@ -1679,18 +2670,694 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
         );
       },
     );
+  }
 
-    if (needsHorizontalScroll) {
-      return SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        child: SizedBox(
-          width: minTableWidth,
-          child: content,
+  // ───────────────────────────────────────────────────────────────────────────
+  // MOBILE DENSE ACCORDION TABLE (Item Name | Inward | Outward | Net Qty)
+  // ───────────────────────────────────────────────────────────────────────────
+  Widget _buildMobileDenseTableHeader() {
+    if (_selectedFlow == TransactionFlowFilter.inward) {
+      return Container(
+        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: const BoxDecoration(
+          color: Color(0xFFF8FAFC),
+          border: Border(
+            bottom: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+          ),
+        ),
+        child: const Row(
+          children: [
+            Expanded(
+              flex: 6,
+              child: Text(
+                'Size / Spec',
+                textAlign: TextAlign.left,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF1E293B),
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: Text(
+                'Inward (MT)',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF059669),
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+          ],
         ),
       );
     }
 
-    return content;
+    if (_selectedFlow == TransactionFlowFilter.outward) {
+      return Container(
+        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: const BoxDecoration(
+          color: Color(0xFFF8FAFC),
+          border: Border(
+            bottom: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+          ),
+        ),
+        child: const Row(
+          children: [
+            Expanded(
+              flex: 6,
+              child: Text(
+                'Size / Spec',
+                textAlign: TextAlign.left,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF1E293B),
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: Text(
+                'Outward (MT)',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFFDC2626),
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Net Qty (4 columns)
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF8FAFC),
+        border: Border(
+          bottom: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+        ),
+      ),
+      child: const Row(
+        children: [
+          Expanded(
+            flex: 4,
+            child: Text(
+              'Size / Spec',
+              textAlign: TextAlign.left,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF1E293B),
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+          SizedBox(width: 4),
+          Expanded(
+            flex: 2,
+            child: Text(
+              'Inward',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF059669),
+              ),
+            ),
+          ),
+          SizedBox(width: 4),
+          Expanded(
+            flex: 2,
+            child: Text(
+              'Outward',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFFDC2626),
+              ),
+            ),
+          ),
+          SizedBox(width: 4),
+          Expanded(
+            flex: 2,
+            child: Text(
+              'Net',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF0F172A),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
+
+  Widget _buildMobileDenseTableRow({
+    required _TodaySizeRowData row,
+    required bool isEven,
+    required String categoryName,
+  }) {
+    final double netQty = row.inward - row.outward;
+    final bool isNegative = netQty < -0.0001;
+    final displayLabel =
+        EnterpriseStockMovementTable.appendKgSuffix(categoryName, row.sizeLabel);
+
+    final String inwardText = row.inward.abs() < 0.0001
+        ? '-'
+        : '+${row.inward.toStringAsFixed(3)} MT';
+    final String outwardText = row.outward.abs() < 0.0001
+        ? '-'
+        : '-${row.outward.toStringAsFixed(3)} MT';
+    final String netQtyText = netQty.abs() < 0.0001
+        ? '-'
+        : netQty.toStringAsFixed(3);
+
+    if (_selectedFlow == TransactionFlowFilter.inward) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isEven ? const Color(0xFFF8FAFC) : Colors.white,
+          border: const Border(
+            bottom: BorderSide(color: Color(0xFFF1F5F9), width: 1.0),
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 6,
+              child: Text(
+                displayLabel,
+                textAlign: TextAlign.left,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1E293B),
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  inwardText,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: row.inward.abs() < 0.0001
+                        ? const Color(0xFF94A3B8)
+                        : const Color(0xFF059669),
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_selectedFlow == TransactionFlowFilter.outward) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isEven ? const Color(0xFFF8FAFC) : Colors.white,
+          border: const Border(
+            bottom: BorderSide(color: Color(0xFFF1F5F9), width: 1.0),
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 6,
+              child: Text(
+                displayLabel,
+                textAlign: TextAlign.left,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1E293B),
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  outwardText,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: row.outward.abs() < 0.0001
+                        ? const Color(0xFF94A3B8)
+                        : const Color(0xFFDC2626),
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Net Qty (4 columns)
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: isNegative
+            ? const Color(0xFFFEF2F2)
+            : (isEven ? Colors.white : const Color(0xFFF8FAFC)),
+        border: const Border(
+          bottom: BorderSide(color: Color(0xFFF1F5F9), width: 1.0),
+        ),
+      ),
+      child: Row(
+        children: [
+          // 1. Item Name / Size Spec
+          Expanded(
+            flex: 4,
+            child: Text(
+              displayLabel,
+              textAlign: TextAlign.left,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: isNegative
+                    ? const Color(0xFFDC2626)
+                    : const Color(0xFF1E293B),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 4),
+
+          // 2. Inward
+          Expanded(
+            flex: 2,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                row.inward.abs() < 0.0001
+                    ? '-'
+                    : '+${row.inward.toStringAsFixed(3)}',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: row.inward.abs() < 0.0001
+                      ? const Color(0xFF94A3B8)
+                      : const Color(0xFF059669),
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+
+          // 3. Outward
+          Expanded(
+            flex: 2,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                row.outward.abs() < 0.0001
+                    ? '-'
+                    : '-${row.outward.toStringAsFixed(3)}',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: row.outward.abs() < 0.0001
+                      ? const Color(0xFF94A3B8)
+                      : const Color(0xFFDC2626),
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+
+          // 4. Net Qty
+          Expanded(
+            flex: 2,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                netQtyText,
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: netQty.abs() < 0.0001
+                      ? const Color(0xFF94A3B8)
+                      : (isNegative
+                          ? const Color(0xFFDC2626)
+                          : const Color(0xFF0F172A)),
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileDenseTableFooter({
+    required double totalInward,
+    required double totalOutward,
+  }) {
+    final double totalNet = totalInward - totalOutward;
+    final bool isNegative = totalNet < -0.0001;
+
+    final String inwardText = totalInward.abs() < 0.0001
+        ? '-'
+        : '+${totalInward.toStringAsFixed(3)} MT';
+    final String outwardText = totalOutward.abs() < 0.0001
+        ? '-'
+        : '-${totalOutward.toStringAsFixed(3)} MT';
+    final String netText = totalNet.abs() < 0.0001
+        ? '-'
+        : '${totalNet.toStringAsFixed(3)} MT';
+
+    if (_selectedFlow == TransactionFlowFilter.inward) {
+      return Container(
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: const BoxDecoration(
+          color: Color(0xFFF1F5F9),
+          border: Border(
+            top: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Expanded(
+              flex: 6,
+              child: Text(
+                'Category Total Inward',
+                textAlign: TextAlign.left,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF0F172A),
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  inwardText,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF059669),
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_selectedFlow == TransactionFlowFilter.outward) {
+      return Container(
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: const BoxDecoration(
+          color: Color(0xFFF1F5F9),
+          border: Border(
+            top: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Expanded(
+              flex: 6,
+              child: Text(
+                'Category Total Outward',
+                textAlign: TextAlign.left,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF0F172A),
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  outwardText,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFFDC2626),
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Net Qty (4 columns)
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF1F5F9),
+        border: Border(
+          top: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Expanded(
+            flex: 4,
+            child: Text(
+              'TOTAL',
+              textAlign: TextAlign.left,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF0F172A),
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            flex: 2,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                totalInward.abs() < 0.0001
+                    ? '-'
+                    : '+${totalInward.toStringAsFixed(3)}',
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF059669),
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            flex: 2,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                totalOutward.abs() < 0.0001
+                    ? '-'
+                    : '-${totalOutward.toStringAsFixed(3)}',
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFFDC2626),
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            flex: 2,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                netText,
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  color: totalNet.abs() < 0.0001
+                      ? const Color(0xFF94A3B8)
+                      : (isNegative
+                          ? const Color(0xFFDC2626)
+                          : const Color(0xFF0F172A)),
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileBottomActionBar(double grandNet) {
+    final bool isNegative = grandNet < -0.00001;
+    final String netFormatted = grandNet.abs() < 0.00001
+        ? '0.000 MT'
+        : '${grandNet.toStringAsFixed(3)} MT';
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(
+          top: BorderSide(color: Color(0xFFE2E8F0), width: 1.0),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x08000000),
+            blurRadius: 8,
+            offset: Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              // Left: Total Net: -28.930 MT (bold 14px slate)
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    text: 'Total Net: ',
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF475569),
+                    ),
+                    children: [
+                      TextSpan(
+                        text: netFormatted,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          color: isNegative
+                              ? const Color(0xFFDC2626)
+                              : const Color(0xFF0F172A),
+                        ),
+                      ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Right: Compact red [ Export PDF ] button (height 38px, border radius 8px, #D32F2F)
+              Material(
+                color: const Color(0xFFD32F2F),
+                borderRadius: BorderRadius.circular(8),
+                child: InkWell(
+                  onTap: widget.isPdfLoading ? null : widget.onExportPdf,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    height: 38,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: widget.isPdfLoading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.picture_as_pdf_rounded,
+                                  size: 15, color: Colors.white),
+                              SizedBox(width: 5),
+                              Text(
+                                'Export PDF',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
 }

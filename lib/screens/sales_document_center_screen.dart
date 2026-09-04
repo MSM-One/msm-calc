@@ -230,9 +230,16 @@ class _SalesDocumentCenterScreenState extends State<SalesDocumentCenterScreen> {
       backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: primaryRed, size: 18),
-          onPressed: () => Navigator.pop(context),
+          icon: Icon(Icons.arrow_back_rounded,
+              color: isDark ? Colors.white : const Color(0xFF0F172A), size: 22),
+          tooltip: 'Back to Dashboard',
+          onPressed: () {
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).pop();
+            } else {
+              Navigator.of(context).pushReplacementNamed('/home');
+            }
+          },
         ),
         title: Text(
           "Sales Document Center",

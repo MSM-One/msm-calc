@@ -45,10 +45,6 @@ class InventoryProvider extends ChangeNotifier {
     "Sqr Bar",
     "Round Bar",
     "Flats",
-    "Heavy Structure ISMB",
-    "Barbed Wire",
-    "GATE Channel",
-    "ERW Pipe",
   ];
 
   static const Map<String, List<String>> _sampleRateAliases = {

@@ -1067,7 +1067,13 @@ class _VendorPurchaseReportScreenState
             child: Row(
               children: [
                 InkWell(
-                  onTap: () => Navigator.pop(context),
+                  onTap: () {
+                    if (Navigator.of(context).canPop()) {
+                      Navigator.of(context).pop();
+                    } else {
+                      Navigator.of(context).pushReplacementNamed('/home');
+                    }
+                  },
                   borderRadius: BorderRadius.circular(8),
                   child: Container(
                     padding: const EdgeInsets.all(8),
@@ -1083,9 +1089,9 @@ class _VendorPurchaseReportScreenState
                       ),
                     ),
                     child: Icon(
-                      Icons.arrow_back_ios_new_rounded,
+                      Icons.arrow_back_rounded,
                       color: isDark ? Colors.white : const Color(0xFF1E293B),
-                      size: 16,
+                      size: 18,
                     ),
                   ),
                 ),

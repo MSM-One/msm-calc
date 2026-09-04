@@ -103,7 +103,7 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
   // Display State
   bool _isDetailedView = false;
   String _todaySummaryTabMode = 'Summary';
-  String _todaySummaryFlowMode = 'Inward';
+  String _todaySummaryFlowMode = 'Net Qty';
   bool get isDesktop => MediaQuery.of(context).size.width >= 1025;
   bool get isTablet =>
       MediaQuery.of(context).size.width >= 641 &&
@@ -544,42 +544,45 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Text("Select Location",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            ),
-            ListTile(
-              leading: const Icon(Icons.maps_home_work_outlined),
-              title: const Text("ALL"),
-              onTap: () {
-                setState(() => _locationFilter = "ALL");
-                _generateReports();
-                Navigator.pop(ctx);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.factory_outlined),
-              title: const Text("FACTORY"),
-              onTap: () {
-                setState(() => _locationFilter = "FACTORY");
-                _generateReports();
-                Navigator.pop(ctx);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.warehouse_outlined),
-              title: const Text("YARD"),
-              onTap: () {
-                setState(() => _locationFilter = "YARD");
-                _generateReports();
-                Navigator.pop(ctx);
-              },
-            ),
-          ],
+        child: Material(
+          color: Colors.white,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text("Select Location",
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.maps_home_work_outlined),
+                title: const Text("ALL"),
+                onTap: () {
+                  setState(() => _locationFilter = "ALL");
+                  _generateReports();
+                  Navigator.pop(ctx);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.factory_outlined),
+                title: const Text("FACTORY"),
+                onTap: () {
+                  setState(() => _locationFilter = "FACTORY");
+                  _generateReports();
+                  Navigator.pop(ctx);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.warehouse_outlined),
+                title: const Text("YARD"),
+                onTap: () {
+                  setState(() => _locationFilter = "YARD");
+                  _generateReports();
+                  Navigator.pop(ctx);
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1199,9 +1202,10 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
     );
   }
 
-  Widget _buildMobileBottomActionBar(BuildContext context) {
+  Widget? _buildMobileBottomActionBar(BuildContext context) {
     final String tabId = _activeTabs[_tabController.index]['id'] as String;
-    if (tabId == 'ledger') return const SizedBox.shrink();
+    // Today's Summary tab has its own dedicated pinned bottom action bar (Total Net + Export PDF)
+    if (tabId == 'ledger' || tabId == 'today') return null;
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       decoration: BoxDecoration(
@@ -1294,6 +1298,19 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
               _todaySummaryFlowMode = flow;
             });
           },
+          onExportPdf: () async {
+            setState(() => _isLoading = true);
+            try {
+              await _exportPdf();
+            } catch (e) {
+              debugPrint("PDF Generation Error tracking: $e");
+            } finally {
+              if (mounted) {
+                setState(() => _isLoading = false);
+              }
+            }
+          },
+          isPdfLoading: _isLoading,
         ),
         _StockMovementTab(
           isLoading: _isLoading,
@@ -2486,19 +2503,22 @@ class _StockMovementTab extends StatelessWidget {
               BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 8)
             ],
           ),
-          child: ListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            onTap: () => onCategorySelect(sEntry.category),
-            title: Text(sEntry.item,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: textDark)),
-            trailing: Text("${formatNumber(sEntry.closing)} MT",
-                style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    color: sEntry.closing < 0 ? Colors.red : textDark)),
+          child: Material(
+            color: Colors.transparent,
+            child: ListTile(
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              onTap: () => onCategorySelect(sEntry.category),
+              title: Text(sEntry.item,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      color: textDark)),
+              trailing: Text("${formatNumber(sEntry.closing)} MT",
+                  style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      color: sEntry.closing < 0 ? Colors.red : textDark)),
+            ),
           ),
         );
       },
@@ -2718,7 +2738,7 @@ class _StockMovementTab extends StatelessWidget {
           child: Row(
             children: [
               IconButton(
-                  icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                  icon: const Icon(Icons.arrow_back_rounded, size: 22),
                   onPressed: onCategoryBack),
               Text("Details: $category",
                   style: const TextStyle(
@@ -3082,21 +3102,24 @@ class _NonMovingStockTab extends StatelessWidget {
               BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 8)
             ],
           ),
-          child: ListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            onTap: () => onCategorySelect(cat),
-            title: Text(cat,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: textDark)),
-            subtitle: Text("${items.length} items non-moving",
-                style: const TextStyle(fontSize: 12, color: textGrey)),
-            trailing: Text("${total.toStringAsFixed(3)} MT",
-                style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    color: total < 0 ? Colors.red : textDark)),
+          child: Material(
+            color: Colors.transparent,
+            child: ListTile(
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              onTap: () => onCategorySelect(cat),
+              title: Text(cat,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      color: textDark)),
+              subtitle: Text("${items.length} items non-moving",
+                  style: const TextStyle(fontSize: 12, color: textGrey)),
+              trailing: Text("${total.toStringAsFixed(3)} MT",
+                  style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      color: total < 0 ? Colors.red : textDark)),
+            ),
           ),
         );
       },
@@ -3232,7 +3255,7 @@ class _NonMovingStockTab extends StatelessWidget {
           child: Row(
             children: [
               IconButton(
-                  icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                  icon: const Icon(Icons.arrow_back_rounded, size: 22),
                   onPressed: onCategoryBack),
               Expanded(
                 child: Column(
@@ -4995,8 +5018,8 @@ class ReportsHeaderDelegate extends SliverPersistentHeaderDelegate {
               child: Row(
                 children: [
                   IconButton(
-                      icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                          color: Colors.white, size: 20),
+                      icon: const Icon(Icons.arrow_back_rounded,
+                          color: Colors.white, size: 22),
                       onPressed: onBack),
                   Expanded(
                       child: Text(title,

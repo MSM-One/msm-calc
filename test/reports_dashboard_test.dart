@@ -672,5 +672,169 @@ void main() {
       await tester.binding.setSurfaceSize(null);
     });
   });
+
+  group('TodaySummaryTab Mobile View (< 600px) Tests', () {
+    testWidgets('renders 2-tier compact header in ReportsExportToolbar on mobile viewport (< 600px)', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      final searchCtrl = TextEditingController();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ReportsExportToolbar(
+              startDate: DateTime(2026, 9, 3),
+              endDate: DateTime(2026, 9, 3),
+              selectedDatePreset: 'Today',
+              locationFilter: 'ALL',
+              searchController: searchCtrl,
+              onSearch: (_) {},
+              onDateRangeTap: () {},
+              onLocationChanged: (_) {},
+              onRefresh: () {},
+              onExportPdf: () {},
+              onExportCsv: () {},
+              showViewToggle: true,
+              isDetailedView: false,
+              onViewToggle: (_) {},
+              activeTabId: 'today',
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Tier 1: Compact search, location chip, refresh
+      expect(find.byType(TextField), findsOneWidget);
+      expect(find.text('Search items, sizes...'), findsOneWidget);
+      expect(find.text('All'), findsOneWidget);
+      expect(find.byIcon(Icons.refresh_rounded), findsOneWidget);
+
+      // Tier 2: Date pills & View toggle
+      expect(find.text('Today'), findsOneWidget);
+      expect(find.text('Yesterday'), findsOneWidget);
+      expect(find.text('Custom'), findsOneWidget);
+      expect(find.text('Summary'), findsOneWidget);
+      expect(find.text('Detailed'), findsOneWidget);
+
+      // Oversized action buttons should NOT be in toolbar on mobile
+      expect(find.text('Export CSV'), findsNothing);
+
+      await tester.binding.setSurfaceSize(null);
+    });
+
+    testWidgets('renders Modern Enterprise Category Cards and Bottom Action Bar in Summary mode on mobile', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      bool pdfExported = false;
+      String? changedTab;
+
+      final mockMovements = [
+        DailyMovementEntry(
+          category: 'MS Pipe',
+          itemName: 'MS Pipe',
+          size: '15 NB',
+          openingQty: 10.0,
+          inQty: 5.000,
+          outQty: 2.000,
+          closingQty: 13.000,
+        ),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TodaySummaryTab(
+              isLoading: false,
+              filteredDailyMovement: mockMovements,
+              selectedTab: 'Summary',
+              activeOnly: true,
+              emptyState: const Text('Empty'),
+              onTabChanged: (tab) => changedTab = tab,
+              onExportPdf: () => pdfExported = true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Verify Category Card Header
+      expect(find.text('#1'), findsOneWidget);
+      expect(find.text('MS PIPE'), findsOneWidget);
+      expect(find.text('1 active / 1 sizes'), findsOneWidget);
+      expect(find.byIcon(Icons.chevron_right_rounded), findsWidgets);
+
+      // Verify 3 Metric Badges
+      expect(find.text('INWARD'), findsOneWidget);
+      expect(find.text('+5.000 MT'), findsOneWidget);
+      expect(find.text('OUTWARD'), findsOneWidget);
+      expect(find.text('-2.000 MT'), findsOneWidget);
+      expect(find.text('NET'), findsOneWidget);
+      expect(find.text('3.000 MT'), findsOneWidget);
+
+      // Verify Bottom Action Bar
+      expect(find.textContaining('Total Net:'), findsOneWidget);
+      expect(find.text('Export PDF'), findsOneWidget);
+
+      // Tap Export PDF in Bottom Action Bar
+      await tester.tap(find.text('Export PDF'));
+      await tester.pumpAndSettle();
+      expect(pdfExported, isTrue);
+
+      // Tap category card to navigate to Detailed view
+      await tester.tap(find.text('MS PIPE'));
+      await tester.pumpAndSettle();
+      expect(changedTab, equals('Detailed'));
+
+      await tester.binding.setSurfaceSize(null);
+    });
+
+    testWidgets('renders mobile accordion with horizontally scrollable table in Detailed mode', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+
+      final mockMovements = [
+        DailyMovementEntry(
+          category: 'MS Pipe',
+          itemName: 'MS Pipe',
+          size: '15 NB',
+          openingQty: 10.0,
+          inQty: 5.000,
+          outQty: 2.000,
+          closingQty: 13.000,
+        ),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TodaySummaryTab(
+              isLoading: false,
+              filteredDailyMovement: mockMovements,
+              selectedTab: 'Detailed',
+              activeOnly: true,
+              emptyState: const Text('Empty'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Accordion header should be visible
+      expect(find.text('MS PIPE'), findsOneWidget);
+      expect(find.text('1 active'), findsOneWidget);
+
+      // In Detailed mode, categories are expanded by default
+      // Table columns should be rendered inside horizontal scroll view
+      expect(find.text('SIZE & SECTION'), findsOneWidget);
+      expect(find.text('INWARD'), findsOneWidget);
+      expect(find.text('OUTWARD'), findsOneWidget);
+      expect(find.text('NET QTY'), findsOneWidget);
+      expect(find.text('15 NB'), findsOneWidget);
+
+      // Bottom bar visible
+      expect(find.textContaining('Total Net:'), findsOneWidget);
+      expect(find.text('Export PDF'), findsOneWidget);
+
+      await tester.binding.setSurfaceSize(null);
+    });
+  });
 }
 

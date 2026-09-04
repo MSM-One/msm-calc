@@ -631,9 +631,16 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
       elevation: 0,
       scrolledUnderElevation: 0,
       leading: IconButton(
-        icon: const Icon(Icons.arrow_back_ios_new_rounded,
-            color: Color(0xFF0F172A), size: 18),
-        onPressed: () => Navigator.pop(context),
+        icon: const Icon(Icons.arrow_back_rounded,
+            color: Color(0xFF0F172A), size: 22),
+        tooltip: 'Back to Dashboard',
+        onPressed: () {
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          } else {
+            Navigator.of(context).pushReplacementNamed('/home');
+          }
+        },
       ),
       title: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,

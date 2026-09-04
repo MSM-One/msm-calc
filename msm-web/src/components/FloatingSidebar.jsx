@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   LayoutDashboard, 
+  Calculator,
   Box, 
   BookOpen, 
   BarChart3, 
@@ -14,6 +15,7 @@ import {
 
 const menuItems = [
   { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { id: 'rates', icon: Calculator, label: 'Sample Rates' },
   { id: 'inventory', icon: Box, label: 'Inventory' },
   { id: 'sauda', icon: BookOpen, label: 'Sauda Book' },
   { id: 'reports', icon: BarChart3, label: 'Reports' },

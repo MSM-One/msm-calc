@@ -180,12 +180,18 @@ class _StockDashboardScreenState extends State<StockDashboardScreen> {
             children: [
               Row(
                 children: [
-                  if (!isMobile)
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                          color: Colors.white, size: 18),
-                      onPressed: () => Navigator.pop(context),
-                    ),
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_rounded,
+                        color: Colors.white, size: 22),
+                    tooltip: 'Back to Dashboard',
+                    onPressed: () {
+                      if (Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
+                      } else {
+                        Navigator.of(context).pushReplacementNamed('/home');
+                      }
+                    },
+                  ),
                   Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 5),

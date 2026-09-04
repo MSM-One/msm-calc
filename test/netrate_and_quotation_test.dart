@@ -20,23 +20,17 @@ void main() {
   });
 
   group('Netrate Calculation & Formula Unit Tests', () {
-    test('Calculates gross net rate with base, SD, freight, OB, loading, and GST', () {
+    test('Calculates net rate strictly with base, SD, freight, and other billing', () {
       final item = ItemEntry(itemName: 'MS Pipe', basic: 50000);
       final size = SizeEntry(label: '25x25x2.0', sd: 500, unitWeight: 1.5);
       item.selectedSizes.add(size);
 
       // In Netrate calculation:
-      // gross = item.basic (50000) + size.sd (500) + freight (0) + OB (0) + loading (255) = 50755
-      // with NC discount enabled: 50755 - 3000 = 47755
-      // with 18% GST: 47755 * 1.18 = 56350.9
-      double gross = item.basic + size.sd + 255;
-      expect(gross, 50755);
-
-      double ncDiscounted = gross - 3000;
-      expect(ncDiscounted, 47755);
-
-      double withGst = ncDiscounted * 1.18;
-      expect(withGst.toStringAsFixed(1), '56350.9');
+      // Net Rate is strictly: Base + Size Difference + Freight + Other Billing
+      const double freight = 700;
+      const double ob = 300;
+      double netRate = item.basic + size.sd + freight + ob;
+      expect(netRate, 51500);
     });
 
     test('Unit weight dynamic recalculation between Nos and Qty (MT)', () {
@@ -71,8 +65,8 @@ void main() {
       // Check header
       expect(find.text('Netrate Calculator'), findsOneWidget);
       expect(find.text('Pricing & Charges'), findsOneWidget);
-      expect(find.text('GST (18% Bill)'), findsOneWidget);
-      expect(find.text('NC Discount'), findsOneWidget);
+      expect(find.text('Freight (₹/MT)'), findsOneWidget);
+      expect(find.text('OB / Other Billing (₹/MT)'), findsOneWidget);
     });
   });
 

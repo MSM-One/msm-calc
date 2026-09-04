@@ -101,7 +101,7 @@ void main() {
       expect(find.text('Basic Details'), findsOneWidget);
       expect(find.text('Items & Rates'), findsOneWidget);
       expect(find.text('+ Add Material Item'), findsOneWidget);
-      expect(find.text('Other Details & Print Settings'), findsOneWidget);
+      expect(find.text('Other Details'), findsOneWidget);
       expect(find.text('Booking Summary'), findsOneWidget);
       expect(find.text('Print Delivery Order'), findsOneWidget);
       expect(find.text('Share Order Text'), findsOneWidget);

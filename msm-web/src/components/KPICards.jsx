@@ -34,7 +34,7 @@ const kpis = [
   },
 ];
 
-const KPICard = ({ kpi, index }) => {
+const KPICard = ({ kpi, index, onNavigate }) => {
   const Icon = kpi.icon;
   
   return (
@@ -43,6 +43,7 @@ const KPICard = ({ kpi, index }) => {
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.1, duration: 0.4 }}
       whileHover={{ y: -5, boxShadow: '0 20px 40px -15px rgba(0,0,0,0.07)' }}
+      onClick={() => onNavigate && onNavigate('reports')}
       className={`glass-card p-6 flex flex-col justify-between min-h-[160px] relative overflow-hidden group cursor-pointer ${
         !kpi.light ? 'border-transparent ring-1 ring-black/5' : ''
       }`}
@@ -75,11 +76,11 @@ const KPICard = ({ kpi, index }) => {
   );
 };
 
-const KPICards = () => {
+const KPICards = ({ onNavigate }) => {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
       {kpis.map((kpi, i) => (
-        <KPICard key={i} kpi={kpi} index={i} />
+        <KPICard key={i} kpi={kpi} index={i} onNavigate={onNavigate} />
       ))}
     </div>
   );
