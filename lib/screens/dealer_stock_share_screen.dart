@@ -797,6 +797,18 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
           child: Container(color: const Color(0xFFE2E8F0), height: 1),
         ),
         iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded,
+              color: Color(0xFF0F172A), size: 22),
+          tooltip: 'Back to Dashboard',
+          onPressed: () {
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).pop();
+            } else {
+              Navigator.of(context).pushReplacementNamed('/home');
+            }
+          },
+        ),
         title: Row(
           children: [
             Container(
@@ -808,27 +820,14 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
               child: const Icon(Icons.share_rounded, size: 18, color: Color(0xFFDC2626)),
             ),
             const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Stock Sheet & Trade Availability',
-                  style: TextStyle(
-                    color: Color(0xFF0F172A),
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-                Text(
-                  'Location: $_activeLocation · Total Selected: ${totalSelectedStockMT.toStringAsFixed(3)} MT',
-                  style: const TextStyle(
-                    color: Color(0xFF64748B),
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
+            const Text(
+              'Stock Sheet',
+              style: TextStyle(
+                color: Color(0xFF0F172A),
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.2,
+              ),
             ),
           ],
         ),

@@ -467,11 +467,26 @@ class _VendorPurchaseReportScreenState
                           DateFormat('dd/MM/yyyy').parse(dateController.text);
                     } catch (_) {}
 
+                    final now = DateTime.now();
+                    final today = DateTime(
+                        now.year, now.month, now.day, 23, 59, 59);
                     final picked = await showDatePicker(
                       context: dialogContext,
-                      initialDate: initial,
+                      initialDate: initial.isAfter(today) ? now : initial,
                       firstDate: DateTime(2020),
-                      lastDate: DateTime(2030),
+                      lastDate: today,
+                      builder: (context, child) {
+                        return Theme(
+                          data: Theme.of(context).copyWith(
+                            colorScheme: const ColorScheme.light(
+                              primary: Color(0xFFD32F2F),
+                              onPrimary: Colors.white,
+                              onSurface: Color(0xFF1E293B),
+                            ),
+                          ),
+                          child: child!,
+                        );
+                      },
                     );
                     if (picked != null) {
                       setDialogState(() {
@@ -1049,24 +1064,27 @@ class _VendorPurchaseReportScreenState
     return Scaffold(
       backgroundColor: bgColor,
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(68),
+        preferredSize: const Size.fromHeight(60),
         child: AppBar(
           backgroundColor: cardColor,
           elevation: 0,
+          scrolledUnderElevation: 0,
           centerTitle: false,
           automaticallyImplyLeading: false,
-          toolbarHeight: 68,
+          toolbarHeight: 60,
           surfaceTintColor: Colors.transparent,
+          titleSpacing: 0,
           shape: Border(
             bottom: BorderSide(
               color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
             ),
           ),
           title: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
-                InkWell(
+                _buildSquareIconButton(
+                  Icons.arrow_back_rounded,
                   onTap: () {
                     if (Navigator.of(context).canPop()) {
                       Navigator.of(context).pop();
@@ -1074,131 +1092,53 @@ class _VendorPurchaseReportScreenState
                       Navigator.of(context).pushReplacementNamed('/home');
                     }
                   },
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.05)
-                          : const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: isDark
-                            ? const Color(0xFF334155)
-                            : const Color(0xFFE2E8F0),
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.arrow_back_rounded,
-                      color: isDark ? Colors.white : const Color(0xFF1E293B),
-                      size: 18,
-                    ),
-                  ),
+                  isDark: isDark,
                 ),
-                const SizedBox(width: 14),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: primaryRed.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.history_rounded,
-                    color: primaryRed,
-                    size: 20,
-                  ),
+                const SizedBox(width: 8),
+                _buildSquareIconButton(
+                  Icons.history_rounded,
+                  iconColor: const Color(0xFFDC2626),
+                  bgColor: isDark
+                      ? const Color(0xFFDC2626).withValues(alpha: 0.15)
+                      : const Color(0xFFFEE2E2),
+                  borderColor: isDark
+                      ? const Color(0xFFDC2626).withValues(alpha: 0.3)
+                      : const Color(0xFFFECACA),
+                  onTap: () => _showItemWiseSummary(),
+                  isDark: isDark,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        "Vendor Purchase Ledger",
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 18,
-                          color: isDark ? Colors.white : const Color(0xFF1E293B),
-                          letterSpacing: -0.3,
-                        ),
-                      ),
-                      Text(
-                        "Procurement History, Balances & Dispatches",
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark
-                              ? const Color(0xFF94A3B8)
-                              : const Color(0xFF64748B),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
+                const SizedBox(width: 8),
+                _buildSquareIconButton(
+                  Icons.refresh_rounded,
+                  iconColor: isDark ? Colors.white : const Color(0xFF475569),
+                  onTap: _isLoading ? null : _loadReports,
+                  isDark: isDark,
                 ),
-                IconButton(
-                  icon: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.05)
-                          : const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: isDark
-                            ? const Color(0xFF334155)
-                            : const Color(0xFFE2E8F0),
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.refresh_rounded,
-                      color: isDark ? Colors.white : const Color(0xFF1E293B),
-                      size: 18,
-                    ),
-                  ),
-                  tooltip: "Refresh Data",
-                  onPressed: _isLoading ? null : _loadReports,
-                ),
-                const SizedBox(width: 6),
+                const Spacer(),
                 ElevatedButton.icon(
-                  onPressed: () => _openVendorPurchaseForm(context),
-                  icon: const Icon(Icons.add_rounded, size: 16),
-                  label: const Text(
-                    "New Inward",
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-                  ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryRed,
-                    foregroundColor: Colors.white,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                    backgroundColor: const Color(0xFFD32F2F),
                     elevation: 0,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    minimumSize: const Size(0, 38),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
                   ),
+                  icon: const Icon(Icons.add_rounded,
+                      size: 16, color: Colors.white),
+                  label: const Text(
+                    'New Inward',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: () => _openVendorPurchaseForm(context),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
                 PopupMenuButton<String>(
-                  icon: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.05)
-                          : const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: isDark
-                            ? const Color(0xFF334155)
-                            : const Color(0xFFE2E8F0),
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.more_vert_rounded,
-                      color: isDark ? Colors.white : const Color(0xFF1E293B),
-                      size: 18,
-                    ),
-                  ),
+                  offset: const Offset(0, 44),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
                   color: cardColor,
@@ -1246,6 +1186,12 @@ class _VendorPurchaseReportScreenState
                       ),
                     ),
                   ],
+                  child: _buildSquareIconButton(
+                    Icons.more_vert_rounded,
+                    iconColor: isDark ? Colors.white : const Color(0xFF475569),
+                    onTap: null,
+                    isDark: isDark,
+                  ),
                 ),
               ],
             ),
@@ -1271,56 +1217,60 @@ class _VendorPurchaseReportScreenState
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
             child: Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 880),
+                constraints: const BoxConstraints(maxWidth: 920),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // ── 4-CARD KPI STRIP ─────────────────────────────────────
+                    // ── 2. 2x2 KEY METRICS KPI CARDS ────────────────────────────
                     LayoutBuilder(
                       builder: (context, constraints) {
-                        final bool isNarrow = constraints.maxWidth < 600;
+                        final bool isNarrow = constraints.maxWidth < 640;
 
+                        // Card 1 (Total Ordered): Shopping bag glyph inside light grey rounded container (#F1F5F9)
                         final card1 = ValueListenableBuilder<double>(
                           valueListenable:
                               DataRepository.vendorTotalQtyNotifier,
                           builder: (context, val, _) => _buildMetricCard(
-                            "Total Ordered",
-                            "${val.toStringAsFixed(3)} MT",
-                            Icons.shopping_bag_outlined,
-                            const Color(0xFF1E293B),
-                            isDark,
-                            cardColor,
+                            label: "Total Ordered",
+                            value: "${val.toStringAsFixed(3)} MT",
+                            icon: Icons.shopping_bag_outlined,
+                            iconColor: const Color(0xFF475569),
+                            iconBgColor: const Color(0xFFF1F5F9),
+                            isDark: isDark,
                           ),
                         );
 
+                        // Card 2 (Total Received): Downward box download glyph inside light emerald container (#ECFDF5, #059669)
                         final card2 = _buildMetricCard(
-                          "Total Received",
-                          "${_totalReceivedQty.toStringAsFixed(3)} MT",
-                          Icons.move_to_inbox_rounded,
-                          const Color(0xFF10B981),
-                          isDark,
-                          cardColor,
+                          label: "Total Received",
+                          value: "${_totalReceivedQty.toStringAsFixed(3)} MT",
+                          icon: Icons.download_rounded,
+                          iconColor: const Color(0xFF059669),
+                          iconBgColor: const Color(0xFFECFDF5),
+                          isDark: isDark,
                         );
 
+                        // Card 3 (Pending Balance): Clipboard clock glyph inside soft red container (#FEF2F2, #DC2626)
                         final card3 = _buildMetricCard(
-                          "Pending Balance",
-                          "${_totalPendingBal.toStringAsFixed(3)} MT",
-                          Icons.pending_actions_rounded,
-                          primaryRed,
-                          isDark,
-                          cardColor,
+                          label: "Pending Balance",
+                          value: "${_totalPendingBal.toStringAsFixed(3)} MT",
+                          icon: Icons.pending_actions_rounded,
+                          iconColor: const Color(0xFFDC2626),
+                          iconBgColor: const Color(0xFFFEF2F2),
+                          isDark: isDark,
                         );
 
+                        // Card 4 (Avg Purchase Rate): Trending chart up glyph inside light sky container (#F0F9FF, #0284C7)
                         final card4 = ValueListenableBuilder<double>(
                           valueListenable:
                               DataRepository.vendorAvgRateNotifier,
                           builder: (context, val, _) => _buildMetricCard(
-                            "Avg Purchase Rate",
-                            "₹ ${val.toStringAsFixed(0)}/MT",
-                            Icons.trending_up_rounded,
-                            const Color(0xFF0284C7),
-                            isDark,
-                            cardColor,
+                            label: "Avg Purchase Rate",
+                            value: "₹ ${val.toStringAsFixed(0)}/MT",
+                            icon: Icons.trending_up_rounded,
+                            iconColor: const Color(0xFF0284C7),
+                            iconBgColor: const Color(0xFFF0F9FF),
+                            isDark: isDark,
                           ),
                         );
 
@@ -1330,15 +1280,15 @@ class _VendorPurchaseReportScreenState
                               Row(
                                 children: [
                                   Expanded(child: card1),
-                                  const SizedBox(width: 8),
+                                  const SizedBox(width: 10),
                                   Expanded(child: card2),
                                 ],
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 10),
                               Row(
                                 children: [
                                   Expanded(child: card3),
-                                  const SizedBox(width: 8),
+                                  const SizedBox(width: 10),
                                   Expanded(child: card4),
                                 ],
                               ),
@@ -1349,24 +1299,38 @@ class _VendorPurchaseReportScreenState
                         return Row(
                           children: [
                             Expanded(child: card1),
-                            const SizedBox(width: 10),
+                            const SizedBox(width: 12),
                             Expanded(child: card2),
-                            const SizedBox(width: 10),
+                            const SizedBox(width: 12),
                             Expanded(child: card3),
-                            const SizedBox(width: 10),
+                            const SizedBox(width: 12),
                             Expanded(child: card4),
                           ],
                         );
                       },
                     ),
 
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 16),
 
-                    // ── FILTERS PANEL ────────────────────────────────────────
+                    // ── 3. FILTER RECORDS CARD ────────────────────────────────
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 12),
-                      decoration: _cardDecoration(isDark, cardColor),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: cardColor,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                        ),
+                        boxShadow: isDark
+                            ? []
+                            : [
+                                BoxShadow(
+                                  color: const Color(0xFF0F172A).withValues(alpha: 0.03),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -1374,213 +1338,117 @@ class _VendorPurchaseReportScreenState
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
                                   const Icon(Icons.tune_rounded,
-                                      size: 16, color: primaryRed),
+                                      size: 18, color: Color(0xFFDC2626)),
                                   const SizedBox(width: 6),
                                   Text(
-                                    "Filter Records",
+                                    'Filter Records',
                                     style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
                                       color: isDark
                                           ? Colors.white
-                                          : const Color(0xFF1E293B),
+                                          : const Color(0xFF0F172A),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
                                   Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 2),
+                                        horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: primaryRed.withValues(alpha: 0.08),
+                                      color: const Color(0xFFFEF2F2),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
-                                      "${_filteredReports.length} ${(_filteredReports.length == 1) ? 'Record' : 'Records'}",
+                                      '${_filteredReports.length} Records',
                                       style: const TextStyle(
+                                        color: Color(0xFFDC2626),
                                         fontSize: 11,
-                                        fontWeight: FontWeight.w800,
-                                        color: primaryRed,
+                                        fontWeight: FontWeight.bold,
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
-                              InkWell(
-                                onTap: () {
-                                  setState(() => _showHidden = !_showHidden);
-                                  _applyFilters();
-                                },
-                                borderRadius: BorderRadius.circular(6),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 4, vertical: 2),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Switch.adaptive(
-                                        value: _showHidden,
-                                        onChanged: (val) {
-                                          setState(() => _showHidden = val);
-                                          _applyFilters();
-                                        },
-                                        activeThumbColor: primaryRed,
-                                        activeTrackColor:
-                                            primaryRed.withValues(alpha: 0.4),
-                                        materialTapTargetSize:
-                                            MaterialTapTargetSize.shrinkWrap,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        "Show Hidden",
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: isDark
-                                              ? Colors.white70
-                                              : const Color(0xFF374151),
-                                        ),
-                                      ),
-                                    ],
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Transform.scale(
+                                    scale: 0.75,
+                                    child: Switch(
+                                      value: _showHidden,
+                                      activeThumbColor: const Color(0xFFDC2626),
+                                      activeTrackColor: const Color(0xFFDC2626).withValues(alpha: 0.35),
+                                      onChanged: (val) {
+                                        setState(() => _showHidden = val);
+                                        _applyFilters();
+                                      },
+                                    ),
                                   ),
-                                ),
+                                  Text(
+                                    'Hidden',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: isDark
+                                          ? const Color(0xFF94A3B8)
+                                          : const Color(0xFF475569),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                          const SizedBox(height: 8),
-                          Divider(
-                            height: 1,
-                            color: isDark
-                                ? const Color(0xFF334155)
-                                : const Color(0xFFE2E8F0),
+                          const SizedBox(height: 12),
+
+                          // 4 Stacked Dropdown Selector Fields (height 44, rounded 12px, light grey bg #F8FAFC, border #E2E8F0)
+                          _buildStackedFilterField(
+                            icon: Icons.person_outline_rounded,
+                            hint: "All Vendors",
+                            value: _selectedVendor,
+                            items: _vendors,
+                            isSearchableVendor: true,
+                            isDark: isDark,
+                            onChanged: (v) {
+                              setState(() => _selectedVendor = v);
+                              _applyFilters();
+                            },
                           ),
                           const SizedBox(height: 8),
-                          LayoutBuilder(
-                            builder: (context, constraints) {
-                              final isCompact = constraints.maxWidth < 600;
-                              if (isCompact) {
-                                return Column(
-                                  children: [
-                                    _buildSearchableVendorSelectorRow(
-                                      icon: Icons.person_search_outlined,
-                                      hint: "All Vendors",
-                                      value: _selectedVendor,
-                                      items: _vendors,
-                                      isDark: isDark,
-                                      onChanged: (v) {
-                                        setState(() => _selectedVendor = v);
-                                        _applyFilters();
-                                      },
-                                    ),
-                                    const SizedBox(height: 6),
-                                    _buildFilterDropdownRow(
-                                      icon: Icons.grid_view_rounded,
-                                      hint: "All Items",
-                                      value: _selectedItem,
-                                      items: _items,
-                                      isDark: isDark,
-                                      onChanged: (v) {
-                                        setState(() => _selectedItem = v);
-                                        _applyFilters();
-                                      },
-                                    ),
-                                    const SizedBox(height: 6),
-                                    _buildFilterDropdownRow(
-                                      icon: Icons.map_rounded,
-                                      hint: "All Regions",
-                                      value: _selectedRegion,
-                                      items: _regions,
-                                      isDark: isDark,
-                                      onChanged: (v) {
-                                        setState(() => _selectedRegion = v);
-                                        _applyFilters();
-                                      },
-                                    ),
-                                    const SizedBox(height: 6),
-                                    _buildFilterDropdownRow(
-                                      icon: Icons.location_on_rounded,
-                                      hint: "All Locations",
-                                      value: _selectedLocation,
-                                      items: _locations,
-                                      isDark: isDark,
-                                      onChanged: (v) {
-                                        setState(() => _selectedLocation = v);
-                                        _applyFilters();
-                                      },
-                                    ),
-                                  ],
-                                );
-                              }
-
-                              return Column(
-                                children: [
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: _buildSearchableVendorSelectorRow(
-                                          icon: Icons.person_search_outlined,
-                                          hint: "All Vendors",
-                                          value: _selectedVendor,
-                                          items: _vendors,
-                                          isDark: isDark,
-                                          onChanged: (v) {
-                                            setState(() => _selectedVendor = v);
-                                            _applyFilters();
-                                          },
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: _buildFilterDropdownRow(
-                                          icon: Icons.grid_view_rounded,
-                                          hint: "All Items",
-                                          value: _selectedItem,
-                                          items: _items,
-                                          isDark: isDark,
-                                          onChanged: (v) {
-                                            setState(() => _selectedItem = v);
-                                            _applyFilters();
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: _buildFilterDropdownRow(
-                                          icon: Icons.map_rounded,
-                                          hint: "All Regions",
-                                          value: _selectedRegion,
-                                          items: _regions,
-                                          isDark: isDark,
-                                          onChanged: (v) {
-                                            setState(() => _selectedRegion = v);
-                                            _applyFilters();
-                                          },
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: _buildFilterDropdownRow(
-                                          icon: Icons.location_on_rounded,
-                                          hint: "All Locations",
-                                          value: _selectedLocation,
-                                          items: _locations,
-                                          isDark: isDark,
-                                          onChanged: (v) {
-                                            setState(
-                                                () => _selectedLocation = v);
-                                            _applyFilters();
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              );
+                          _buildStackedFilterField(
+                            icon: Icons.grid_view_rounded,
+                            hint: "All Items",
+                            value: _selectedItem,
+                            items: _items,
+                            isDark: isDark,
+                            onChanged: (v) {
+                              setState(() => _selectedItem = v);
+                              _applyFilters();
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          _buildStackedFilterField(
+                            icon: Icons.map_outlined,
+                            hint: "All Regions",
+                            value: _selectedRegion,
+                            items: _regions,
+                            isDark: isDark,
+                            onChanged: (v) {
+                              setState(() => _selectedRegion = v);
+                              _applyFilters();
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          _buildStackedFilterField(
+                            icon: Icons.location_on_outlined,
+                            hint: "All Locations",
+                            value: _selectedLocation,
+                            items: _locations,
+                            isDark: isDark,
+                            onChanged: (v) {
+                              setState(() => _selectedLocation = v);
+                              _applyFilters();
                             },
                           ),
                         ],
@@ -1596,9 +1464,27 @@ class _VendorPurchaseReportScreenState
                       _buildEmptyState(isDark)
                     else
                       Container(
-                        decoration: _cardDecoration(isDark, cardColor),
+                        decoration: BoxDecoration(
+                          color: cardColor,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: isDark
+                                ? const Color(0xFF334155)
+                                : const Color(0xFFE2E8F0),
+                          ),
+                          boxShadow: isDark
+                              ? []
+                              : [
+                                  BoxShadow(
+                                    color: const Color(0xFF0F172A)
+                                        .withValues(alpha: 0.03),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                        ),
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(18),
                           child: SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             child: ConstrainedBox(
@@ -1610,13 +1496,13 @@ class _VendorPurchaseReportScreenState
                                             32,
                               ),
                               child: DataTable(
-                                headingRowHeight: 44,
+                                headingRowHeight: 46,
                                 dataRowMinHeight: 52,
-                                dataRowMaxHeight: 56,
+                                dataRowMaxHeight: 58,
                                 headingRowColor: WidgetStateProperty.all(
                                   isDark
                                       ? const Color(0xFF0F172A)
-                                      : const Color(0xFFF1F5F9),
+                                      : const Color(0xFFF8FAFC),
                                 ),
                                 horizontalMargin: 16,
                                 columnSpacing: 18,
@@ -1659,23 +1545,23 @@ class _VendorPurchaseReportScreenState
                                       DataCell(Text(
                                         dateDisplay,
                                         style: TextStyle(
-                                          fontSize: 11,
+                                          fontSize: 13,
                                           fontWeight: FontWeight.w500,
                                           color: isDark
-                                              ? Colors.white70
-                                              : const Color(0xFF1E293B),
+                                              ? const Color(0xFF94A3B8)
+                                              : const Color(0xFF475569),
                                         ),
                                       )),
                                       DataCell(SizedBox(
-                                        width: 120,
+                                        width: 130,
                                         child: Text(
-                                          r['party']?.toString() ?? "",
+                                          (r['party']?.toString() ?? "").toUpperCase(),
                                           style: TextStyle(
-                                            fontSize: 12,
+                                            fontSize: 13,
                                             fontWeight: FontWeight.w700,
                                             color: isDark
                                                 ? Colors.white
-                                                : const Color(0xFF1E293B),
+                                                : const Color(0xFF0F172A),
                                           ),
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -1689,11 +1575,11 @@ class _VendorPurchaseReportScreenState
                                           Text(
                                             item,
                                             style: TextStyle(
-                                              fontSize: 12,
+                                              fontSize: 13,
                                               fontWeight: FontWeight.w700,
                                               color: isDark
                                                   ? Colors.white
-                                                  : const Color(0xFF1E293B),
+                                                  : const Color(0xFF0F172A),
                                             ),
                                           ),
                                           if (size.isNotEmpty)
@@ -1704,7 +1590,7 @@ class _VendorPurchaseReportScreenState
                                                     r['unitWeight'],
                                               ),
                                               style: TextStyle(
-                                                fontSize: 10,
+                                                fontSize: 11,
                                                 color: isDark
                                                     ? const Color(0xFF94A3B8)
                                                     : const Color(0xFF64748B),
@@ -1715,11 +1601,11 @@ class _VendorPurchaseReportScreenState
                                       DataCell(Text(
                                         "₹ ${formatIndianCurrency(r['rate'] ?? 0)}",
                                         style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w700,
                                           color: isDark
                                               ? Colors.white
-                                              : const Color(0xFF1E293B),
+                                              : const Color(0xFF0F172A),
                                         ),
                                       )),
                                       DataCell(Text(
@@ -1855,8 +1741,7 @@ class _VendorPurchaseReportScreenState
                                                 child: Row(
                                                   children: [
                                                     Icon(
-                                                      Icons
-                                                          .move_to_inbox_rounded,
+                                                      Icons.download_done_rounded,
                                                       color: Color(0xFF10B981),
                                                       size: 18,
                                                     ),
@@ -1867,62 +1752,40 @@ class _VendorPurchaseReportScreenState
                                                   ],
                                                 ),
                                               ),
-                                            if (AccessGuard.can(
-                                                AppPermissions.vendorPurchase))
-                                              PopupMenuItem(
-                                                value: 'hide',
-                                                child: Row(
-                                                  children: [
-                                                    Icon(
-                                                      (r['is_hidden'] == true ||
-                                                              r['isHidden'] ==
-                                                                  true ||
-                                                              r['is_hidden']
-                                                                      ?.toString()
-                                                                      .toLowerCase() ==
-                                                                  'true' ||
-                                                              r['isHidden']
-                                                                      ?.toString()
-                                                                      .toLowerCase() ==
-                                                                  'true')
-                                                          ? Icons
-                                                              .visibility_outlined
-                                                          : Icons
-                                                              .visibility_off_outlined,
-                                                      color:
-                                                          const Color(0xFF0284C7),
-                                                      size: 18,
-                                                    ),
-                                                    const SizedBox(width: 8),
-                                                    Text(
-                                                      (r['is_hidden'] == true ||
-                                                              r['isHidden'] ==
-                                                                  true ||
-                                                              r['is_hidden']
-                                                                      ?.toString()
-                                                                      .toLowerCase() ==
-                                                                  'true' ||
-                                                              r['isHidden']
-                                                                      ?.toString()
-                                                                      .toLowerCase() ==
-                                                                  'true')
-                                                          ? "Unhide Sauda"
-                                                          : "Hide Sauda",
+                                            PopupMenuItem(
+                                              value: 'hide',
+                                              child: Row(
+                                                children: [
+                                                  Icon(
+                                                    r['is_hidden'] == true
+                                                        ? Icons.visibility_rounded
+                                                        : Icons
+                                                            .visibility_off_rounded,
+                                                    color:
+                                                        const Color(0xFF64748B),
+                                                    size: 18,
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Text(
+                                                      r['is_hidden'] == true
+                                                          ? "Unhide"
+                                                          : "Hide Record",
                                                       style: const TextStyle(
-                                                          fontSize: 13),
-                                                    ),
-                                                  ],
-                                                ),
+                                                          fontSize: 13)),
+                                                ],
                                               ),
+                                            ),
                                             if (AccessGuard.can(
                                                 AppPermissions.vendorPurchase))
                                               const PopupMenuItem(
                                                 value: 'edit',
                                                 child: Row(
                                                   children: [
-                                                    Icon(Icons.edit_outlined,
-                                                        color: Colors.orange,
-                                                        size: 18),
+                                                    Icon(
+                                                      Icons.edit_outlined,
+                                                      color: Color(0xFF0284C7),
+                                                      size: 18,
+                                                    ),
                                                     SizedBox(width: 8),
                                                     Text("Edit Sauda",
                                                         style: TextStyle(
@@ -1989,28 +1852,46 @@ class _VendorPurchaseReportScreenState
     );
   }
 
-  Widget _buildMetricCard(
-    String label,
-    String value,
-    IconData icon,
-    Color color,
-    bool isDark,
-    Color cardColor,
-  ) {
+  Widget _buildMetricCard({
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color iconColor,
+    required Color iconBgColor,
+    required bool isDark,
+  }) {
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: _cardDecoration(isDark, cardColor),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+          width: 1.5,
+        ),
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                  color: const Color(0xFF0F172A).withValues(alpha: 0.03),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+      ),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(8),
+              color: isDark ? iconBgColor.withValues(alpha: 0.15) : iconBgColor,
+              borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, color: color, size: 18),
+            alignment: Alignment.center,
+            child: Icon(icon, color: iconColor, size: 20),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2022,8 +1903,8 @@ class _VendorPurchaseReportScreenState
                   child: Text(
                     value,
                     style: TextStyle(
-                      color: isDark ? Colors.white : const Color(0xFF1E293B),
-                      fontSize: 15,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      fontSize: 16,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.3,
                     ),
@@ -2036,8 +1917,8 @@ class _VendorPurchaseReportScreenState
                     color: isDark
                         ? const Color(0xFF94A3B8)
                         : const Color(0xFF64748B),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -2049,173 +1930,211 @@ class _VendorPurchaseReportScreenState
     );
   }
 
-  BoxDecoration _cardDecoration(bool isDark, Color cardColor) {
-    return BoxDecoration(
-      color: cardColor,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(
-        color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+  Widget _buildSquareIconButton(
+    IconData icon, {
+    required VoidCallback? onTap,
+    Color? iconColor,
+    Color? bgColor,
+    Color? borderColor,
+    bool isDark = false,
+    double size = 38,
+  }) {
+    final bg = bgColor ??
+        (isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : const Color(0xFFF1F5F9));
+    final border = borderColor ??
+        (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0));
+    final icColor =
+        iconColor ?? (isDark ? Colors.white : const Color(0xFF1E293B));
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: border),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, color: icColor, size: 18),
+        ),
       ),
-      boxShadow: isDark
-          ? []
-          : [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.02),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
     );
   }
 
-  Widget _buildSearchableVendorSelectorRow({
+  Widget _buildStackedFilterField({
     required IconData icon,
     required String hint,
     required String? value,
     required List<String> items,
     required bool isDark,
     required ValueChanged<String?> onChanged,
+    bool isSearchableVendor = false,
   }) {
     final bool hasSelection = value != null && value.isNotEmpty;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.02)
-            : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-        ),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: () async {
-          final picked = await SearchableVendorModal.show(
-            context,
-            allVendors: items,
-            selectedVendor: value,
-            title: "Select Vendor",
-            allOptionLabel: "All Vendors",
-          );
-          if (picked != null) {
-            onChanged(picked.isEmpty ? null : picked);
-          }
-        },
-        child: Row(
-          children: [
-            Icon(icon, color: primaryRed, size: 16),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                hasSelection ? value : hint,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight:
-                      hasSelection ? FontWeight.w700 : FontWeight.w500,
-                  color: hasSelection
-                      ? (isDark ? Colors.white : const Color(0xFF1E293B))
-                      : (isDark
-                          ? const Color(0xFF94A3B8)
-                          : const Color(0xFF64748B)),
-                ),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-              ),
-            ),
-            if (hasSelection)
-              InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () => onChanged(null),
-                child: const Padding(
-                  padding: EdgeInsets.all(2.0),
-                  child: Icon(
-                    Icons.cancel_rounded,
-                    size: 14,
-                    color: Color(0xFF94A3B8),
-                  ),
-                ),
-              )
-            else
-              const Icon(
-                Icons.arrow_drop_down_rounded,
-                color: Color(0xFF94A3B8),
-                size: 20,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
 
-  Widget _buildFilterDropdownRow({
-    required IconData icon,
-    required String hint,
-    required String? value,
-    required List<String> items,
-    required bool isDark,
-    required ValueChanged<String?> onChanged,
-  }) {
+    if (isSearchableVendor) {
+      return Container(
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.04)
+              : const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          ),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () async {
+            final picked = await SearchableVendorModal.show(
+              context,
+              allVendors: items,
+              selectedVendor: value,
+              title: "Select Vendor",
+              allOptionLabel: "All Vendors",
+            );
+            if (picked != null) {
+              onChanged(picked.isEmpty ? null : picked);
+            }
+          },
+          child: Row(
+            children: [
+              Icon(icon, color: const Color(0xFFDC2626), size: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  hasSelection ? value : hint,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight:
+                        hasSelection ? FontWeight.w700 : FontWeight.w500,
+                    color: hasSelection
+                        ? (isDark ? Colors.white : const Color(0xFF0F172A))
+                        : (isDark
+                            ? const Color(0xFF94A3B8)
+                            : const Color(0xFF64748B)),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
+              if (hasSelection)
+                InkWell(
+                  onTap: () => onChanged(null),
+                  borderRadius: BorderRadius.circular(12),
+                  child: const Padding(
+                    padding: EdgeInsets.all(4.0),
+                    child: Icon(Icons.close_rounded,
+                        size: 16, color: Color(0xFF94A3B8)),
+                  ),
+                )
+              else
+                const Icon(Icons.keyboard_arrow_down_rounded,
+                    color: Color(0xFF94A3B8), size: 20),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      height: 42,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
       decoration: BoxDecoration(
         color: isDark
-            ? Colors.white.withValues(alpha: 0.02)
+            ? Colors.white.withValues(alpha: 0.04)
             : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
         ),
       ),
       child: Row(
         children: [
-          Icon(icon, color: primaryRed, size: 16),
-          const SizedBox(width: 8),
+          Icon(icon, color: const Color(0xFFDC2626), size: 18),
+          const SizedBox(width: 10),
           Expanded(
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String?>(
                 value: value,
-                isDense: true,
-                dropdownColor:
-                    isDark ? const Color(0xFF1E293B) : Colors.white,
+                isExpanded: true,
+                dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                    color: Color(0xFF94A3B8), size: 20),
                 hint: Text(
                   hint,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
                     color: isDark
                         ? const Color(0xFF94A3B8)
                         : const Color(0xFF64748B),
                   ),
+                  overflow: TextOverflow.ellipsis,
                 ),
-                isExpanded: true,
-                icon: const Icon(Icons.arrow_drop_down_rounded,
-                    color: Color(0xFF94A3B8), size: 20),
+                selectedItemBuilder: (context) {
+                  return [
+                    Text(
+                      hint,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: isDark
+                            ? const Color(0xFF94A3B8)
+                            : const Color(0xFF64748B),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    ...items.map((i) => Text(
+                          i,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color:
+                                isDark ? Colors.white : const Color(0xFF0F172A),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        )),
+                  ];
+                },
                 items: [
-                  DropdownMenuItem(
+                  DropdownMenuItem<String?>(
                     value: null,
                     child: Text(
                       hint,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
                         color: isDark
                             ? const Color(0xFF94A3B8)
                             : const Color(0xFF64748B),
                       ),
                     ),
                   ),
-                  ...items.map((i) => DropdownMenuItem(
+                  ...items.map((i) => DropdownMenuItem<String?>(
                         value: i,
                         child: Text(
                           i,
                           style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            fontWeight: value == i
+                                ? FontWeight.w700
+                                : FontWeight.w500,
                             color: isDark
                                 ? Colors.white
-                                : const Color(0xFF1E293B),
+                                : const Color(0xFF0F172A),
                           ),
                         ),
-                      ))
+                      )),
                 ],
                 onChanged: onChanged,
               ),

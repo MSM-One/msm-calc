@@ -120,11 +120,12 @@ const InventoryReports = ({ onBack }) => {
           {onBack && (
             <button
               onClick={onBack}
-              className="p-3 rounded-2xl bg-white/50 backdrop-blur-md border border-white/30 hover:bg-white/80 text-slate-700 hover:text-slate-950 transition-all shadow-sm flex items-center justify-center cursor-pointer group"
+              className="px-4 py-2.5 rounded-2xl bg-white border border-slate-200/80 text-slate-700 hover:text-slate-950 hover:bg-slate-50 hover:border-slate-300 shadow-sm transition-all active:scale-95 cursor-pointer flex items-center gap-2 group text-xs font-bold shrink-0"
               title="Back to Dashboard"
               aria-label="Back to Dashboard"
             >
-              <ArrowLeft size={20} className="group-hover:-translate-x-0.5 transition-transform" />
+              <ArrowLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" />
+              <span>Dashboard</span>
             </button>
           )}
           <div className="relative w-full md:w-96 group">

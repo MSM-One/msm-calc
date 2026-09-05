@@ -6,6 +6,7 @@ import '../services/data_repository.dart';
 import '../utils/steel_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/sorting_utils.dart';
+import '../utils/category_matcher.dart';
 
 class ResponsiveSizePicker extends StatefulWidget {
   final String itemType;
@@ -109,15 +110,10 @@ class _ResponsiveSizePickerState extends State<ResponsiveSizePicker> {
 
         final matchingSizes = allSizes.where((s) {
           final sMatId = s['material_id'] ?? s['materialId'];
-          final sMatName =
-              (s['material_name'] ?? s['materialName'])?.toString();
           final matchId = (selectedMaterialId != null &&
               sMatId != null &&
               sMatId.toString() == selectedMaterialId.toString());
-          final matchName = (selectedMaterialName.trim().isNotEmpty &&
-              sMatName != null &&
-              sMatName.trim().toLowerCase() ==
-                  selectedMaterialName.trim().toLowerCase());
+          final matchName = isSizeInCategory(s, selectedMaterialName);
           return matchId || matchName;
         }).toList();
 

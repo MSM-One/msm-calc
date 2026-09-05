@@ -67,7 +67,7 @@ class EnterpriseQuickActionsGrid extends StatelessWidget {
             ),
           if (snap.canAccessSaudaBooking)
             QuickActionItem(
-              title: 'Sauda Booking',
+              title: 'Sauda & Delivery Order',
               subtitle: 'Contract rates & bookings',
               icon: Icons.menu_book_rounded,
               iconColor: const Color(0xFFD32F2F),
@@ -163,7 +163,7 @@ class EnterpriseQuickActionsGrid extends StatelessWidget {
             ),
           if (snap.canAccessQuotation)
             QuickActionItem(
-              title: 'Quotations',
+              title: 'Quotation',
               subtitle: 'Customer estimates & rates',
               icon: Icons.description_rounded,
               iconColor: const Color(0xFFD97706),

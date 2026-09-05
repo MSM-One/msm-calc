@@ -50,12 +50,32 @@ class _StockMonthReportScreenState extends State<StockMonthReportScreen> {
       });
       await _loadData();
     } else if (preset == 'Custom') {
+      final now = DateTime.now();
+      final todayEnd = DateTime(now.year, now.month, now.day, 23, 59, 59);
+
       final DateTimeRange? picked = await showDateRangePicker(
         context: context,
-        initialDateRange:
-            DateTimeRange(start: _selectedMonth, end: DateTime.now()),
+        initialDateRange: (_selectedMonth.isBefore(todayEnd) ||
+                _selectedMonth.isAtSameMomentAs(todayEnd))
+            ? DateTimeRange(start: _selectedMonth, end: now)
+            : DateTimeRange(
+                start: now.subtract(const Duration(days: 7)),
+                end: now,
+              ),
         firstDate: DateTime(2020),
-        lastDate: DateTime.now().add(const Duration(days: 365)),
+        lastDate: todayEnd,
+        builder: (context, child) {
+          return Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme: const ColorScheme.light(
+                primary: Color(0xFFD32F2F),
+                onPrimary: Colors.white,
+                onSurface: Color(0xFF1E293B),
+              ),
+            ),
+            child: child!,
+          );
+        },
       );
       if (picked != null) {
         setState(() {

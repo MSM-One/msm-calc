@@ -23,7 +23,6 @@ import 'dealer_stock_share_screen.dart';
 import '../models/stock_role.dart';
 import '../widgets/screen_gate.dart';
 
-import '../widgets/dashboard_sliver_header.dart';
 import '../widgets/dashboard/executive_telemetry_header.dart';
 import '../widgets/dashboard/compact_kpi_ribbon.dart';
 import '../widgets/dashboard/unified_stock_distribution_card.dart';
@@ -476,27 +475,18 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget _buildMobileLayout() {
     return RefreshIndicator(
       onRefresh: _handleSync,
-      edgeOffset: MediaQuery.of(context).padding.top +
-          88, // Start below the collapsed header
       color: appRed,
-      child: CustomScrollView(
+      child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          DashboardSliverHeader(
-            userName: _effectiveDisplayName(),
-            companyName: "MSM One",
-            isSyncing: _isSyncing,
-            onRefresh: _handleSync,
-            onProfileTap: _showProfile,
-            onLogout: _handleLogout,
-          ),
-          SliverSafeArea(
-            top: false,
-            bottom: true,
-            sliver: SliverPadding(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildModernExecutiveHeader(context),
+            Padding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-              sliver: SliverList(
-                delegate: SliverChildListDelegate([
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   _buildMobileActionsGrid(),
                   const SizedBox(height: 28),
                   const Text(
@@ -510,7 +500,172 @@ class _DashboardScreenState extends State<DashboardScreen>
                   const SizedBox(height: 16),
                   _buildMobileSupportCard(),
                   const SizedBox(height: 20),
-                ]),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModernExecutiveHeader(BuildContext context) {
+    final userName = _effectiveDisplayName();
+    final initial = userName.isNotEmpty ? userName[0].toUpperCase() : 'V';
+
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF991B1B), // Rich Deep Crimson
+            Color(0xFFDC2626), // Vibrant Enterprise Red
+          ],
+        ),
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(28),
+          bottomRight: Radius.circular(28),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x26DC2626),
+            offset: Offset(0, 10),
+            blurRadius: 20,
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          // Decorative subtle translucent ambient glow in top corner
+          Positioned(
+            top: -24,
+            right: -24,
+            child: Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.06),
+              ),
+            ),
+          ),
+
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Top Meta Row: Brand Pill + Profile Avatar
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Frosted Glass Brand Badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.2),
+                            width: 1,
+                          ),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.layers_rounded,
+                                size: 13, color: Colors.white),
+                            SizedBox(width: 6),
+                            Text(
+                              'MSM One',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // User Profile Capsule Avatar
+                      GestureDetector(
+                        onTap: _showProfile,
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.12),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          child: Center(
+                            child: Text(
+                              initial,
+                              style: const TextStyle(
+                                color: Color(0xFFDC2626),
+                                fontWeight: FontWeight.w800,
+                                fontSize: 17,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 22),
+
+                  // Greeting Subtitle
+                  Text(
+                    'Welcome back,',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.white.withValues(alpha: 0.82),
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+
+                  const SizedBox(height: 4),
+
+                  // User Name + Wave Emoji (Perfect Baseline Alignment)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          userName.isNotEmpty ? userName : 'Vivek Salve',
+                          style: const TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: -0.4,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        '👋',
+                        style: TextStyle(fontSize: 22),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ),
@@ -518,8 +673,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       ),
     );
   }
-
-  // _buildMobileHeader is now replaced by DashboardHeader widget
 
   Widget _buildMobileActionsGrid() {
     return ValueListenableBuilder<PermissionSnapshot>(
@@ -558,7 +711,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           if (snap.canAccessSaudaBooking)
             _MobileActionData(
-              title: "Sauda Book",
+              title: "Sauda & Delivery Order",
               icon: Icons.menu_book_rounded,
               color: appRed,
               onTap: () => Navigator.push(

@@ -299,7 +299,8 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   final TextEditingController _obCtrl = TextEditingController();
 
   bool gstEnabled = true;
-  bool ncDiscountEnabled = true;
+  bool ncDiscountEnabled = false;
+  bool hasLoadingCharge = true;
   bool loadingData = true;
   List<String> itemList = [];
   Map<String, List<SizeEntry>> masterSizes = {};
@@ -398,42 +399,6 @@ class _CalculatorScreenState extends State<CalculatorScreen>
     return "assets/msm_icon.jpg";
   }
 
-  static const List<String> allowedCategories = [
-    'MS PIPE',
-    'MS ANGLE',
-    'MS CHANNEL',
-    'SQR BAR',
-    'ROUND BAR',
-    'FLATS',
-  ];
-
-  static bool isAllowedCategory(String cat) {
-    final upper = cat.toUpperCase().trim();
-    if (upper.contains('HR PIPE') ||
-        upper.contains('CR PIPE') ||
-        upper.contains('ISMB') ||
-        upper.contains('ISMC') ||
-        upper.contains('STRUCTURE') ||
-        upper.contains('BEAM') ||
-        upper.contains('BARBED') ||
-        upper.contains('GATE') ||
-        upper.contains('BINDING') ||
-        upper.contains('NAIL') ||
-        upper.contains('ERW')) {
-      return false;
-    }
-    return allowedCategories.any((allowed) =>
-        upper == allowed ||
-        (allowed == 'MS PIPE' && upper.contains('PIPE')) ||
-        (allowed == 'MS ANGLE' && upper.contains('ANGLE')) ||
-        (allowed == 'MS CHANNEL' && upper.contains('CHANNEL')) ||
-        (allowed == 'SQR BAR' &&
-            (upper.contains('SQR') || upper.contains('SQUARE'))) ||
-        (allowed == 'ROUND BAR' && upper.contains('ROUND')) ||
-        (allowed == 'FLATS' &&
-            (upper.contains('FLAT') || upper.contains('FLATS'))));
-  }
-
   Future<void> _loadSheetData() async {
     final data = await DataRepository.getSheetDataAsync(null);
     if (!mounted) return;
@@ -454,7 +419,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
 
     for (var itemObj in rawItems) {
       String name = itemObj['name'].toString().trim();
-      if (!isAllowedCategory(name)) continue;
+      if (name.isEmpty) continue;
 
       List<dynamic> rawSizes = itemObj['sizes'] ?? [];
 
@@ -571,7 +536,8 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                 _customerNameCtrl.clear();
                 _contactNumberCtrl.clear();
                 gstEnabled = true;
-                ncDiscountEnabled = true;
+                ncDiscountEnabled = false;
+                hasLoadingCharge = true;
               });
               Navigator.pop(context);
             },
@@ -840,7 +806,16 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   }
 
   double netRate(ItemEntry item, SizeEntry size) {
-    return item.basic + size.sd + globalFreight + globalOB;
+    if (item.basic <= 0) return 0.0;
+    double effectiveBase =
+        item.basic + size.sd + (hasLoadingCharge ? loading : 0.0);
+    if (ncDiscountEnabled) {
+      effectiveBase -= ncDiscount;
+    }
+    double netBeforeGst = effectiveBase + globalFreight + globalOB;
+    double finalNetRate =
+        gstEnabled ? (netBeforeGst * (1.0 + gstRate)) : netBeforeGst;
+    return finalNetRate;
   }
 
   double grandTotal() {
@@ -863,13 +838,17 @@ class _CalculatorScreenState extends State<CalculatorScreen>
     return total;
   }
 
-  String buildTermsAndConditions([bool ncDiscountEnabled = false]) {
-    StringBuffer terms = StringBuffer();
-    terms.writeln("*Terms & Conditions*");
-    terms.writeln("• Payment Advance");
-    terms.writeln("• Transport (Extra)");
-    terms.writeln("• Weight Tolerance - +/-5kg per MT");
-    return terms.toString();
+  String buildTermsAndConditions({required bool isNcEnabled}) {
+    final buffer = StringBuffer();
+    buffer.writeln('*Terms & Conditions*');
+    buffer.writeln('• Payment Advance');
+    buffer.writeln('• Loading Charge - (Inclusive)');
+    buffer.writeln('• Transport (Extra)');
+    if (!isNcEnabled) {
+      buffer.writeln('• GST - 18.00 % (Inclusive)');
+    }
+    buffer.write('• Weight Tolerance - +/-5kg per MT');
+    return buffer.toString();
   }
 
   String _generateMessageText() {
@@ -941,7 +920,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       msg.writeln("───────────────────────");
     }
 
-    msg.write(buildTermsAndConditions(ncDiscountEnabled));
+    msg.write(buildTermsAndConditions(isNcEnabled: ncDiscountEnabled));
 
     return msg.toString();
   }
@@ -1223,7 +1202,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    widget.isQuotationMode ? 'Quotations' : 'Netrate Calc',
+                    widget.isQuotationMode ? 'Quotation' : 'Netrate Calc',
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 17,
@@ -1322,7 +1301,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                 children: [
                   Text(
                     widget.isQuotationMode
-                        ? 'Quotations Console'
+                        ? 'Quotation'
                         : 'Netrate Calculator',
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
@@ -1483,6 +1462,60 @@ class _CalculatorScreenState extends State<CalculatorScreen>
     );
   }
 
+  Widget _buildModernToggleTile({
+    required String title,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+    required bool isDark,
+  }) {
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                ),
+                maxLines: 1,
+                softWrap: false,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Transform.scale(
+            scale: 0.85,
+            child: Switch(
+              value: value,
+              activeThumbColor: Colors.white,
+              activeTrackColor: const Color(0xFFD32F2F),
+              inactiveTrackColor:
+                  isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+              inactiveThumbColor: Colors.white,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildModernSettingsCard(
       bool isDark, Color brandRed, Color cardColor) {
     return Container(
@@ -1492,31 +1525,51 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _sectionHeader(
-              Icons.tune_rounded, "Pricing & Charges", brandRed, isDark),
+              Icons.tune_rounded, "Pricing Settings", brandRed, isDark),
           const SizedBox(height: 14),
           Row(
             children: [
               Expanded(
+                child: _buildModernToggleTile(
+                  title: "GST (18%)",
+                  value: gstEnabled,
+                  onChanged: (v) => setState(() => gstEnabled = v),
+                  isDark: isDark,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildModernToggleTile(
+                  title: "NC Discount",
+                  value: ncDiscountEnabled,
+                  onChanged: (v) => setState(() => ncDiscountEnabled = v),
+                  isDark: isDark,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
                 child: _modernTextInput(
-                  "Freight (₹/MT)",
+                  "Freight (₹)",
                   _freightCtrl,
                   (v) => globalFreight = double.tryParse(v) ?? 0,
                   brandRed,
                   isDark,
                   isNumber: true,
-                  prefixText: "₹ ",
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _modernTextInput(
-                  "OB / Other Billing (₹/MT)",
+                  "OB (₹)",
                   _obCtrl,
                   (v) => globalOB = double.tryParse(v) ?? 0,
                   brandRed,
                   isDark,
                   isNumber: true,
-                  prefixText: "₹ ",
                 ),
               ),
             ],
@@ -1994,12 +2047,14 @@ class _CalculatorScreenState extends State<CalculatorScreen>
           child: Icon(icon, color: brandRed, size: 16),
         ),
         const SizedBox(width: 10),
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            color: isDark ? Colors.white : const Color(0xFF1E293B),
+        Flexible(
+          child: Text(
+            title,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: isDark ? Colors.white : const Color(0xFF1E293B),
+            ),
           ),
         ),
       ],
@@ -2093,6 +2148,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         final bool isMobile = constraints.maxWidth < 600;
         final categoryDropdown = DropdownButtonFormField<String>(
           isExpanded: true,
+          menuMaxHeight: 380,
           initialValue: item.itemName,
           dropdownColor: cardColor,
           icon: Icon(Icons.keyboard_arrow_down_rounded, color: brandRed),

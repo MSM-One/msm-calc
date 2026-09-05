@@ -61,43 +61,168 @@ class InventoryProvider extends ChangeNotifier {
     "Round Bar": ["ROUND BAR", "ROUND", "MS ROUND BAR", "MS ROUND"],
   };
 
-  static const Map<String, List<String>> _sampleRateRequiredSizes = {
-    "MS Pipe": [
-      '1" 25x25(1.6) 7',
-      '1.5" 38x38(1.6) 11',
-      '2" 50x50(1.6) 15',
-      '2.5" 60x60(2.0) 22',
-      '3" 72x72(2.0) 27',
-      '60.3OD (2.0)',
-      '2"x1" 50x25 (1.6) 11',
-      '2.5"x1.5" 60x40 (1.6) 14',
-      '3"x1.5" 80x40 (1.6) 17',
-      '4"x2" 96x48 (1.6) 21',
-      '1.25" 41OD (2.0) 11',
-      '1.5" 48.3OD (2.0) 13',
-    ],
+  static const Map<String, List<SampleRateSpec>> _sampleSpecifications = {
     "MS Angle": [
-      "25x3 6.2",
-      "35x5 14.5",
-      "40x5 18",
-      "50x5 21.5",
+      SampleRateSpec(
+        label: "25x3",
+        defaultWeight: 6.2,
+        defaultSd: 3000,
+        matchKeys: ["25X3", "25 X 3"],
+      ),
+      SampleRateSpec(
+        label: "35x5",
+        defaultWeight: 14.5,
+        defaultSd: 2000,
+        matchKeys: ["35X5", "35 X 5"],
+      ),
+      SampleRateSpec(
+        label: "40x5",
+        defaultWeight: 18.0,
+        defaultSd: 1000,
+        matchKeys: ["40X5", "40 X 5"],
+      ),
+      SampleRateSpec(
+        label: "50x5",
+        defaultWeight: 21.5,
+        defaultSd: 0,
+        matchKeys: ["50X5", "50 X 5"],
+      ),
     ],
     "MS Channel": [
-      'C 70x35 (3"X1.5") 22',
-      'C 100x50 (4"x 2") 56',
-      'C 75x40 (3"X1.5") 36',
+      SampleRateSpec(
+        label: "70x35 (3\"X1.5\")",
+        defaultWeight: 22.0,
+        defaultSd: 2500,
+        matchKeys: ["70X35", "C 70X35", "70X35 (3\"X1.5\")"],
+      ),
+      SampleRateSpec(
+        label: "75x40 (3\"X1.5\")",
+        defaultWeight: 36.0,
+        defaultSd: 1500,
+        matchKeys: ["75X40", "C 75X40", "75X40 (3\"X1.5\")"],
+      ),
+      SampleRateSpec(
+        label: "100x50 (4\"x 2\")",
+        defaultWeight: 56.0,
+        defaultSd: 0,
+        matchKeys: ["100X50", "C 100X50", "100X50 (4\"X2\")"],
+      ),
     ],
     "Sqr Bar": [
-      "10mm",
-      "12mm",
-    ],
-    "Flats": [
-      "F 25x5",
-      "F 32x5",
+      SampleRateSpec(
+        label: "10MM",
+        defaultWeight: 0.0,
+        defaultSd: 1500,
+        matchKeys: ["10MM", "10 MM"],
+      ),
+      SampleRateSpec(
+        label: "12MM",
+        defaultWeight: 0.0,
+        defaultSd: 0,
+        matchKeys: ["12MM", "12 MM"],
+      ),
     ],
     "Round Bar": [
-      "10mm",
-      "12mm",
+      SampleRateSpec(
+        label: "10MM",
+        defaultWeight: 0.0,
+        defaultSd: 1500,
+        matchKeys: ["10MM", "10 MM"],
+      ),
+      SampleRateSpec(
+        label: "12MM",
+        defaultWeight: 0.0,
+        defaultSd: 0,
+        matchKeys: ["12MM", "12 MM"],
+      ),
+    ],
+    "Flats": [
+      SampleRateSpec(
+        label: "F 25x5",
+        defaultWeight: 0.0,
+        defaultSd: 2000,
+        matchKeys: ["25X5", "F 25X5", "F25X5"],
+      ),
+      SampleRateSpec(
+        label: "F 32x5",
+        defaultWeight: 0.0,
+        defaultSd: 1000,
+        matchKeys: ["32X5", "F 32X5", "F32X5"],
+      ),
+    ],
+    "MS Pipe": [
+      SampleRateSpec(
+        label: "1\" 25x25 (1.6)",
+        defaultWeight: 7.0,
+        defaultSd: 4500,
+        matchKeys: ["1\" 25X25", "25X25 (1.6)", "25X25"],
+      ),
+      SampleRateSpec(
+        label: "1.25\" 41OD (2.0)",
+        defaultWeight: 11.0,
+        defaultSd: 4500,
+        matchKeys: ["1.25\" 41OD", "41OD (2.0)", "41OD", "41.3OD"],
+      ),
+      SampleRateSpec(
+        label: "1.5\" 38x38 (1.6)",
+        defaultWeight: 11.0,
+        defaultSd: 3500,
+        matchKeys: ["1.5\" 38X38", "38X38 (1.6)", "38X38"],
+      ),
+      SampleRateSpec(
+        label: "1.5\" 48.3OD (2.0)",
+        defaultWeight: 13.0,
+        defaultSd: 3500,
+        matchKeys: ["1.5\" 48.3OD", "48.3OD (2.0)", "48.3OD", "48OD"],
+      ),
+      SampleRateSpec(
+        label: "2\"x1\" 50x25 (1.6)",
+        defaultWeight: 11.0,
+        defaultSd: 3500,
+        matchKeys: ["2\"X1\" 50X25", "50X25 (1.6)", "50X25", "2\"X1\""],
+      ),
+      SampleRateSpec(
+        label: "2\" 50x50 (1.6)",
+        defaultWeight: 15.0,
+        defaultSd: 3500,
+        matchKeys: ["2\" 50X50", "50X50 (1.6)", "50X50"],
+      ),
+      SampleRateSpec(
+        label: "2\" 60.3OD (2.0)",
+        defaultWeight: 17.0,
+        defaultSd: 3500,
+        matchKeys: ["2\" 60.3OD", "60.3OD (2.0)", "60.3OD", "60OD"],
+      ),
+      SampleRateSpec(
+        label: "2.5\"x1.5\" 60x40 (1.6)",
+        defaultWeight: 14.0,
+        defaultSd: 3500,
+        matchKeys: ["2.5\"X1.5\" 60X40", "60X40 (1.6)", "60X40", "2.5\"X1.5\""],
+      ),
+      SampleRateSpec(
+        label: "2.5\" 60x60 (2.0)",
+        defaultWeight: 22.0,
+        defaultSd: 4000,
+        matchKeys: ["2.5\" 60X60", "60X60 (2.0)", "60X60"],
+      ),
+      SampleRateSpec(
+        label: "3\"x1.5\" 80x40 (1.6)",
+        defaultWeight: 17.0,
+        defaultSd: 4500,
+        matchKeys: ["3\"X1.5\" 80X40", "80X40 (1.6)", "80X40", "3\"X1.5\""],
+      ),
+      SampleRateSpec(
+        label: "3\" 72x72 (2.0)",
+        defaultWeight: 27.0,
+        defaultSd: 4500,
+        matchKeys: ["3\" 72X72", "72X72 (2.0)", "72X72"],
+      ),
+      SampleRateSpec(
+        label: "4\"x2\" 96x48 (1.6)",
+        defaultWeight: 21.0,
+        defaultSd: 5500,
+        matchKeys: ["4\"X2\" 96X48", "96X48 (1.6)", "96X48", "4\"X2\""],
+      ),
     ],
   };
 
@@ -183,39 +308,8 @@ class InventoryProvider extends ChangeNotifier {
     return s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
   }
 
-  String _stripWeightSuffix(String s) {
-    return s.trim().replaceAll(RegExp(r'\s+\d+(?:\.\d+)?$'), '');
-  }
-
   String _normalizeSize(String s) {
-    // 1. Replace mathematical cross symbol × and lowercase x with uppercase X, then trim
-    String res =
-        s.replaceAll('×', 'X').replaceAll('x', 'X').trim().toUpperCase();
-    res = res.replaceAll(RegExp(r'\s+'), ' ');
-    res = res.replaceAll(RegExp(r'\s*[xX]\s*'), 'X');
-
-    // 2. Strip leading 'C ' or 'F ' prefixes for Channel/Flats matching
-    if (res.startsWith('C ') || res.startsWith('F ')) {
-      res = res.substring(2).trim();
-    } else if ((res.startsWith('C') || res.startsWith('F')) &&
-        res.length > 1 &&
-        RegExp(r'^\d').hasMatch(res.substring(1))) {
-      res = res.substring(1).trim();
-    }
-
-    // 3. Robust MM normalization without regex interpolation
-    if (res.contains('MM')) {
-      final digits = res.replaceAll(RegExp(r'[^0-9]'), '');
-      if (digits.isNotEmpty) {
-        return '${digits}MM';
-      }
-    }
-    return res;
-  }
-
-  bool _isSimpleMmSize(String s) {
-    final norm = _normalizeSize(s);
-    return RegExp(r'^\d+MM$').hasMatch(norm);
+    return s.replaceAll('×', 'X').replaceAll('x', 'X').replaceAll(RegExp(r'\s+'), ' ').trim().toUpperCase();
   }
 
   Future<void> fetchSampleRateData({bool force = false}) async {
@@ -224,20 +318,14 @@ class InventoryProvider extends ChangeNotifier {
     _isLoadingSampleRates = true;
 
     try {
-      debugPrint("DEBUG: [SampleRate-V3] Starting data fetch (force: $force)");
+      debugPrint("DEBUG: [SampleRate-Dynamic] Starting data fetch (force: $force)");
       final data =
           await DataRepository.getSheetDataAsync(null, forceRefresh: force);
       final List items = data['items'] ?? [];
 
       final Map<String, List<SampleRateSize>> grouped = {};
-      final Map<String, Map<String, SampleRateSize>> bestMatches =
-          {}; // canonical -> normalizedReq -> SampleRateSize
 
       for (var catName in _orderedSampleRateCategories) {
-        bestMatches[catName] = {};
-
-        final List<String> requiredSizes =
-            _sampleRateRequiredSizes[catName] ?? [];
         final List<String> aliases = _sampleRateAliases[catName] ?? [];
         final String normCatName = _normalizeCategory(catName);
 
@@ -247,6 +335,20 @@ class InventoryProvider extends ChangeNotifier {
           final String normSheetCat = _normalizeCategory(sheetCatName);
           final String upperSheetCat = sheetCatName.toUpperCase().trim();
 
+          if (upperSheetCat.contains('HR PIPE') ||
+              upperSheetCat.contains('CR PIPE') ||
+              upperSheetCat.contains('ISMB') ||
+              upperSheetCat.contains('ISMC') ||
+              upperSheetCat.contains('STRUCTURE') ||
+              upperSheetCat.contains('BEAM') ||
+              upperSheetCat.contains('BARBED') ||
+              upperSheetCat.contains('GATE') ||
+              upperSheetCat.contains('BINDING') ||
+              upperSheetCat.contains('NAIL') ||
+              upperSheetCat.contains('ERW')) {
+            return false;
+          }
+
           bool matchesAlias = aliases
               .any((alias) => alias.toUpperCase().trim() == upperSheetCat);
           bool matchesNorm = normSheetCat == normCatName;
@@ -254,129 +356,74 @@ class InventoryProvider extends ChangeNotifier {
           return matchesAlias || matchesNorm;
         }).toList();
 
-        if (catName == "Sqr Bar" || catName == "Round Bar") {
-          final List<String> sheetLabels = [];
-          for (var item in categoryItemsFromSheet) {
-            final sizes = item['sizes'] as List? ?? [];
-            for (var s in sizes) {
-              sheetLabels.add((s['label'] ?? '').toString());
-            }
-          }
-          debugPrint(
-              "DEBUG: [SampleRate-V3] Available sheet labels for $catName: $sheetLabels");
+        // Extract all raw sizes for this category from sheet / Supabase
+        final List rawSizes = [];
+        for (var catItem in categoryItemsFromSheet) {
+          final List sizesRaw = catItem['sizes'] ?? [];
+          rawSizes.addAll(sizesRaw);
         }
 
-        for (final reqSize in requiredSizes) {
-          final String baseReq = _stripWeightSuffix(reqSize);
-          final String normReq = _normalizeSize(baseReq);
-          final bool isSimpleMm = _isSimpleMmSize(baseReq);
-          final String reqDigits = normReq.replaceAll(RegExp(r'[^0-9]'), '');
-
-          Map<String, dynamic>? bestMatch;
-          String? matchedLabel;
-
-          // 1. Try Exact Match
-          for (var catItem in categoryItemsFromSheet) {
-            final List sizesRaw = catItem['sizes'] ?? [];
-            for (var s in sizesRaw) {
-              final String label = (s['label'] ?? '').toString();
-              final String normLabel = _normalizeSize(label);
-
-              if (normLabel == normReq) {
-                // DOUBLE CHECK: If it's an MM size, the digits must match exactly.
-                // This prevents 8MM from ever matching 10MM even if normalization fails.
-                if (isSimpleMm) {
-                  final labelDigits =
-                      normLabel.replaceAll(RegExp(r'[^0-9]'), '');
-                  if (labelDigits != reqDigits) {
-                    debugPrint(
-                        "WARNING: [SampleRate-V3] Skipping numeric mismatch: '$label' for requirement '$reqSize'");
-                    continue;
-                  }
-                }
-
-                bestMatch = s;
-                matchedLabel = label;
-                break;
-              }
-            }
-            if (bestMatch != null) break;
-          }
-
-          // 2. Try Contains Fallback (ONLY for complex sizes like Pipe/Angle/Channel)
-          if (bestMatch == null && !isSimpleMm) {
-            for (var catItem in categoryItemsFromSheet) {
-              final List sizesRaw = catItem['sizes'] ?? [];
-              for (var s in sizesRaw) {
-                final String label = (s['label'] ?? '').toString();
-                final String normLabel = _normalizeSize(label);
-
-                if (normLabel.contains(normReq)) {
-                  bestMatch = s;
-                  matchedLabel = label;
-                  break;
-                }
-              }
-              if (bestMatch != null) break;
-            }
-          }
-
-          if (bestMatch != null) {
-            if (catName == "Sqr Bar" || catName == "Round Bar") {
-              debugPrint(
-                  "DEBUG: [SampleRate-V3] SUCCESS: Matched '$reqSize' -> '$matchedLabel'");
-            }
-
-            final rawSd = bestMatch['sd'] ?? bestMatch['size_difference'];
-            final rawWeight =
-                bestMatch['weight'] ?? bestMatch['unit_weight_kg'];
-            final num sd = (rawSd is num)
-                ? rawSd
-                : (num.tryParse(rawSd?.toString() ?? '') ?? 0);
-            final num weight = (rawWeight is num)
-                ? rawWeight
-                : (num.tryParse(rawWeight?.toString() ?? '') ?? 0);
-
-            bestMatches[catName]![normReq] =
-                SampleRateSize(matchedLabel!, sd, weight);
-          } else {
-            if (catName == "Sqr Bar" || catName == "Round Bar") {
-              debugPrint(
-                  "DEBUG: [SampleRate-V3] FAILED to match '$reqSize' for $catName");
-            }
-          }
-        }
-      }
-
-      // Build the final ordered map
-      for (var catName in _orderedSampleRateCategories) {
         final List<SampleRateSize> categorySizes = [];
-        final List<String> required = _sampleRateRequiredSizes[catName] ?? [];
+        final List<SampleRateSpec> specs = _sampleSpecifications[catName] ?? [];
 
-        for (final req in required) {
-          final String baseReq = _stripWeightSuffix(req);
-          final normReq = _normalizeSize(baseReq);
-          if (bestMatches[catName]!.containsKey(normReq)) {
-            categorySizes.add(bestMatches[catName]![normReq]!);
-          } else {
-            // If missing, we show the requirement label but marked as missing
-            categorySizes.add(SampleRateSize(req, 0, 0, isMissing: true));
+        for (var spec in specs) {
+          num matchedSd = spec.defaultSd;
+          num matchedWeight = spec.defaultWeight;
+
+          for (var s in rawSizes) {
+            final String rawLabel =
+                (s['label'] ?? s['size'] ?? '').toString().trim();
+            if (rawLabel.isEmpty) continue;
+            final String normRaw = _normalizeSize(rawLabel);
+
+            bool isMatch = spec.matchKeys.any((k) {
+              final String normK = _normalizeSize(k);
+              return normRaw == normK ||
+                  normRaw.startsWith(normK) ||
+                  normRaw.contains(normK);
+            });
+
+            if (isMatch) {
+              final rawSd = s['sd'] ?? s['size_difference'];
+              final rawWeight = s['weight'] ?? s['unit_weight_kg'];
+              if (rawSd != null) {
+                matchedSd = (rawSd is num)
+                    ? rawSd
+                    : (num.tryParse(rawSd.toString()) ?? spec.defaultSd);
+              }
+              if (rawWeight != null) {
+                num parsedW = (rawWeight is num)
+                    ? rawWeight
+                    : (num.tryParse(rawWeight.toString()) ?? 0);
+                if (parsedW > 0) {
+                  matchedWeight = parsedW;
+                }
+              }
+              break;
+            }
           }
+
+          if (matchedWeight == 0 && spec.defaultWeight > 0) {
+            matchedWeight = spec.defaultWeight;
+          }
+
+          categorySizes.add(SampleRateSize(spec.label, matchedSd, matchedWeight));
         }
+
         grouped[catName] = categorySizes;
       }
 
       int totalMatched = 0;
       grouped.forEach((cat, sizes) {
-        totalMatched += sizes.where((s) => !s.isMissing).length;
+        totalMatched += sizes.length;
       });
       debugPrint(
-          "DEBUG: [SampleRate-V3] Load complete. Total matched rows: $totalMatched");
+          "DEBUG: [SampleRate-Dynamic] Load complete. Strictly filtered sample rows: $totalMatched");
 
       _sampleRateCategories = grouped;
       notifyListeners();
     } catch (e, stack) {
-      debugPrint("ERROR: [SampleRate-V3] $e");
+      debugPrint("ERROR: [SampleRate-Dynamic] $e");
       debugPrint(stack.toString());
     } finally {
       _isLoadingSampleRates = false;

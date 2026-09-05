@@ -494,16 +494,22 @@ class _SaudaEntryScreenState extends State<SaudaEntryScreen> {
                               ),
                             ),
                             onTap: () async {
+                              final now = DateTime.now();
+                              final today = DateTime(
+                                  now.year, now.month, now.day, 23, 59, 59);
                               final picked = await showDatePicker(
                                 context: context,
-                                initialDate: _selectedDate,
-                                firstDate: DateTime(2024),
-                                lastDate: DateTime.now(),
+                                initialDate: _selectedDate.isAfter(today)
+                                    ? now
+                                    : _selectedDate,
+                                firstDate: DateTime(2020),
+                                lastDate: today,
                                 builder: (ctx, child) => Theme(
                                   data: Theme.of(ctx).copyWith(
                                     colorScheme: const ColorScheme.light(
                                       primary: brandRed,
                                       onPrimary: Colors.white,
+                                      onSurface: Color(0xFF1E293B),
                                     ),
                                   ),
                                   child: child!,

@@ -113,6 +113,20 @@ class SampleRateSize {
   SampleRateSize(this.label, this.sd, this.weight, {this.isMissing = false});
 }
 
+class SampleRateSpec {
+  final String label;
+  final num defaultWeight;
+  final num defaultSd;
+  final List<String> matchKeys;
+
+  const SampleRateSpec({
+    required this.label,
+    required this.defaultWeight,
+    required this.defaultSd,
+    this.matchKeys = const [],
+  });
+}
+
 class StockUtils {
   static String normalizeLocation(String loc) {
     String n = loc.toUpperCase().trim();

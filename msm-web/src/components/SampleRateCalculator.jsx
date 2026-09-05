@@ -16,7 +16,11 @@ import {
   ExternalLink,
   MessageCircle,
   X,
-  Info
+  Info,
+  Receipt,
+  Tag,
+  Sliders,
+  CheckCircle2
 } from 'lucide-react';
 
 // Allowed canonical categories whitelist (strictly 6 structural categories)
@@ -84,17 +88,17 @@ const DEFAULT_CATALOG = {
     { label: '50x5', weight: 21.5, sd: 0 },
   ],
   'MS Channel': [
-    { label: 'C 70x35 (3"x1.5")', weight: 22, sd: 2500 },
-    { label: 'C 75x40 (3"x1.5")', weight: 36, sd: 1500 },
-    { label: 'C 100x50 (4"x2")', weight: 56, sd: 0 },
+    { label: '70x35 (3"X1.5")', weight: 22, sd: 2500 },
+    { label: '75x40 (3"X1.5")', weight: 36, sd: 1500 },
+    { label: '100x50 (4"x 2")', weight: 56, sd: 0 },
   ],
   'SQR Bar': [
-    { label: '10mm', weight: 0, sd: 1500 },
-    { label: '12mm', weight: 0, sd: 0 },
+    { label: '10MM', weight: 0, sd: 1500 },
+    { label: '12MM', weight: 0, sd: 0 },
   ],
   'Round Bar': [
-    { label: '10mm', weight: 0, sd: 1500 },
-    { label: '12mm', weight: 0, sd: 0 },
+    { label: '10MM', weight: 0, sd: 1500 },
+    { label: '12MM', weight: 0, sd: 0 },
   ],
   'Flats': [
     { label: 'F 25x5', weight: 0, sd: 2000 },
@@ -108,13 +112,52 @@ const formatIndianCurrency = (num) => {
   return new Intl.NumberFormat('en-IN').format(val);
 };
 
-export default function SampleRateCalculator({ onBack }) {
+function ModernToggleTile({ title, value, onChange }) {
+  return (
+    <div
+      onClick={() => onChange(!value)}
+      className="h-[56px] px-3.5 py-2 bg-white rounded-2xl border border-slate-200 hover:border-slate-300 transition-all cursor-pointer select-none flex items-center justify-between gap-2 shadow-sm"
+    >
+      <span className="text-[13px] font-semibold text-slate-900 truncate flex-1 min-w-0">
+        {title}
+      </span>
+      <div className="relative inline-flex items-center cursor-pointer shrink-0">
+        <input
+          type="checkbox"
+          checked={value}
+          onChange={(e) => onChange(e.target.checked)}
+          className="sr-only peer"
+        />
+        <div
+          className={`w-9 h-5 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all ${
+            value ? 'bg-red-600' : 'bg-slate-300'
+          }`}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default function SampleRateCalculator({ onBack, catalog = DEFAULT_CATALOG }) {
+  const activeCatalog = catalog || DEFAULT_CATALOG;
+
   // Base rates state
   const [pipeBasic, setPipeBasic] = useState('47011');
   const [angleBasic, setAngleBasic] = useState('46500');
   const [channelBasic, setChannelBasic] = useState('48000');
   const [sqrBarBasic, setSqrBarBasic] = useState('46000');
   const [roundFlatsBasic, setRoundFlatsBasic] = useState('46000');
+
+  // Surcharges & Formula Toggles
+  const [isGstEnabled, setIsGstEnabled] = useState(true);
+  const [isNcDiscountEnabled, setIsNcDiscountEnabled] = useState(false);
+  const [hasLoadingCharge, setHasLoadingCharge] = useState(true);
+  const [freight, setFreight] = useState('0');
+  const [otherBilling, setOtherBilling] = useState('0');
+
+  const LOADING_CHARGE = 255;
+  const NC_DISCOUNT = 3000;
+  const GST_RATE = 0.18;
 
   const [selectedCategory, setSelectedCategory] = useState('MS Pipe');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -148,7 +191,18 @@ export default function SampleRateCalculator({ onBack }) {
   const calculateFinalRate = (category, sd) => {
     const basic = getBasicRate(category);
     if (basic === 0) return 0;
-    return Math.round(basic + sd);
+    const freightVal = parseFloat(freight) || 0;
+    const obVal = parseFloat(otherBilling) || 0;
+
+    let effectiveBase = basic + sd + (hasLoadingCharge ? LOADING_CHARGE : 0);
+    if (isNcDiscountEnabled) {
+      effectiveBase -= NC_DISCOUNT;
+    }
+    const netBeforeGst = effectiveBase + freightVal + obVal;
+    const finalRate = isGstEnabled
+      ? netBeforeGst * (1 + GST_RATE)
+      : netBeforeGst;
+    return Math.round(finalRate);
   };
 
   const handleApplyPipeToAll = () => {
@@ -174,12 +228,14 @@ export default function SampleRateCalculator({ onBack }) {
     lines.push(`Date: ${formattedDate}`);
     lines.push(`----------------------------`);
 
-    const categories = Object.keys(DEFAULT_CATALOG).filter((cat) => {
-      if (filterCat && filterCat !== 'ALL') {
-        return cat.toUpperCase() === filterCat.toUpperCase();
-      }
-      return true;
-    });
+    const categories = Object.keys(activeCatalog)
+      .filter(isAllowedCategory)
+      .filter((cat) => {
+        if (filterCat && filterCat !== 'ALL') {
+          return cat.toUpperCase() === filterCat.toUpperCase();
+        }
+        return true;
+      });
 
     let catIndex = 1;
     let hasAnySelected = false;
@@ -189,7 +245,7 @@ export default function SampleRateCalculator({ onBack }) {
       if (basic > 0) {
         hasAnySelected = true;
         lines.push(`\n*${catIndex++}. ${cat.toUpperCase()}* (@₹${formatIndianCurrency(basic)})`);
-        const sizes = DEFAULT_CATALOG[cat] || [];
+        const sizes = activeCatalog[cat] || [];
         sizes.forEach((s) => {
           const rate = calculateFinalRate(cat, s.sd);
           const weightStr = s.weight > 0 ? ` ${s.weight}kg` : '';
@@ -204,7 +260,11 @@ export default function SampleRateCalculator({ onBack }) {
     lines.push(`\n───────────────────────`);
     lines.push(`*Terms & Conditions*`);
     lines.push(`• Payment Advance`);
+    lines.push(`• Loading Charge - (Inclusive)`);
     lines.push(`• Transport (Extra)`);
+    if (!isNcDiscountEnabled) {
+      lines.push(`• GST - 18.00 % (Inclusive)`);
+    }
     lines.push(`• Weight Tolerance - +/-5kg per MT`);
 
     return lines.join('\n');
@@ -218,7 +278,19 @@ export default function SampleRateCalculator({ onBack }) {
 
   const currentShareMessage = useMemo(() => {
     return generateRateMessage(shareFilter);
-  }, [shareFilter, pipeBasic, angleBasic, channelBasic, sqrBarBasic, roundFlatsBasic]);
+  }, [
+    shareFilter,
+    pipeBasic,
+    angleBasic,
+    channelBasic,
+    sqrBarBasic,
+    roundFlatsBasic,
+    isGstEnabled,
+    isNcDiscountEnabled,
+    hasLoadingCharge,
+    freight,
+    otherBilling
+  ]);
 
   const handleCopyText = async () => {
     if (!currentShareMessage) return;
@@ -254,7 +326,7 @@ export default function SampleRateCalculator({ onBack }) {
     }
   };
 
-  const activeSizes = DEFAULT_CATALOG[selectedCategory] || [];
+  const activeSizes = activeCatalog[selectedCategory] || [];
   const currentCategoryBasic = getBasicRate(selectedCategory);
 
   return (
@@ -280,11 +352,12 @@ export default function SampleRateCalculator({ onBack }) {
           <div className="flex items-center gap-4">
             <button
               onClick={handleBack}
-              className="p-3 rounded-2xl bg-white border border-slate-200/80 text-slate-700 hover:text-slate-950 hover:bg-slate-50 hover:border-slate-300 shadow-sm transition-all active:scale-95 cursor-pointer flex items-center justify-center group"
+              className="px-4 py-2.5 rounded-2xl bg-white border border-slate-200/80 text-slate-700 hover:text-slate-950 hover:bg-slate-50 hover:border-slate-300 shadow-sm transition-all active:scale-95 cursor-pointer flex items-center gap-2 group text-xs font-bold"
               title="Back to Dashboard"
               aria-label="Back to Dashboard"
             >
-              <ArrowLeft size={20} className="group-hover:-translate-x-0.5 transition-transform text-slate-700" />
+              <ArrowLeft size={16} className="group-hover:-translate-x-0.5 transition-transform text-slate-700" />
+              <span>Dashboard</span>
             </button>
             <div className="w-14 h-14 bg-gradient-to-tr from-red-600 to-rose-500 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-red-500/20">
               <Calculator size={28} />
@@ -321,18 +394,6 @@ export default function SampleRateCalculator({ onBack }) {
         {/* LEFT COLUMN: Base Rates Configuration */}
         <div className="lg:col-span-4 flex flex-col gap-6">
           <div className="glass-card p-6 bg-white/80 border-slate-100">
-            <div className="flex items-center justify-between mb-5">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-red-50 rounded-xl text-red-600">
-                  <Sparkles size={18} />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-800">Base Rates Config</h3>
-                  <p className="text-xs text-slate-400 font-medium">Enter standard basic rates (₹/MT)</p>
-                </div>
-              </div>
-            </div>
-
             {/* Inputs Grid */}
             <div className="space-y-3.5">
               <div>
@@ -418,19 +479,82 @@ export default function SampleRateCalculator({ onBack }) {
               {/* Broadcast Button */}
               <button
                 onClick={handleApplyPipeToAll}
-                className="w-full py-2.5 px-4 mt-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Layers size={14} />
                 Apply Pipe Rate to All
               </button>
+
+              {/* Freight and OB Inputs */}
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Freight (₹/MT)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">₹</span>
+                    <input
+                      type="number"
+                      value={freight}
+                      onChange={(e) => setFreight(e.target.value)}
+                      placeholder="0"
+                      className="w-full pl-7 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-bold text-xs focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    OB / Other (₹/MT)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">₹</span>
+                    <input
+                      type="number"
+                      value={otherBilling}
+                      onChange={(e) => setOtherBilling(e.target.value)}
+                      placeholder="0"
+                      className="w-full pl-7 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-bold text-xs focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Pricing & Surcharges Section */}
+              <div className="pt-3 border-t border-slate-100">
+                <div className="flex items-center gap-1.5 mb-2.5">
+                  <div className="w-1 h-3 bg-red-600 rounded-full" />
+                  <span className="text-[10.5px] font-black text-slate-500 tracking-wider uppercase">
+                    Pricing & Surcharges
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <ModernToggleTile
+                    title="GST (18%)"
+                    value={isGstEnabled}
+                    onChange={setIsGstEnabled}
+                  />
+                  <ModernToggleTile
+                    title="NC Discount"
+                    value={isNcDiscountEnabled}
+                    onChange={setIsNcDiscountEnabled}
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Pricing Formula Meta Strip */}
-            <div className="mt-6 pt-5 border-t border-slate-100">
-              <div className="p-3.5 rounded-xl bg-slate-50/80 border border-slate-100 text-[11px] text-slate-500 space-y-1">
-                <div className="font-semibold text-slate-700">Pricing Formula</div>
-                <div className="text-[11px] text-slate-400">
-                  Computed Rate = Base Rate + Size Difference (SD)
+            <div className="mt-5 pt-4 border-t border-slate-100">
+              <div className="p-3 rounded-xl bg-slate-50/90 border border-slate-200/80 text-[11px] text-slate-600 space-y-1 font-mono">
+                <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                  <Sliders size={13} className="text-red-600" />
+                  <span>Formula Engine</span>
+                </div>
+                <div className="text-[10.5px] text-slate-500 leading-tight">
+                  (Base + SD + {hasLoadingCharge ? `LC(₹${LOADING_CHARGE})` : '0'}{isNcDiscountEnabled ? ` - NC(₹${NC_DISCOUNT})` : ''})
+                  {parseFloat(freight) > 0 ? ` + Freight(₹${freight})` : ''}
+                  {parseFloat(otherBilling) > 0 ? ` + OB(₹${otherBilling})` : ''}
+                  {isGstEnabled ? ' × 1.18' : ''}
                 </div>
               </div>
             </div>
@@ -441,9 +565,9 @@ export default function SampleRateCalculator({ onBack }) {
         <div className="lg:col-span-8 flex flex-col gap-6">
           {/* Category Tabs */}
           <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
-            {Object.keys(DEFAULT_CATALOG).filter(isAllowedCategory).map((cat) => {
+            {Object.keys(activeCatalog).filter(isAllowedCategory).map((cat) => {
               const isSelected = selectedCategory === cat;
-              const count = DEFAULT_CATALOG[cat]?.length || 0;
+              const count = activeCatalog[cat]?.length || 0;
               const catBasic = getBasicRate(cat);
 
               return (
@@ -495,16 +619,6 @@ export default function SampleRateCalculator({ onBack }) {
                     ? `Base: ₹${formatIndianCurrency(currentCategoryBasic)}/MT`
                     : 'Base Rate Not Set'}
                 </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => openShareModal(selectedCategory)}
-                  className="px-3.5 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold flex items-center gap-1.5 border border-red-200 transition-all cursor-pointer"
-                >
-                  <Share2 size={13} />
-                  Share {selectedCategory}
-                </button>
               </div>
             </div>
 
@@ -605,7 +719,7 @@ export default function SampleRateCalculator({ onBack }) {
                 >
                   All Categories
                 </button>
-                {Object.keys(DEFAULT_CATALOG).filter(isAllowedCategory).map((cat) => (
+                {Object.keys(activeCatalog).filter(isAllowedCategory).map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setShareFilter(cat)}

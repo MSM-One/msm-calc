@@ -19,7 +19,6 @@ import '../providers/inventory_provider.dart';
 import 'package:provider/provider.dart';
 import '../widgets/m_loader.dart';
 import 'package:intl/intl.dart';
-import 'modern_floating_sidebar.dart';
 import '../models/user_session_notifier.dart';
 import '../services/auth_service.dart';
 import '../models/stock_role.dart';
@@ -160,38 +159,13 @@ class _MainScaffoldState extends State<MainScaffold> {
           _selectedIndex = 0;
         }
 
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final isDesktop = constraints.maxWidth >= 900;
-
-            return Scaffold(
-              backgroundColor: const Color(0xFFFFF8F8),
-              body: Row(
-                children: [
-                  if (isDesktop)
-                    ModernFloatingSidebar(
-                      selectedTab: filteredItems[_selectedIndex].title,
-                      onTabChanged: (tabTitle) {
-                        final index = filteredItems
-                            .indexWhere((item) => item.title == tabTitle);
-                        if (index != -1) {
-                          setState(() => _selectedIndex = index);
-                        }
-                      },
-                      onLogout: _handleLogout,
-                    ),
-                  Expanded(
-                    child: IndexedStack(
-                      index: _selectedIndex,
-                      children:
-                          filteredItems.map((item) => item.screen).toList(),
-                    ),
-                  ),
-                ],
-              ),
-              bottomNavigationBar: null, // Follows modern dashboard style
-            );
-          },
+        return Scaffold(
+          backgroundColor: const Color(0xFFFFF8F8),
+          body: IndexedStack(
+            index: _selectedIndex,
+            children: filteredItems.map((item) => item.screen).toList(),
+          ),
+          bottomNavigationBar: null, // Follows modern dashboard style
         );
       },
     );

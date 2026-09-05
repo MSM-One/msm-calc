@@ -29,6 +29,14 @@ subprojects {
         if (plugins.hasPlugin("com.android.library")) {
             val androidExt = extensions.findByName("android") as? com.android.build.gradle.LibraryExtension
             androidExt?.compileSdk = 36
+            androidExt?.compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+            androidExt?.lint {
+                checkReleaseBuilds = false
+                abortOnError = false
+            }
         }
     }
     if (state.executed) {

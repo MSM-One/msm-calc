@@ -89,7 +89,6 @@ void main() {
 
       String selectedLocation = 'YARD';
       bool selectAllClicked = false;
-      bool whatsAppClicked = false;
       bool pdfClicked = false;
       bool shareClicked = false;
 
@@ -107,7 +106,6 @@ void main() {
               totalCount: 25,
               totalSelectedStockMT: 150.500,
               onToggleSelectAll: () => selectAllClicked = true,
-              onCopyWhatsApp: () => whatsAppClicked = true,
               onExportPdf: () => pdfClicked = true,
               onShare: () => shareClicked = true,
             ),
@@ -117,13 +115,9 @@ void main() {
 
       expect(find.text('Yard Stock'), findsOneWidget);
       expect(find.text('Factory Stock'), findsOneWidget);
-      expect(find.text('Copy for WhatsApp'), findsOneWidget);
       expect(find.text('Export PDF'), findsOneWidget);
       expect(find.text('Share'), findsOneWidget);
       expect(find.text('20 / 25'), findsOneWidget);
-
-      await tester.tap(find.text('Copy for WhatsApp'));
-      expect(whatsAppClicked, isTrue);
 
       await tester.tap(find.text('Export PDF'));
       expect(pdfClicked, isTrue);

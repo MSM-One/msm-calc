@@ -385,6 +385,17 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       foregroundColor: Colors.white,
       elevation: 0,
       centerTitle: false,
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+        tooltip: 'Back to Dashboard',
+        onPressed: () {
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          } else {
+            Navigator.of(context).pushReplacementNamed('/dashboard');
+          }
+        },
+      ),
       title: const Text(
         "Transaction History",
         style: TextStyle(
@@ -591,21 +602,41 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                       isSelected: isCustomSelected,
                       onTap: () async {
                         Navigator.pop(ctx);
+                        final now = DateTime.now();
+                        final todayEnd =
+                            DateTime(now.year, now.month, now.day, 23, 59, 59);
+
                         final DateTimeRange? pickedRange =
                             await showDateRangePicker(
                           context: context,
-                          initialDateRange:
-                              DateTimeRange(start: _startDate, end: _endDate),
+                          initialDateRange: (_endDate.isBefore(todayEnd) ||
+                                  _endDate.isAtSameMomentAs(todayEnd))
+                              ? DateTimeRange(start: _startDate, end: _endDate)
+                              : DateTimeRange(
+                                  start: now.subtract(const Duration(days: 7)),
+                                  end: now,
+                                ),
                           firstDate: DateTime(2020),
-                          lastDate:
-                              DateTime.now().add(const Duration(days: 365)),
+                          lastDate: todayEnd,
+                          builder: (context, child) {
+                            return Theme(
+                              data: Theme.of(context).copyWith(
+                                colorScheme: const ColorScheme.light(
+                                  primary: Color(0xFFD32F2F),
+                                  onPrimary: Colors.white,
+                                  onSurface: Color(0xFF1E293B),
+                                ),
+                              ),
+                              child: child!,
+                            );
+                          },
                         );
                         if (pickedRange != null) {
                           setState(() {
                             _startDate = DateTime(pickedRange.start.year,
                                 pickedRange.start.month, pickedRange.start.day);
                             _endDate = DateTime(pickedRange.end.year,
-                                pickedRange.end.month, pickedRange.end.day);
+                                pickedRange.end.month, pickedRange.end.day, 23, 59, 59);
                           });
                           _loadData(reset: true);
                         }

@@ -508,11 +508,20 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
   }
 
   Future<void> _selectDateRange() async {
+    final now = DateTime.now();
+    final todayEnd = DateTime(now.year, now.month, now.day, 23, 59, 59);
+
     final DateTimeRange? picked = await showDateRangePicker(
       context: context,
-      initialDateRange: DateTimeRange(start: _startDate, end: _endDate),
+      initialDateRange: (_endDate.isBefore(todayEnd) ||
+              _endDate.isAtSameMomentAs(todayEnd))
+          ? DateTimeRange(start: _startDate, end: _endDate)
+          : DateTimeRange(
+              start: now.subtract(const Duration(days: 7)),
+              end: now,
+            ),
       firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+      lastDate: todayEnd,
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -531,7 +540,8 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
       setState(() {
         _selectedDatePreset = 'Custom';
         _startDate = picked.start;
-        _endDate = picked.end;
+        _endDate = DateTime(
+            picked.end.year, picked.end.month, picked.end.day, 23, 59, 59);
       });
       await fetchStockMovementData();
     }

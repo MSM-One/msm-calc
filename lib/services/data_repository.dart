@@ -1366,7 +1366,9 @@ class DataRepository {
         },
         'locations': formattedLocations
       };
-      _box.put('erp_stock', jsonEncode(erpMap));
+      try {
+        _box.put('erp_stock', jsonEncode(erpMap));
+      } catch (_) {}
       erpStockNotifier.value = erpMap;
     });
   }

@@ -20,17 +20,35 @@ void main() {
   });
 
   group('Netrate Calculation & Formula Unit Tests', () {
-    test('Calculates net rate strictly with base, SD, freight, and other billing', () {
+    test('Calculates net rate with base, SD, loading charge, NC discount, and GST', () {
       final item = ItemEntry(itemName: 'MS Pipe', basic: 50000);
       final size = SizeEntry(label: '25x25x2.0', sd: 500, unitWeight: 1.5);
       item.selectedSizes.add(size);
 
-      // In Netrate calculation:
-      // Net Rate is strictly: Base + Size Difference + Freight + Other Billing
+      const double loading = 255;
+      const double ncDiscount = 3000;
       const double freight = 700;
       const double ob = 300;
-      double netRate = item.basic + size.sd + freight + ob;
-      expect(netRate, 51500);
+
+      // 1. Standard: Loading ON, NC OFF, GST ON (18%)
+      // Effective base = 50000 + 500 + 255 = 50755
+      // Net before GST = 50755 + 700 + 300 = 51755
+      // Final = 51755 * 1.18 = 61070.9
+      double effectiveBase = item.basic + size.sd + loading;
+      double netBeforeGst = effectiveBase + freight + ob;
+      double finalNetRate = netBeforeGst * 1.18;
+      expect(finalNetRate.round(), 61071);
+
+      // 2. NC Discount ON: Effective base = 50755 - 3000 = 47755
+      // Net before GST = 47755 + 700 + 300 = 48755
+      // Final = 48755 * 1.18 = 57530.9
+      double effectiveBaseNc = effectiveBase - ncDiscount;
+      double netBeforeGstNc = effectiveBaseNc + freight + ob;
+      double finalNetRateNc = netBeforeGstNc * 1.18;
+      expect(finalNetRateNc.round(), 57531);
+
+      // 3. GST OFF: Final = 48755
+      expect(netBeforeGstNc.round(), 48755);
     });
 
     test('Unit weight dynamic recalculation between Nos and Qty (MT)', () {
@@ -44,6 +62,31 @@ void main() {
       // recalculate nos from qty: (0.450 * 1000) / 4.5 = 100
       final nosRecalc = ((size.qty * 1000) / size.unitWeight).round();
       expect(nosRecalc, 100);
+    });
+
+    test('Terms & Conditions generation when NC is OFF vs ON', () {
+      const state = CalculatorScreen(isQuotationMode: false);
+      final element = state.createElement();
+      final calcState = element.state as dynamic;
+
+      // Case A: NC is OFF
+      final termsNcOff = calcState.buildTermsAndConditions(isNcEnabled: false);
+      expect(termsNcOff, contains('*Terms & Conditions*'));
+      expect(termsNcOff, contains('• Payment Advance'));
+      expect(termsNcOff, contains('• Loading Charge - (Inclusive)'));
+      expect(termsNcOff, contains('• Transport (Extra)'));
+      expect(termsNcOff, contains('• GST - 18.00 % (Inclusive)'));
+      expect(termsNcOff, contains('• Weight Tolerance - +/-5kg per MT'));
+
+      // Case B: NC is ON
+      final termsNcOn = calcState.buildTermsAndConditions(isNcEnabled: true);
+      expect(termsNcOn, contains('*Terms & Conditions*'));
+      expect(termsNcOn, contains('• Payment Advance'));
+      expect(termsNcOn, contains('• Loading Charge - (Inclusive)'));
+      expect(termsNcOn, contains('• Transport (Extra)'));
+      expect(termsNcOn, isNot(contains('• GST - 18.00 % (Inclusive)')));
+      expect(termsNcOn, isNot(contains('NC Discount applied')));
+      expect(termsNcOn, contains('• Weight Tolerance - +/-5kg per MT'));
     });
   });
 
@@ -64,9 +107,11 @@ void main() {
 
       // Check header
       expect(find.text('Netrate Calculator'), findsOneWidget);
-      expect(find.text('Pricing & Charges'), findsOneWidget);
-      expect(find.text('Freight (₹/MT)'), findsOneWidget);
-      expect(find.text('OB / Other Billing (₹/MT)'), findsOneWidget);
+      expect(find.text('Pricing Settings'), findsOneWidget);
+      expect(find.text('Freight (₹)'), findsOneWidget);
+      expect(find.text('OB (₹)'), findsOneWidget);
+      expect(find.text('GST (18%)'), findsOneWidget);
+      expect(find.text('NC Discount'), findsOneWidget);
     });
   });
 

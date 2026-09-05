@@ -32,6 +32,16 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
   final TextEditingController _sqrBarBasicCtrl = TextEditingController();
   final TextEditingController _roundFlatsBasicCtrl = TextEditingController();
 
+  // Global & Formula Toggles
+  bool _gstEnabled = true;
+  bool _ncDiscountEnabled = false;
+  final bool _hasLoadingCharge = true;
+  final double _loading = 255.0;
+  final double _ncDiscount = 3000.0;
+  final double _gstRate = 0.18;
+  final double _freight = 0.0;
+  final double _ob = 0.0;
+
   Map<String, List<SampleRateSize>> _categories = {};
 
   @override
@@ -98,7 +108,16 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     }
 
     if (basic == 0.0) return 0.0;
-    return (basic + sd).toDouble();
+
+    double effectiveBase =
+        basic + sd.toDouble() + (_hasLoadingCharge ? _loading : 0.0);
+    if (_ncDiscountEnabled) {
+      effectiveBase -= _ncDiscount;
+    }
+    double netBeforeGst = effectiveBase + _freight + _ob;
+    double finalNetRate =
+        _gstEnabled ? (netBeforeGst * (1.0 + _gstRate)) : netBeforeGst;
+    return finalNetRate;
   }
 
   void _applyToAll(String sourceCategory) {
@@ -197,13 +216,24 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
         for (var size in sortedSizes) {
           if (size.isMissing) continue;
           double finalRate = _calculateFinalRate(category, size.sd);
+          String baseLabel = size.label.trim().replaceAll(
+              RegExp(r'\s*\(?\d*[\.,]?\d*\s*kg\)?$', caseSensitive: false), "");
           final double w = size.weight.toDouble();
           final formattedWeight =
               w % 1 == 0 ? w.toInt().toString() : w.toStringAsFixed(1);
-          String weightSuffix = w != 0 ? " ${formattedWeight}kg" : "";
+          final lowerTitle = category.toLowerCase();
+          final bool isExcluded = lowerTitle.contains('sqr bar') ||
+              lowerTitle.contains('square bar') ||
+              lowerTitle.contains('round bar') ||
+              lowerTitle.contains('flats') ||
+              lowerTitle.contains('flat') ||
+              lowerTitle.contains('gate channel') ||
+              lowerTitle.contains('binding wire') ||
+              lowerTitle.contains('barbed wire');
+          String weightSuffix = (w != 0 && !isExcluded) ? " ${formattedWeight}kg" : "";
           String dispLabel = category.trim() == 'MS Angle'
-              ? formatSizeLabel(size.label, category, w)
-              : "${size.label}$weightSuffix";
+              ? formatSizeLabel(baseLabel, category, w)
+              : "$baseLabel$weightSuffix";
           sb.writeln(
               "▪ $dispLabel = ${formatIndianCurrency(finalRate.round())} /-");
         }
@@ -215,8 +245,12 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     sb.writeln("\n───────────────────────");
     sb.writeln("*Terms & Conditions*");
     sb.writeln("• Payment Advance");
+    sb.writeln("• Loading Charge - (Inclusive)");
     sb.writeln("• Transport (Extra)");
-    sb.writeln("• Weight Tolerance - +/-5kg per MT");
+    if (!_ncDiscountEnabled) {
+      sb.writeln("• GST - 18.00 % (Inclusive)");
+    }
+    sb.write("• Weight Tolerance - +/-5kg per MT");
 
     return sb.toString();
   }
@@ -626,58 +660,19 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                 MotionToast.show(context, "Refreshing sample rates...");
               },
             ),
-            if (isDesktop)
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
-                child: ElevatedButton.icon(
-                  onPressed: _shareSampleRates,
-                  icon: const Icon(Icons.share_rounded, size: 16),
-                  label: const Text(
-                    "Share Rates",
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFD32F2F),
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ),
-              )
-            else
-              IconButton(
-                icon: Container(
-                  padding: const EdgeInsets.all(5),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFD32F2F).withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Icon(Icons.share_rounded,
-                      size: 18, color: Color(0xFFD32F2F)),
-                ),
-                tooltip: 'Share Sample Rates',
-                onPressed: _shareSampleRates,
+            IconButton(
+              icon: Icon(
+                Icons.share_rounded,
+                size: 20,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
               ),
+              tooltip: 'Share Sample Rates',
+              onPressed: _shareSampleRates,
+            ),
             const SizedBox(width: 8),
           ],
         ),
-        floatingActionButton: isDesktop
-            ? null
-            : FloatingActionButton.extended(
-                onPressed: _shareSampleRates,
-                backgroundColor: const Color(0xFFD32F2F),
-                foregroundColor: Colors.white,
-                elevation: 4,
-                icon: const Icon(Icons.share_rounded, size: 18),
-                label: const Text(
-                  "Share Rates",
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                ),
-              ),
+        floatingActionButton: null,
         body: Consumer<InventoryProvider>(
           builder: (context, inv, _) {
             if (inv.isLoadingSampleRates && inv.sampleRateCategories.isEmpty) {
@@ -754,51 +749,6 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Header Badge
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(7),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFD32F2F)
-                                      .withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(Icons.tune_rounded,
-                                    color: Color(0xFFD32F2F), size: 16),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      "Base Rates Config",
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 15,
-                                        color: isDark
-                                            ? Colors.white
-                                            : const Color(0xFF0F172A),
-                                      ),
-                                    ),
-                                    Text(
-                                      "Set base rates for live calculation",
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: isDark
-                                            ? const Color(0xFF94A3B8)
-                                            : const Color(0xFF64748B),
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 18),
-
                           // 5 Base Rate Inputs
                           _PanelInput(
                             label: "Pipe Basic",
@@ -860,39 +810,30 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                               ),
                             ),
                           ),
-                          const SizedBox(height: 16),
-
-                          Divider(
-                            color: isDark
-                                ? const Color(0xFF334155)
-                                : const Color(0xFFE2E8F0),
-                          ),
                           const SizedBox(height: 14),
 
-                          // Desktop Primary Share Button
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              onPressed: _shareSampleRates,
-                              icon: const Icon(Icons.share_rounded, size: 16),
-                              label: const Text(
-                                "Preview & Share Rates",
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildModernToggleTile(
+                                  title: "GST (18%)",
+                                  value: _gstEnabled,
+                                  onChanged: (v) =>
+                                      setState(() => _gstEnabled = v),
+                                  isDark: isDark,
                                 ),
                               ),
-                              style: ElevatedButton.styleFrom(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 12),
-                                backgroundColor: const Color(0xFFD32F2F),
-                                foregroundColor: Colors.white,
-                                elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _buildModernToggleTile(
+                                  title: "NC Discount",
+                                  value: _ncDiscountEnabled,
+                                  onChanged: (v) =>
+                                      setState(() => _ncDiscountEnabled = v),
+                                  isDark: isDark,
                                 ),
                               ),
-                            ),
+                            ],
                           ),
                         ],
                       ),
@@ -915,7 +856,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
 
                               // Table Section
                               if (_selectedCategory != null &&
-                                  _categories.containsKey(_selectedCategory))
+                                   _categories.containsKey(_selectedCategory))
                                 _buildCategorySection(
                                   _selectedCategory!,
                                   _categories[_selectedCategory!]!,
@@ -956,151 +897,108 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                       ],
                     ),
                     padding: const EdgeInsets.all(14.0),
-                    child: Material(
-                      color: Colors.transparent,
-                      child: Theme(
-                        data: Theme.of(context)
-                            .copyWith(dividerColor: Colors.transparent),
-                        child: ExpansionTile(
-                          initiallyExpanded: true,
-                          tilePadding: EdgeInsets.zero,
-                          iconColor: const Color(0xFFD32F2F),
-                          collapsedIconColor: const Color(0xFF64748B),
-                          title: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFD32F2F)
-                                      .withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(Icons.tune_rounded,
-                                    color: Color(0xFFD32F2F), size: 16),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                "Base Rates Config",
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 14.5,
-                                  color: isDark
-                                      ? Colors.white
-                                      : const Color(0xFF0F172A),
-                                ),
-                              ),
-                            ],
-                          ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
                           children: [
-                            const SizedBox(height: 10),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: _PanelInput(
-                                    label: "Pipe",
-                                    controller: _pipeBasicCtrl,
-                                    isDark: isDark,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: _PanelInput(
-                                    label: "Angle",
-                                    controller: _angleBasicCtrl,
-                                    isDark: isDark,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: _PanelInput(
-                                    label: "Channel",
-                                    controller: _channelBasicCtrl,
-                                    isDark: isDark,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: _PanelInput(
-                                    label: "SQR Bar",
-                                    controller: _sqrBarBasicCtrl,
-                                    isDark: isDark,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            _PanelInput(
-                              label: "Round/Flats",
-                              controller: _roundFlatsBasicCtrl,
-                              isDark: isDark,
-                            ),
-                            const SizedBox(height: 10),
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton.icon(
-                                onPressed: () => _applyToAll('MS Pipe'),
-                                icon: const Icon(Icons.copy_all_rounded, size: 14),
-                                label: const Text(
-                                  "Apply Pipe Rate to All",
-                                  style: TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w600),
-                                ),
-                                style: OutlinedButton.styleFrom(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 8),
-                                  side: BorderSide(
-                                    color: isDark
-                                        ? const Color(0xFF334155)
-                                        : const Color(0xFFCBD5E1),
-                                  ),
-                                  foregroundColor: isDark
-                                      ? Colors.white70
-                                      : const Color(0xFF475569),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                ),
+                            Expanded(
+                              child: _PanelInput(
+                                label: "Pipe",
+                                controller: _pipeBasicCtrl,
+                                isDark: isDark,
                               ),
                             ),
-                            const SizedBox(height: 12),
-                            Divider(
-                              color: isDark
-                                  ? const Color(0xFF334155)
-                                  : const Color(0xFFE2E8F0),
-                            ),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                onPressed: _shareSampleRates,
-                                icon: const Icon(Icons.share_rounded, size: 16),
-                                label: const Text(
-                                  "Preview & Share Rates",
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 10),
-                                  backgroundColor: const Color(0xFFD32F2F),
-                                  foregroundColor: Colors.white,
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _PanelInput(
+                                label: "Angle",
+                                controller: _angleBasicCtrl,
+                                isDark: isDark,
                               ),
                             ),
                           ],
                         ),
-                      ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _PanelInput(
+                                label: "Channel",
+                                controller: _channelBasicCtrl,
+                                isDark: isDark,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _PanelInput(
+                                label: "SQR Bar",
+                                controller: _sqrBarBasicCtrl,
+                                isDark: isDark,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        _PanelInput(
+                          label: "Round/Flats",
+                          controller: _roundFlatsBasicCtrl,
+                          isDark: isDark,
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => _applyToAll('MS Pipe'),
+                            icon: const Icon(Icons.copy_all_rounded, size: 14),
+                            label: const Text(
+                              "Apply Pipe Rate to All",
+                              style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 8),
+                              side: BorderSide(
+                                color: isDark
+                                    ? const Color(0xFF334155)
+                                    : const Color(0xFFCBD5E1),
+                              ),
+                              foregroundColor: isDark
+                                  ? Colors.white70
+                                  : const Color(0xFF475569),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildModernToggleTile(
+                                title: "GST (18%)",
+                                value: _gstEnabled,
+                                onChanged: (v) =>
+                                    setState(() => _gstEnabled = v),
+                                isDark: isDark,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _buildModernToggleTile(
+                                title: "NC Discount",
+                                value: _ncDiscountEnabled,
+                                onChanged: (v) =>
+                                    setState(() => _ncDiscountEnabled = v),
+                                isDark: isDark,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -1284,39 +1182,6 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  InkWell(
-                    borderRadius: BorderRadius.circular(6),
-                    onTap: () => _shareSampleRates(initialCategory: title),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFD32F2F).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: const Color(0xFFD32F2F).withValues(alpha: 0.3),
-                          width: 0.8,
-                        ),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.share_rounded,
-                              size: 12, color: Color(0xFFD32F2F)),
-                          SizedBox(width: 4),
-                          Text(
-                            "Share",
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFFD32F2F),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ],
@@ -1388,9 +1253,10 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                   final SampleRateSize size = entry.value;
                   final bool isEven = index % 2 == 0;
 
+                  String baseLabel = size.label.trim().replaceAll(
+                      RegExp(r'\s*\(?\d*[\.,]?\d*\s*kg\)?$', caseSensitive: false), "");
                   String weightText = '';
                   final double? wVal = double.tryParse(size.weight.toString());
-                  final String lowerLabel = size.label.toLowerCase();
                   final String lowerTitle = title.toLowerCase();
 
                   final bool isExcluded = lowerTitle.contains('sqr bar') ||
@@ -1400,9 +1266,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                       lowerTitle.contains('flat') ||
                       lowerTitle.contains('gate channel') ||
                       lowerTitle.contains('binding wire') ||
-                      lowerTitle.contains('barbed wire') ||
-                      lowerLabel.contains('18g') ||
-                      lowerLabel.contains('random');
+                      lowerTitle.contains('barbed wire');
 
                   if (wVal != null && wVal != 0 && !isExcluded) {
                     final formattedWeight = wVal % 1 == 0
@@ -1412,8 +1276,8 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                   }
 
                   String dispLabel = (title.trim() == 'MS Angle')
-                      ? formatSizeLabel(size.label, title, wVal ?? 0.0)
-                      : "${size.label}$weightText";
+                      ? formatSizeLabel(baseLabel, title, wVal ?? 0.0)
+                      : "$baseLabel$weightText";
 
                   final Color rowBg = isEven
                       ? (isDark ? const Color(0xFF1E293B) : Colors.white)
@@ -1572,6 +1436,60 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     }
 
     return SortingUtils.compareSizes(aLabel, bLabel);
+  }
+
+  Widget _buildModernToggleTile({
+    required String title,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+    required bool isDark,
+  }) {
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                ),
+                maxLines: 1,
+                softWrap: false,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Transform.scale(
+            scale: 0.85,
+            child: Switch(
+              value: value,
+              activeThumbColor: Colors.white,
+              activeTrackColor: const Color(0xFFD32F2F),
+              inactiveTrackColor:
+                  isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+              inactiveThumbColor: Colors.white,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

@@ -9,7 +9,6 @@ import '../widgets/screen_gate.dart';
 import '../widgets/m_loader.dart';
 import '../widgets/guarded_metric.dart';
 import 'inventory_dashboard_screen.dart';
-import 'inventory_history_screen.dart';
 import 'inventory_in_out_screen.dart';
 import '../utils/formatters.dart';
 import '../utils/steel_helper.dart';
@@ -69,13 +68,13 @@ class _MainInventoryShellState extends State<MainInventoryShell> {
           },
           {
             'index': 2,
-            'title': 'In & Out Console',
-            'icon': Icons.swap_vert_circle_rounded,
+            'title': 'Transaction History',
+            'icon': Icons.receipt_long_rounded,
             'allowed': canHistory,
             'widget': ScreenGate(
               canAccess: (s) =>
                   AccessGuard.can(Permissions.screensTransactions),
-              screenName: 'Inventory In & Out',
+              screenName: 'Transaction History',
               child: const InventoryInOutScreen(),
             ),
           },
@@ -135,9 +134,9 @@ class _MainInventoryShellState extends State<MainInventoryShell> {
                           label: "Stock",
                         ),
                         BottomNavigationBarItem(
-                          icon: Icon(Icons.history_rounded),
-                          activeIcon: Icon(Icons.history_rounded),
-                          label: "Transactions",
+                          icon: Icon(Icons.receipt_long_rounded),
+                          activeIcon: Icon(Icons.receipt_long_rounded),
+                          label: "Transaction History",
                         ),
                       ],
                     )

@@ -1,20 +1,17 @@
 import 'package:flutter/material.dart';
-import '../constants/app_colors.dart';
 import '../services/data_repository.dart';
 import '../services/stock_notifier.dart';
-import '../widgets/inventory/compact_transaction_entry_panel.dart';
 import '../widgets/inventory/live_transaction_ledger_table.dart';
 
-/// Enterprise Inventory In & Out Warehouse Console Screen.
-/// Provides side-by-side transaction recording and live transaction ledger on desktop,
-/// and smooth segmented navigation on mobile.
-class InventoryInOutScreen extends StatefulWidget {
+/// Enterprise Transaction History Screen.
+/// Dedicated full-screen log viewer for Inward, Dispatch, Yard Transfers, and Adjustments.
+class TransactionHistoryScreen extends StatefulWidget {
   final String? initialType;
   final String? initialMaterial;
   final String? initialSize;
   final String? initialLocation;
 
-  const InventoryInOutScreen({
+  const TransactionHistoryScreen({
     super.key,
     this.initialType,
     this.initialMaterial,
@@ -23,11 +20,14 @@ class InventoryInOutScreen extends StatefulWidget {
   });
 
   @override
-  State<InventoryInOutScreen> createState() => _InventoryInOutScreenState();
+  State<TransactionHistoryScreen> createState() =>
+      _TransactionHistoryScreenState();
 }
 
-class _InventoryInOutScreenState extends State<InventoryInOutScreen> {
-  int _mobileTabIndex = 0; // 0 = Entry Form, 1 = Live Ledger
+/// Backward-compatibility alias
+typedef InventoryInOutScreen = TransactionHistoryScreen;
+
+class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
   bool _isRefreshing = false;
 
   Future<void> _refreshAll() async {
@@ -43,16 +43,13 @@ class _InventoryInOutScreenState extends State<InventoryInOutScreen> {
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: _buildAppBar(),
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final bool isDesktop = constraints.maxWidth >= 980;
-
-            if (isDesktop) {
-              return _buildDesktopLayout();
-            } else {
-              return _buildMobileLayout();
-            }
-          },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: LiveTransactionLedgerTable(
+            initialType: widget.initialType,
+            initialLocation: widget.initialLocation,
+            onTransactionChanged: _refreshAll,
+          ),
         ),
       ),
     );
@@ -65,28 +62,26 @@ class _InventoryInOutScreenState extends State<InventoryInOutScreen> {
       elevation: 0,
       scrolledUnderElevation: 0,
       centerTitle: false,
-      title: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Inventory Operations Console',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              color: Color(0xFF0F172A),
-              letterSpacing: -0.3,
-            ),
-          ),
-          SizedBox(height: 2),
-          Text(
-            'Daily Inward, Dispatch & Yard Transfers · Real-time Ledger',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: Color(0xFF64748B),
-            ),
-          ),
-        ],
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF1E293B)),
+        tooltip: 'Back to Dashboard',
+        onPressed: () {
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          } else {
+            // Fallback for direct tab navigation
+            Navigator.of(context).pushReplacementNamed('/dashboard');
+          }
+        },
+      ),
+      title: const Text(
+        'Transaction History',
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w800,
+          color: Color(0xFF0F172A),
+          letterSpacing: -0.3,
+        ),
       ),
       actions: [
         // Live Realtime Indicator Pill
@@ -123,7 +118,8 @@ class _InventoryInOutScreenState extends State<InventoryInOutScreen> {
                   height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Icon(Icons.refresh_rounded, size: 20, color: Color(0xFF475569)),
+              : const Icon(Icons.refresh_rounded,
+                  size: 20, color: Color(0xFF475569)),
           tooltip: 'Refresh Stock & Ledger',
           onPressed: _isRefreshing ? null : _refreshAll,
         ),
@@ -132,155 +128,6 @@ class _InventoryInOutScreenState extends State<InventoryInOutScreen> {
       bottom: const PreferredSize(
         preferredSize: Size.fromHeight(1),
         child: Divider(height: 1, color: Color(0xFFE2E8F0)),
-      ),
-    );
-  }
-
-  // ── DESKTOP SIDE-BY-SIDE LAYOUT ──
-  Widget _buildDesktopLayout() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Left Pane: Compact Transaction Entry Panel (~420px)
-          SizedBox(
-            width: 420,
-            child: SingleChildScrollView(
-              child: CompactTransactionEntryPanel(
-                initialType: widget.initialType,
-                initialMaterial: widget.initialMaterial,
-                initialSize: widget.initialSize,
-                initialLocation: widget.initialLocation,
-                onTransactionSubmitted: _refreshAll,
-              ),
-            ),
-          ),
-          const SizedBox(width: 16),
-
-          // Right Pane: Live Transaction Ledger Table (Expanded)
-          Expanded(
-            child: LiveTransactionLedgerTable(
-              initialType: widget.initialType,
-              initialLocation: widget.initialLocation,
-              onTransactionChanged: _refreshAll,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── MOBILE / TABLET TABBED LAYOUT ──
-  Widget _buildMobileLayout() {
-    return Column(
-      children: [
-        // Mobile Segmented Switcher
-        Container(
-          margin: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-          padding: const EdgeInsets.all(3),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF1F5F9),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: _buildMobileTabButton(
-                  index: 0,
-                  label: 'New Transaction',
-                  icon: Icons.edit_note_rounded,
-                ),
-              ),
-              Expanded(
-                child: _buildMobileTabButton(
-                  index: 1,
-                  label: 'Live Ledger',
-                  icon: Icons.receipt_long_rounded,
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // Body Content
-        Expanded(
-          child: _mobileTabIndex == 0
-              ? SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: CompactTransactionEntryPanel(
-                    initialType: widget.initialType,
-                    initialMaterial: widget.initialMaterial,
-                    initialSize: widget.initialSize,
-                    initialLocation: widget.initialLocation,
-                    onTransactionSubmitted: () {
-                      _refreshAll();
-                      setState(() => _mobileTabIndex = 1);
-                    },
-                  ),
-                )
-              : Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: LiveTransactionLedgerTable(
-                    initialType: widget.initialType,
-                    initialLocation: widget.initialLocation,
-                    onTransactionChanged: _refreshAll,
-                  ),
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMobileTabButton({
-    required int index,
-    required String label,
-    required IconData icon,
-  }) {
-    final bool isSelected = _mobileTabIndex == index;
-    return InkWell(
-      onTap: () => setState(() => _mobileTabIndex = index),
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 7),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.white : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: const Color(0xFF0F172A).withValues(alpha: 0.05),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ]
-              : null,
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 15,
-              color: isSelected ? const Color(0xFF0F172A) : const Color(0xFF64748B),
-            ),
-            const SizedBox(width: 5),
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-                  color: isSelected ? const Color(0xFF0F172A) : const Color(0xFF64748B),
-                ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

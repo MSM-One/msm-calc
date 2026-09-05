@@ -6,6 +6,7 @@ import '../../services/stock_notifier.dart';
 import '../../services/supabase_service.dart';
 import '../../utils/formatters.dart';
 import '../../utils/item_order_util.dart';
+import '../../utils/category_matcher.dart';
 import '../../widgets/motion_toast.dart';
 
 /// Compact Transaction Entry Panel for Enterprise Inventory In / Out / Transfer.
@@ -77,6 +78,28 @@ class _CompactTransactionEntryPanelState
     super.dispose();
   }
 
+  List<Map<String, dynamic>> _getSizesForCategory(String? selectedCategory) {
+    if (selectedCategory == null || selectedCategory.trim().isEmpty) {
+      return [];
+    }
+    final allMasterSizes = DataRepository.itemSizesNotifier.value;
+
+    final availableSizes = allMasterSizes.where((size) {
+      return isSizeInCategory(size, selectedCategory);
+    }).map((s) {
+      String label = (s['label'] ?? s['size_label'] ?? '').toString().trim();
+      double w = double.tryParse((s['weight'] ?? s['unit_weight_kg'] ?? '0').toString()) ?? 0.0;
+      double sd = double.tryParse((s['sd'] ?? s['size_difference'] ?? '0').toString()) ?? 0.0;
+      return {
+        'label': label,
+        'unit_weight_kg': w,
+        'sd': sd,
+      };
+    }).toList();
+
+    return availableSizes;
+  }
+
   void _loadMasterMaterialsAndSizes() {
     if (!mounted) return;
     final data = DataRepository.sheetDataNotifier.value;
@@ -99,6 +122,18 @@ class _CompactTransactionEntryPanelState
       }).toList();
 
       tempMap[name] = parsedSizes;
+    }
+
+    final dynamicCategories = DataRepository.getDynamicCategories();
+    for (final cat in dynamicCategories) {
+      if (!tempMap.containsKey(cat) || tempMap[cat]!.isEmpty) {
+        final sizes = _getSizesForCategory(cat);
+        if (sizes.isNotEmpty) {
+          tempMap[cat] = sizes;
+        } else if (!tempMap.containsKey(cat)) {
+          tempMap[cat] = [];
+        }
+      }
     }
 
     final sortedMaterials = tempMap.keys.toList()
@@ -546,6 +581,7 @@ class _CompactTransactionEntryPanelState
     return DropdownButtonFormField<String>(
       value: _selectedMaterial,
       isExpanded: true,
+      menuMaxHeight: 350,
       decoration: _inputDecoration(
         label: 'Material / Category',
         icon: Icons.category_outlined,
@@ -566,12 +602,13 @@ class _CompactTransactionEntryPanelState
       onChanged: (val) {
         setState(() {
           _selectedMaterial = val;
-          if (val != null &&
-              _materialSizesMap.containsKey(val) &&
-              _materialSizesMap[val]!.isNotEmpty) {
-            _selectedSize = _materialSizesMap[val]!.first['label'];
-          } else {
-            _selectedSize = null;
+          _selectedSize = null; // reset previously selected size
+          if (val != null) {
+            final available = _materialSizesMap[val] ?? _getSizesForCategory(val);
+            _materialSizesMap[val] = available;
+            if (available.isNotEmpty) {
+              _selectedSize = available.first['label'];
+            }
           }
         });
       },
@@ -580,14 +617,19 @@ class _CompactTransactionEntryPanelState
 
   Widget _buildSizeDropdown() {
     final sizes = _selectedMaterial != null
-        ? (_materialSizesMap[_selectedMaterial] ?? [])
+        ? (_materialSizesMap[_selectedMaterial] ?? _getSizesForCategory(_selectedMaterial))
         : <Map<String, dynamic>>[];
 
     return DropdownButtonFormField<String>(
       value: _selectedSize,
       isExpanded: true,
+      menuMaxHeight: 350,
       decoration: _inputDecoration(
-        label: 'Size / Section',
+        label: _selectedMaterial == null
+            ? 'Select category first'
+            : sizes.isEmpty
+                ? 'No sizes available'
+                : 'Size / Section (${sizes.length})',
         icon: Icons.straighten_outlined,
       ),
       items: sizes.map((s) {

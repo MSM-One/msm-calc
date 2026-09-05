@@ -642,29 +642,14 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
           }
         },
       ),
-      title: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            "Sauda Booking & Delivery Order",
-            style: TextStyle(
-              color: Color(0xFF0F172A),
-              fontWeight: FontWeight.w800,
-              fontSize: 16,
-              letterSpacing: -0.3,
-            ),
-          ),
-          SizedBox(height: 2),
-          Text(
-            "Contract Rates, Size Breakdown & Delivery Orders",
-            style: TextStyle(
-              color: Color(0xFF64748B),
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
+      title: const Text(
+        "Sauda & Delivery Order",
+        style: TextStyle(
+          color: Color(0xFF0F172A),
+          fontWeight: FontWeight.w800,
+          fontSize: 16,
+          letterSpacing: -0.3,
+        ),
       ),
       actions: [
         IconButton(
@@ -847,11 +832,13 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
   }
 
   void _pickDate() async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day, 23, 59, 59);
     DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: bookingDate,
+      initialDate: bookingDate.isAfter(today) ? now : bookingDate,
       firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+      lastDate: today,
       initialEntryMode: DatePickerEntryMode.calendarOnly,
       builder: (context, child) {
         return Theme(

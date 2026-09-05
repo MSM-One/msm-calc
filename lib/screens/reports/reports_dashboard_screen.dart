@@ -65,7 +65,8 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
   bool _isDetailedView = true;
   String _todaySummaryTabMode = 'Detailed';
   String _todaySummaryFlowMode = 'Summary';
-  bool _activeOnlyFilter = true;
+  final bool showActiveOnly = true; // Hardcoded default, always active
+  static const bool _activeOnlyFilter = true;
 
   // Expansion Sets
   final Set<String> _expandedMovementCategories = {};
@@ -250,11 +251,20 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
   }
 
   Future<void> _selectCustomDateRange() async {
+    final now = DateTime.now();
+    final todayEnd = DateTime(now.year, now.month, now.day, 23, 59, 59);
+
     final DateTimeRange? picked = await showDateRangePicker(
       context: context,
-      initialDateRange: DateTimeRange(start: _startDate, end: _endDate),
+      initialDateRange: (_endDate.isBefore(todayEnd) ||
+              _endDate.isAtSameMomentAs(todayEnd))
+          ? DateTimeRange(start: _startDate, end: _endDate)
+          : DateTimeRange(
+              start: now.subtract(const Duration(days: 7)),
+              end: now,
+            ),
       firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+      lastDate: todayEnd,
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -273,7 +283,8 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
       setState(() {
         _selectedDatePreset = 'Custom';
         _startDate = picked.start;
-        _endDate = picked.end;
+        _endDate = DateTime(
+            picked.end.year, picked.end.month, picked.end.day, 23, 59, 59);
       });
       _loadReports();
     }
@@ -480,7 +491,7 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
           startDate: _startDate,
           endDate: _endDate,
           location: _locationFilter,
-          activeOnly: _activeOnlyFilter,
+          activeOnly: showActiveOnly,
         );
         final isDetailed = _todaySummaryTabMode == 'Detailed';
         final filename = isDetailed
@@ -711,7 +722,7 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
         startDate: _startDate,
         endDate: _endDate,
         location: _locationFilter,
-        activeOnly: _activeOnlyFilter,
+        activeOnly: showActiveOnly,
       );
 
       final safeName = category.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase();
@@ -887,11 +898,7 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
                     todayFlowMode: _todaySummaryFlowMode,
                     onTodayFlowModeChanged: (val) =>
                         setState(() => _todaySummaryFlowMode = val),
-                    showActiveOnlyToggle: _activeTabId == 'today' ||
-                        _activeTabId == 'movement',
-                    activeOnly: _activeOnlyFilter,
-                    onActiveOnlyChanged: (val) =>
-                        setState(() => _activeOnlyFilter = val),
+                    activeOnly: showActiveOnly,
                     activeTabId: _activeTabId,
                   ),
                 ],
@@ -949,9 +956,7 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
           onExportPdf: _handleExportPdf,
           isPdfLoading: _isPdfExporting,
           categoryDownloading: _categoryDownloading,
-          activeOnly: _activeOnlyFilter,
-          onActiveOnlyChanged: (val) =>
-              setState(() => _activeOnlyFilter = val),
+          activeOnly: showActiveOnly,
         );
 
       case 'movement':
@@ -971,7 +976,7 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
           onExportCategoryPdf: _exportCategoryPdf,
           categoryDownloading: _categoryDownloading,
           locationFilter: _locationFilter,
-          activeOnly: _activeOnlyFilter,
+          activeOnly: showActiveOnly,
           emptyState: _buildEmptyState(
             title: 'No stock movement records',
             subtitle: 'No transactions found for the selected period & location',

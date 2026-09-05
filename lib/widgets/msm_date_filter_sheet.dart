@@ -131,19 +131,41 @@ class MsmDateFilterSheet extends StatelessWidget {
                   onTap: () async {
                     Navigator.pop(context); // Wipes out the modal view cleanly
 
+                    final now = DateTime.now();
+                    final todayEnd =
+                        DateTime(now.year, now.month, now.day, 23, 59, 59);
+
                     final DateTimeRange? pickedRange =
                         await showDateRangePicker(
                       context: context,
-                      initialDateRange: initialRange,
+                      initialDateRange: (initialRange.end.isBefore(todayEnd) ||
+                              initialRange.end.isAtSameMomentAs(todayEnd))
+                          ? initialRange
+                          : DateTimeRange(
+                              start: now.subtract(const Duration(days: 7)),
+                              end: now,
+                            ),
                       firstDate: DateTime(2020),
-                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                      lastDate: todayEnd,
+                      builder: (context, child) {
+                        return Theme(
+                          data: Theme.of(context).copyWith(
+                            colorScheme: const ColorScheme.light(
+                              primary: Color(0xFFD32F2F),
+                              onPrimary: Colors.white,
+                              onSurface: Color(0xFF1E293B),
+                            ),
+                          ),
+                          child: child!,
+                        );
+                      },
                     );
 
                     if (pickedRange != null) {
                       final startNormalized = DateTime(pickedRange.start.year,
                           pickedRange.start.month, pickedRange.start.day);
                       final endNormalized = DateTime(pickedRange.end.year,
-                          pickedRange.end.month, pickedRange.end.day);
+                          pickedRange.end.month, pickedRange.end.day, 23, 59, 59);
                       onRangeSelected(DateTimeRange(
                           start: startNormalized, end: endNormalized));
                     }

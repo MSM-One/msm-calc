@@ -31,7 +31,7 @@ class EnterpriseStockMovementTable extends StatefulWidget {
     this.categoryDownloading = const {},
     this.locationFilter = 'ALL',
     this.emptyState,
-    this.activeOnly = false,
+    this.activeOnly = true,
   });
 
   static double extractUnitWeight(String sizeLabel) {

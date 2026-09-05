@@ -21,9 +21,7 @@ class ReportsExportToolbar extends StatelessWidget {
   final bool showViewToggle;
   final bool isDetailedView;
   final ValueChanged<bool>? onViewToggle;
-  final bool showActiveOnlyToggle;
   final bool activeOnly;
-  final ValueChanged<bool>? onActiveOnlyChanged;
   final String? todayTabMode;
   final ValueChanged<String>? onTodayTabModeChanged;
   final String? todayFlowMode;
@@ -49,9 +47,7 @@ class ReportsExportToolbar extends StatelessWidget {
     this.showViewToggle = false,
     this.isDetailedView = false,
     this.onViewToggle,
-    this.showActiveOnlyToggle = false,
     this.activeOnly = true,
-    this.onActiveOnlyChanged,
     this.todayTabMode,
     this.onTodayTabModeChanged,
     this.todayFlowMode,
@@ -163,10 +159,6 @@ class ReportsExportToolbar extends StatelessWidget {
                       const SizedBox(width: 8),
                       _buildSummaryDetailedToggle(),
                     ],
-                    if (showActiveOnlyToggle) ...[
-                      const SizedBox(width: 8),
-                      _buildActiveOnlyToggle(),
-                    ],
                   ],
                 ),
                 const SizedBox(height: 10),
@@ -187,7 +179,7 @@ class ReportsExportToolbar extends StatelessWidget {
                       child: _buildActionButton(
                         label: 'Export CSV',
                         icon: Icons.table_chart_rounded,
-                        color: const Color(0xFF059669), // Emerald
+                        color: const Color(0xFF16A34A), // Emerald Green
                         isLoading: isCsvLoading,
                         onTap: onExportCsv,
                       ),
@@ -199,24 +191,25 @@ class ReportsExportToolbar extends StatelessWidget {
           );
         }
 
-        // Desktop Layout (Single / Two Clean Bars)
+        // Desktop Layout (Width >= 768px): Single Horizontal Command Bar
         return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: const Color(0xFFE2E8F0)),
-            boxShadow: const [
+            boxShadow: [
               BoxShadow(
-                color: Color(0x06000000),
+                color: Colors.black.withValues(alpha: 0.03),
                 blurRadius: 6,
-                offset: Offset(0, 2),
+                offset: const Offset(0, 2),
               ),
             ],
           ),
           child: Row(
             children: [
-              // 1. Search Bar
+              // 1. Search Field (Expanded)
               Expanded(
                 flex: 3,
                 child: _buildSearchField(),
@@ -234,12 +227,6 @@ class ReportsExportToolbar extends StatelessWidget {
               // 4. View Toggles (Summary | Detailed)
               if (showViewToggle && onViewToggle != null) ...[
                 _buildSummaryDetailedToggle(),
-                const SizedBox(width: 10),
-              ],
-
-              // 5. Active Movements Only Toggle
-              if (showActiveOnlyToggle) ...[
-                _buildActiveOnlyToggle(),
                 const SizedBox(width: 10),
               ],
 
@@ -697,35 +684,6 @@ class ReportsExportToolbar extends StatelessWidget {
     );
   }
 
-  Widget _buildActiveOnlyToggle() {
-    return Container(
-      height: 40,
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF1F5F9),
-        borderRadius: BorderRadius.circular(9),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildToggleOption(
-            label: 'Active Only',
-            isSelected: activeOnly,
-            onTap: () => onActiveOnlyChanged?.call(true),
-          ),
-          _buildToggleOption(
-            label: 'All Sizes',
-            isSelected: !activeOnly,
-            onTap: () => onActiveOnlyChanged?.call(false),
-          ),
-        ],
-      ),
-    );
-  }
-
-
-
   Widget _buildToggleOption({
     required String label,
     required bool isSelected,
@@ -762,6 +720,7 @@ class ReportsExportToolbar extends StatelessWidget {
       ),
     );
   }
+
 
   Widget _buildIconButton({
     required IconData icon,

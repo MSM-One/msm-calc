@@ -13,7 +13,7 @@ class DealerShareToolbar extends StatelessWidget {
   final int totalCount;
   final double totalSelectedStockMT;
   final VoidCallback onToggleSelectAll;
-  final VoidCallback onCopyWhatsApp;
+  final VoidCallback? onCopyWhatsApp;
   final VoidCallback onExportPdf;
   final VoidCallback onShare;
   final bool isExporting;
@@ -30,7 +30,7 @@ class DealerShareToolbar extends StatelessWidget {
     required this.totalCount,
     required this.totalSelectedStockMT,
     required this.onToggleSelectAll,
-    required this.onCopyWhatsApp,
+    this.onCopyWhatsApp,
     required this.onExportPdf,
     required this.onShare,
     this.isExporting = false,
@@ -99,17 +99,6 @@ class DealerShareToolbar extends StatelessWidget {
 
           // 4. Action Buttons
           _buildActionButton(
-            label: 'Copy for WhatsApp',
-            icon: Icons.chat_bubble_outline_rounded,
-            color: const Color(0xFF10B981),
-            bgColor: const Color(0xFFECFDF5),
-            borderColor: const Color(0xFFA7F3D0),
-            onTap: onCopyWhatsApp,
-            tooltip: 'Copy formatted WhatsApp text broadcast',
-          ),
-          const SizedBox(width: 8),
-
-          _buildActionButton(
             label: 'Export PDF',
             icon: Icons.picture_as_pdf_outlined,
             color: const Color(0xFFDC2626),
@@ -168,15 +157,6 @@ class DealerShareToolbar extends StatelessWidget {
             children: [
               _buildSelectAllButton(isAllSelected),
               const Spacer(),
-              _buildActionButton(
-                label: 'WhatsApp',
-                icon: Icons.chat_bubble_outline_rounded,
-                color: const Color(0xFF10B981),
-                bgColor: const Color(0xFFECFDF5),
-                borderColor: const Color(0xFFA7F3D0),
-                onTap: onCopyWhatsApp,
-              ),
-              const SizedBox(width: 6),
               _buildActionButton(
                 label: 'Export PDF',
                 icon: Icons.picture_as_pdf_outlined,

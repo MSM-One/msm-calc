@@ -2043,11 +2043,28 @@ class _DeliveryOrderScreenState extends State<DeliveryOrderScreen> {
                       Expanded(
                           child: InkWell(
                         onTap: () async {
+                          final now = DateTime.now();
+                          final today = DateTime(
+                              now.year, now.month, now.day, 23, 59, 59);
                           DateTime? p = await showDatePicker(
-                              context: context,
-                              initialDate: orderDate,
-                              firstDate: DateTime(2020),
-                              lastDate: DateTime.now());
+                            context: context,
+                            initialDate:
+                                orderDate.isAfter(today) ? now : orderDate,
+                            firstDate: DateTime(2020),
+                            lastDate: today,
+                            builder: (context, child) {
+                              return Theme(
+                                data: Theme.of(context).copyWith(
+                                  colorScheme: const ColorScheme.light(
+                                    primary: Color(0xFFD32F2F),
+                                    onPrimary: Colors.white,
+                                    onSurface: Color(0xFF1E293B),
+                                  ),
+                                ),
+                                child: child!,
+                              );
+                            },
+                          );
                           if (p != null) setState(() => orderDate = p);
                           _saveToPrefs();
                         },

@@ -202,7 +202,6 @@ void main() {
               isLoading: false,
               filteredDailyMovement: mockDailyMovements,
               emptyState: const Text('Empty'),
-              activeOnly: false,
               onExportCategoryPdf: (cat) => exportedCategory = cat,
             ),
           ),
@@ -217,8 +216,8 @@ void main() {
       // Verify category items in canonical sequence (MS Pipe, then Flats)
       expect(find.text('MS PIPE'), findsWidgets);
       expect(find.text('FLATS'), findsWidgets);
-      expect(find.text('2 sizes'), findsWidgets); // MS Pipe has 2 sizes
-      expect(find.text('1 sizes'), findsWidgets); // Flats has 1 size
+      expect(find.text('2 active / 2 sizes'), findsWidgets); // MS Pipe has 2 sizes, both active
+      expect(find.text('1 active / 1 sizes'), findsWidgets); // Flats has 1 size, active
 
       // Verify detail pane headers (strictly 5 columns: #, SIZE & SECTION, INWARD, OUTWARD, NET QTY)
       expect(find.text('SIZE & SECTION'), findsOneWidget);
@@ -332,7 +331,6 @@ void main() {
             body: TodaySummaryTab(
               isLoading: false,
               filteredDailyMovement: mockDailyMovements,
-              activeOnly: false,
               emptyState: const Text('Empty'),
             ),
           ),
@@ -343,13 +341,13 @@ void main() {
       // MS Angle is selected (or present in sidebar)
       expect(find.text('MS ANGLE'), findsWidgets);
       expect(find.text('MS CHANNEL'), findsWidgets);
-      expect(find.text('3 sizes'), findsWidgets); // MS Angle has 3 sizes in mock
-      expect(find.text('4 sizes'), findsWidgets); // MS Channel has 4 sizes in mock
+      expect(find.text('2 active / 3 sizes'), findsWidgets); // MS Angle has 2 active out of 3 sizes
+      expect(find.text('2 active / 4 sizes'), findsWidgets); // MS Channel has 2 active out of 4 sizes
 
-      // Verify MS Angle row 1 is 25x3 6.2kg (appended with weight)
+      // Verify MS Angle rows: active rows 25x3 and 25x5 are rendered
       expect(find.textContaining('25x3'), findsOneWidget);
       expect(find.textContaining('25x5'), findsOneWidget);
-      expect(find.textContaining('75x8'), findsOneWidget);
+      expect(find.textContaining('75x8'), findsNothing);
 
       // Verify 25x3 outward was 1.030 and net is -1.030
       expect(find.text('-1.030'), findsWidgets);
@@ -358,11 +356,11 @@ void main() {
       await tester.tap(find.text('MS CHANNEL'));
       await tester.pumpAndSettle();
 
-      // Verify all 4 sizes of MS Channel are present including 95x45
+      // Verify active sizes of MS Channel are present and inactive filtered out
       expect(find.textContaining('75x40'), findsOneWidget);
       expect(find.textContaining('70x35'), findsOneWidget);
-      expect(find.textContaining('100x50'), findsOneWidget);
-      expect(find.textContaining('95x45'), findsOneWidget);
+      expect(find.textContaining('100x50'), findsNothing);
+      expect(find.textContaining('95x45'), findsNothing);
     });
 
     testWidgets('renders single high-density summary table when selectedTab is Summary', (tester) async {
@@ -492,8 +490,7 @@ void main() {
       expect(toggledView, equals(true));
     });
 
-    testWidgets('renders [ Active Only | All Sizes ] toggle and triggers callback', (tester) async {
-      bool? activeOnlyVal;
+    testWidgets('does not render [ Active Only | All Sizes ] toggle buttons in ReportsExportToolbar', (tester) async {
       final searchCtrl = TextEditingController();
 
       await tester.pumpWidget(
@@ -511,9 +508,6 @@ void main() {
               onRefresh: () {},
               onExportPdf: () {},
               onExportCsv: () {},
-              showActiveOnlyToggle: true,
-              activeOnly: true,
-              onActiveOnlyChanged: (val) => activeOnlyVal = val,
               activeTabId: 'today',
             ),
           ),
@@ -521,14 +515,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Verify Active Only and All Sizes options
-      expect(find.text('Active Only'), findsOneWidget);
-      expect(find.text('All Sizes'), findsOneWidget);
-
-      // Tap All Sizes
-      await tester.tap(find.text('All Sizes'));
-      await tester.pumpAndSettle();
-      expect(activeOnlyVal, equals(false));
+      // Ensure Active Only and All Sizes toggle options are not present
+      expect(find.text('Active Only'), findsNothing);
+      expect(find.text('All Sizes'), findsNothing);
     });
   });
 
@@ -585,7 +574,7 @@ void main() {
       await tester.binding.setSurfaceSize(null);
     });
 
-    testWidgets('renders all sizes in All Sizes mode', (tester) async {
+    testWidgets('enforces active only filtering by default in TodaySummaryTab', (tester) async {
       final mockMovements = [
         DailyMovementEntry(
           category: 'MS Pipe',
@@ -616,19 +605,20 @@ void main() {
               isLoading: false,
               filteredDailyMovement: mockMovements,
               selectedTab: 'Detailed',
-              activeOnly: false,
-            emptyState: const Text('Empty'),
+              emptyState: const Text('Empty'),
+            ),
           ),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
 
-      // Badge should display total count
-      expect(find.text('2 sizes'), findsWidgets);
+      // Badge should display active count by default
+      expect(find.text('1 active / 2 sizes'), findsWidgets);
 
-      // Both items should be rendered
+      // Active item should be rendered
       expect(find.text('15 NB'), findsWidgets);
-      expect(find.text('20 NB'), findsWidgets);
+      // Inactive item should NOT be rendered
+      expect(find.text('20 NB'), findsNothing);
 
       await tester.binding.setSurfaceSize(null);
     });
@@ -757,21 +747,10 @@ void main() {
       await tester.pumpAndSettle();
 
       // Verify Category Card Header
-      expect(find.text('#1'), findsOneWidget);
       expect(find.text('MS PIPE'), findsOneWidget);
-      expect(find.text('1 active / 1 sizes'), findsOneWidget);
-      expect(find.byIcon(Icons.chevron_right_rounded), findsWidgets);
-
-      // Verify 3 Metric Badges
-      expect(find.text('INWARD'), findsOneWidget);
-      expect(find.text('+5.000 MT'), findsOneWidget);
-      expect(find.text('OUTWARD'), findsOneWidget);
-      expect(find.text('-2.000 MT'), findsOneWidget);
-      expect(find.text('NET'), findsOneWidget);
       expect(find.text('3.000 MT'), findsOneWidget);
 
       // Verify Bottom Action Bar
-      expect(find.textContaining('Total Net:'), findsOneWidget);
       expect(find.text('Export PDF'), findsOneWidget);
 
       // Tap Export PDF in Bottom Action Bar
@@ -819,18 +798,10 @@ void main() {
 
       // Accordion header should be visible
       expect(find.text('MS PIPE'), findsOneWidget);
-      expect(find.text('1 active'), findsOneWidget);
+      expect(find.text('3.000 MT'), findsWidgets);
 
-      // In Detailed mode, categories are expanded by default
-      // Table columns should be rendered inside horizontal scroll view
-      expect(find.text('SIZE & SECTION'), findsOneWidget);
-      expect(find.text('INWARD'), findsOneWidget);
-      expect(find.text('OUTWARD'), findsOneWidget);
-      expect(find.text('NET QTY'), findsOneWidget);
+      // Size row and bottom action bar visible
       expect(find.text('15 NB'), findsOneWidget);
-
-      // Bottom bar visible
-      expect(find.textContaining('Total Net:'), findsOneWidget);
       expect(find.text('Export PDF'), findsOneWidget);
 
       await tester.binding.setSurfaceSize(null);

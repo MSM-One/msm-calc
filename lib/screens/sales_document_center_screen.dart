@@ -699,17 +699,27 @@ class _SalesDocumentCenterScreenState extends State<SalesDocumentCenterScreen> {
         ),
       ),
       onTap: () async {
+        final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day, 23, 59, 59);
+        DateTime initial = now;
+        try {
+          if (_dateController.text.isNotEmpty) {
+            initial = DateFormat('dd-MM-yyyy').parse(_dateController.text);
+          }
+        } catch (_) {}
+
         DateTime? pickedDate = await showDatePicker(
           context: context,
-          initialDate: DateTime.now(),
+          initialDate: initial.isAfter(today) ? now : initial,
           firstDate: DateTime(2020),
-          lastDate: DateTime(2030),
+          lastDate: today,
           builder: (context, child) {
             return Theme(
               data: Theme.of(context).copyWith(
                 colorScheme: const ColorScheme.light(
                   primary: primaryRed,
                   onPrimary: Colors.white,
+                  onSurface: Color(0xFF1E293B),
                 ),
               ),
               child: child!,
