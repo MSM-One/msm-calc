@@ -49,6 +49,7 @@ import 'providers/inventory_provider.dart';
 import 'providers/user_provider.dart';
 import 'services/sheet_service.dart';
 import 'services/supabase_realtime_service.dart';
+import 'services/app_version_service.dart';
 
 /// Global navigator key — allows nav operations from outside widget tree.
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
@@ -150,6 +151,8 @@ void main() async {
     debugPrint('DEBUG: [main] DataRepository initialized');
     debugPrint('DEBUG: [main] Initializing SupabaseRealtimeService...');
     SupabaseRealtimeService.instance.initialize();
+    debugPrint('DEBUG: [main] Initializing AppVersionService...');
+    await AppVersionService.init();
   } catch (e) {
     debugPrint('DEBUG: [main] Initialization error: $e');
   }

@@ -61,7 +61,62 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
   final double _freight = 0.0;
   final double _ob = 0.0;
 
+  bool _isRemovalMode = false;
   Map<String, List<SampleRateSize>> _categories = {};
+  final Map<String, List<SampleRateSize>> _customAddedSizes = {};
+  final Map<String, Set<String>> _removedSizeLabels = {};
+
+  void _addCustomSize(String category, SampleRateSize size) {
+    setState(() {
+      _removedSizeLabels[category]?.remove(size.label);
+      final inv = context.read<InventoryProvider>();
+      final baseList = inv.sampleRateCategories[category] ?? [];
+      if (!baseList.any((s) => s.label == size.label)) {
+        final list = _customAddedSizes.putIfAbsent(category, () => []);
+        if (!list.any((s) => s.label == size.label)) {
+          list.add(size);
+        }
+      }
+    });
+    MotionToast.show(context, "Added ${size.label} to $category");
+  }
+
+  void _removeSizeFromCategory(String category, SampleRateSize size) {
+    setState(() {
+      _customAddedSizes[category]?.removeWhere((s) => s.label == size.label);
+      _removedSizeLabels.putIfAbsent(category, () => {}).add(size.label);
+    });
+    MotionToast.show(context, "Removed ${size.label} from $category");
+  }
+
+  void _resetCategoryToDefaults(String category) {
+    setState(() {
+      _customAddedSizes.remove(category);
+      _removedSizeLabels.remove(category);
+      _isRemovalMode = false;
+    });
+    MotionToast.show(context, "Reset $category to benchmark defaults");
+  }
+
+  bool _isCategoryModified(String category) {
+    final hasCustom = (_customAddedSizes[category] ?? []).isNotEmpty;
+    final hasRemoved = (_removedSizeLabels[category] ?? {}).isNotEmpty;
+    return hasCustom || hasRemoved;
+  }
+
+  void _showAddSizeModal(BuildContext context, String category, bool isDark) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _AddSizeBottomSheet(
+        category: category,
+        isDark: isDark,
+        existingSizes: _categories[category] ?? [],
+        onSizeSelected: (size) => _addCustomSize(category, size),
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -684,9 +739,37 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
               return const Center(child: MLoader(size: 60));
             }
 
-            _categories = inv.sampleRateCategories;
+            final Map<String, List<SampleRateSize>> combinedCategories = {};
+            for (final entry in inv.sampleRateCategories.entries) {
+              final cat = entry.key;
+              final baseList = entry.value;
+              final customList = _customAddedSizes[cat] ?? [];
+              final removed = _removedSizeLabels[cat] ?? {};
 
-            if (inv.sampleRateCategories.isEmpty) {
+              final mergedList = <SampleRateSize>[];
+              for (final s in [...baseList, ...customList]) {
+                if (!removed.contains(s.label)) {
+                  if (!mergedList.any((existing) => existing.label == s.label)) {
+                    mergedList.add(s);
+                  }
+                }
+              }
+              combinedCategories[cat] = mergedList;
+            }
+
+            for (final entry in _customAddedSizes.entries) {
+              final cat = entry.key;
+              if (!combinedCategories.containsKey(cat)) {
+                final removed = _removedSizeLabels[cat] ?? {};
+                combinedCategories[cat] = entry.value
+                    .where((s) => !removed.contains(s.label))
+                    .toList();
+              }
+            }
+
+            _categories = combinedCategories;
+
+            if (_categories.isEmpty) {
               return Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -717,7 +800,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
               );
             }
 
-            final sortedCategories = inv.sampleRateCategories.keys
+            final sortedCategories = _categories.keys
                 .where(_isAllowedCategory)
                 .toList()
               ..sort(ItemOrderUtil.compare);
@@ -861,7 +944,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
 
                               // Table Section
                               if (_selectedCategory != null &&
-                                   _categories.containsKey(_selectedCategory))
+                                  _categories.containsKey(_selectedCategory))
                                 _buildCategorySection(
                                   _selectedCategory!,
                                   _categories[_selectedCategory!]!,
@@ -879,138 +962,182 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
 
             // ── MOBILE / NARROW LAYOUT ──
             return SingleChildScrollView(
-              padding: const EdgeInsets.all(14.0),
+              padding: const EdgeInsets.all(12.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Collapsible Rate Config Card
-                  Container(
-                    decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isDark
-                            ? const Color(0xFF334155)
-                            : const Color(0xFFE2E8F0),
+                  // Collapsible Rate Config Card on Mobile
+                  Material(
+                    color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    elevation: 0,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isDark
+                              ? const Color(0xFF334155)
+                              : const Color(0xFFE2E8F0),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.02),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.02),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
+                      clipBehavior: Clip.antiAlias,
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          dividerColor: Colors.transparent,
                         ),
-                      ],
-                    ),
-                    padding: const EdgeInsets.all(14.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _PanelInput(
-                                label: "Pipe",
-                                controller: _pipeBasicCtrl,
-                                isDark: isDark,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: _PanelInput(
-                                label: "Angle",
-                                controller: _angleBasicCtrl,
-                                isDark: isDark,
-                              ),
-                            ),
-                          ],
+                        child: ExpansionTile(
+                        initiallyExpanded: _pipeBasicCtrl.text.isEmpty &&
+                            _angleBasicCtrl.text.isEmpty &&
+                            _channelBasicCtrl.text.isEmpty &&
+                            _sqrBarBasicCtrl.text.isEmpty &&
+                            _roundFlatsBasicCtrl.text.isEmpty,
+                        tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                        leading: Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFD32F2F).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(
+                            Icons.tune_rounded,
+                            color: Color(0xFFD32F2F),
+                            size: 18,
+                          ),
                         ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _PanelInput(
-                                label: "Channel",
-                                controller: _channelBasicCtrl,
-                                isDark: isDark,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: _PanelInput(
-                                label: "SQR Bar",
-                                controller: _sqrBarBasicCtrl,
-                                isDark: isDark,
-                              ),
-                            ),
-                          ],
+                        title: Text(
+                          "Rate Settings & Inputs",
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          ),
                         ),
-                        const SizedBox(height: 10),
-                        _PanelInput(
-                          label: "Round/Flats",
-                          controller: _roundFlatsBasicCtrl,
-                          isDark: isDark,
+                        subtitle: Text(
+                          _pipeBasicCtrl.text.isNotEmpty
+                              ? "Pipe: ₹${formatIndianCurrency((double.tryParse(_pipeBasicCtrl.text) ?? 0).round())} • GST ${_gstEnabled ? '18%' : 'Off'}"
+                              : "Tap to set Pipe, Angle, Channel basic rates",
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                          ),
                         ),
-                        const SizedBox(height: 10),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            onPressed: () => _applyToAll('MS Pipe'),
-                            icon: const Icon(Icons.copy_all_rounded, size: 14),
-                            label: const Text(
-                              "Apply Pipe Rate to All",
-                              style: TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w600),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 8),
-                              side: BorderSide(
-                                color: isDark
-                                    ? const Color(0xFF334155)
-                                    : const Color(0xFFCBD5E1),
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _PanelInput(
+                                  label: "Pipe",
+                                  controller: _pipeBasicCtrl,
+                                  isDark: isDark,
+                                ),
                               ),
-                              foregroundColor: isDark
-                                  ? Colors.white70
-                                  : const Color(0xFF475569),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _PanelInput(
+                                  label: "Angle",
+                                  controller: _angleBasicCtrl,
+                                  isDark: isDark,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _PanelInput(
+                                  label: "Channel",
+                                  controller: _channelBasicCtrl,
+                                  isDark: isDark,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _PanelInput(
+                                  label: "SQR Bar",
+                                  controller: _sqrBarBasicCtrl,
+                                  isDark: isDark,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          _PanelInput(
+                            label: "Round/Flats",
+                            controller: _roundFlatsBasicCtrl,
+                            isDark: isDark,
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () => _applyToAll('MS Pipe'),
+                              icon: const Icon(Icons.copy_all_rounded, size: 14),
+                              label: const Text(
+                                "Apply Pipe Rate to All",
+                                style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 8),
+                                side: BorderSide(
+                                  color: isDark
+                                      ? const Color(0xFF334155)
+                                      : const Color(0xFFCBD5E1),
+                                ),
+                                foregroundColor: isDark
+                                    ? Colors.white70
+                                    : const Color(0xFF475569),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _buildModernToggleTile(
-                                title: "GST (18%)",
-                                value: _gstEnabled,
-                                onChanged: (v) =>
-                                    setState(() => _gstEnabled = v),
-                                isDark: isDark,
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildModernToggleTile(
+                                  title: "GST (18%)",
+                                  value: _gstEnabled,
+                                  onChanged: (v) =>
+                                      setState(() => _gstEnabled = v),
+                                  isDark: isDark,
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _buildModernToggleTile(
-                                title: "NC Discount",
-                                value: _ncDiscountEnabled,
-                                onChanged: (v) =>
-                                    setState(() => _ncDiscountEnabled = v),
-                                isDark: isDark,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _buildModernToggleTile(
+                                  title: "NC Discount",
+                                  value: _ncDiscountEnabled,
+                                  onChanged: (v) =>
+                                      setState(() => _ncDiscountEnabled = v),
+                                  isDark: isDark,
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                ),
+                const SizedBox(height: 14),
 
-                  // Canonical Category Chips
+                  // Canonical Category Chips (Horizontal Scroll)
                   _buildCategoryChips(sortedCategories, isDark),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 12),
 
                   // Responsive Pricing Table
                   if (_selectedCategory != null &&
@@ -1031,65 +1158,68 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
 
   // ── CANONICAL CATEGORY PILL TABS ──
   Widget _buildCategoryChips(List<String> sortedCategories, bool isDark) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      physics: const BouncingScrollPhysics(),
-      child: Row(
-        children: sortedCategories.map((cat) {
-          final isSelected = _selectedCategory == cat;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(20),
-              onTap: () {
-                setState(() => _selectedCategory = cat);
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14.0, vertical: 8.0),
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? const Color(0xFFD32F2F)
-                      : (isDark
-                          ? const Color(0xFF1E293B)
-                          : const Color(0xFFF1F5F9)),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
+    return SizedBox(
+      height: 44,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: Row(
+          children: sortedCategories.map((cat) {
+            final isSelected = _selectedCategory == cat;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () {
+                  setState(() => _selectedCategory = cat);
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14.0, vertical: 8.0),
+                  decoration: BoxDecoration(
                     color: isSelected
                         ? const Color(0xFFD32F2F)
                         : (isDark
-                            ? const Color(0xFF334155)
-                            : const Color(0xFFE2E8F0)),
-                    width: 1,
+                            ? const Color(0xFF1E293B)
+                            : const Color(0xFFF1F5F9)),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isSelected
+                          ? const Color(0xFFD32F2F)
+                          : (isDark
+                              ? const Color(0xFF334155)
+                              : const Color(0xFFE2E8F0)),
+                      width: 1,
+                    ),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: const Color(0xFFD32F2F).withValues(alpha: 0.25),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2),
+                            ),
+                          ]
+                        : null,
                   ),
-                  boxShadow: isSelected
-                      ? [
-                          BoxShadow(
-                            color: const Color(0xFFD32F2F).withValues(alpha: 0.25),
-                            blurRadius: 6,
-                            offset: const Offset(0, 2),
-                          ),
-                        ]
-                      : null,
-                ),
-                child: Text(
-                  cat.toUpperCase(),
-                  style: TextStyle(
-                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-                    fontSize: 11.5,
-                    color: isSelected
-                        ? Colors.white
-                        : (isDark
-                            ? const Color(0xFFCBD5E1)
-                            : const Color(0xFF475569)),
-                    letterSpacing: 0.3,
+                  child: Text(
+                    cat.toUpperCase(),
+                    style: TextStyle(
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                      fontSize: 11.5,
+                      color: isSelected
+                          ? Colors.white
+                          : (isDark
+                              ? const Color(0xFFCBD5E1)
+                              : const Color(0xFF475569)),
+                      letterSpacing: 0.3,
+                    ),
                   ),
                 ),
               ),
-            ),
-          );
-        }).toList(),
+            );
+          }).toList(),
+        ),
       ),
     );
   }
@@ -1103,12 +1233,14 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     final double basic = double.tryParse(ctrl.text) ?? 0.0;
     final bool hasBasic = basic > 0;
 
+    final isModified = _isCategoryModified(title);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Category Header Bar
+        // Category Header Bar (Single Compact Row)
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
           decoration: BoxDecoration(
             color: isDark ? const Color(0xFF1E293B) : Colors.white,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
@@ -1116,80 +1248,222 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
               color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
             ),
           ),
-          child: Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 6,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isCompact = constraints.maxWidth < 450;
+              final isUltraCompact = constraints.maxWidth < 360;
+
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    title.toUpperCase(),
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: isDark ? Colors.white : const Color(0xFF0F172A),
-                      letterSpacing: 0.2,
+                  // Left: Title + Size count badge
+                  Flexible(
+                    flex: 4,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            title.toUpperCase(),
+                            style: TextStyle(
+                              fontSize: isUltraCompact ? 11.5 : 12.5,
+                              fontWeight: FontWeight.w800,
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              "${sortedSizes.length} sizes",
+                              style: TextStyle(
+                                fontSize: isUltraCompact ? 9 : 10,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      "${sortedSizes.length} sizes",
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF64748B),
+                  const SizedBox(width: 6),
+
+                  // Right: Action button group
+                  Flexible(
+                    flex: 6,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Base Rate Status Chip
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: hasBasic
+                                  ? const Color(0xFFECFDF5)
+                                  : (isDark
+                                      ? const Color(0xFF334155)
+                                      : const Color(0xFFF1F5F9)),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: hasBasic
+                                    ? const Color(0xFFA7F3D0)
+                                    : (isDark
+                                        ? const Color(0xFF475569)
+                                        : const Color(0xFFE2E8F0)),
+                              ),
+                            ),
+                            child: Text(
+                              hasBasic
+                                  ? "Base: ₹${formatIndianCurrency(basic.round())}"
+                                  : (isCompact ? "Base: —" : "Base Rate Not Set"),
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: hasBasic
+                                    ? const Color(0xFF059669)
+                                    : const Color(0xFF94A3B8),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+
+                          // "+ Add" Action Button
+                          Tooltip(
+                            message: "+ Add Size",
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(6),
+                              onTap: () => _showAddSizeModal(context, title, isDark),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 3.5),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: isDark
+                                        ? const Color(0xFF475569)
+                                        : const Color(0xFFCBD5E1),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: const [
+                                    Icon(Icons.add_circle_outline,
+                                        size: 13, color: Color(0xFFD32F2F)),
+                                    SizedBox(width: 3),
+                                    Text(
+                                      "+ Add",
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFFD32F2F),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+
+                          // "- Remove" Toggle Button
+                          Tooltip(
+                            message: "- Remove Size",
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(6),
+                              onTap: () {
+                                setState(() {
+                                  _isRemovalMode = !_isRemovalMode;
+                                });
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 3.5),
+                                decoration: BoxDecoration(
+                                  color: _isRemovalMode
+                                      ? (isDark
+                                          ? const Color(0xFF7F1D1D)
+                                              .withValues(alpha: 0.3)
+                                          : const Color(0xFFFEE2E2))
+                                      : null,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: _isRemovalMode
+                                        ? const Color(0xFFDC2626)
+                                        : (isDark
+                                            ? const Color(0xFF475569)
+                                            : const Color(0xFFCBD5E1)),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _isRemovalMode
+                                          ? Icons.check_circle_outline
+                                          : Icons.remove_circle_outline,
+                                      size: 13,
+                                      color: _isRemovalMode
+                                          ? const Color(0xFFDC2626)
+                                          : (isDark
+                                              ? const Color(0xFFE2E8F0)
+                                              : const Color(0xFF475569)),
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      _isRemovalMode ? "Done" : "- Remove",
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: _isRemovalMode
+                                            ? const Color(0xFFDC2626)
+                                            : (isDark
+                                                ? const Color(0xFFE2E8F0)
+                                                : const Color(0xFF475569)),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // Optional Reset Defaults button if modified
+                          if (isModified) ...[
+                            const SizedBox(width: 2),
+                            IconButton(
+                              tooltip: "Reset Defaults",
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.all(3),
+                              constraints: const BoxConstraints(
+                                  minWidth: 24, minHeight: 24),
+                              onPressed: () => _resetCategoryToDefaults(title),
+                              icon: Icon(
+                                Icons.restore_rounded,
+                                size: 15,
+                                color: isDark
+                                    ? const Color(0xFF94A3B8)
+                                    : const Color(0xFF64748B),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   ),
                 ],
-              ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: hasBasic
-                          ? const Color(0xFFECFDF5)
-                          : (isDark
-                              ? const Color(0xFF334155)
-                              : const Color(0xFFF1F5F9)),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: hasBasic
-                            ? const Color(0xFFA7F3D0)
-                            : (isDark
-                                ? const Color(0xFF475569)
-                                : const Color(0xFFE2E8F0)),
-                      ),
-                    ),
-                    child: Text(
-                      hasBasic
-                          ? "Base: ₹${formatIndianCurrency(basic.round())}/MT"
-                          : "Base Rate Not Set",
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: hasBasic
-                            ? const Color(0xFF059669)
-                            : const Color(0xFF94A3B8),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+              );
+            },
           ),
         ),
 
@@ -1243,7 +1517,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                     ),
                     _TableHeaderCell(
                       "SD VALUE",
-                      alignment: Alignment.centerRight,
+                      alignment: Alignment.center,
                     ),
                     _TableHeaderCell(
                       "NET COMPUTED RATE",
@@ -1308,7 +1582,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                           ),
                         ),
                         const _TableCell(
-                          alignment: Alignment.centerRight,
+                          alignment: Alignment.center,
                           child: Text("—",
                               style: TextStyle(
                                   fontSize: 12, color: Color(0xFF94A3B8))),
@@ -1329,26 +1603,96 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                   return TableRow(
                     decoration: BoxDecoration(color: rowBg),
                     children: [
-                      // Col 1: Size & Weight
+                      // Col 1: Size & Weight + Custom Tag + Delete Action (flex: 4)
                       _TableCell(
                         alignment: Alignment.centerLeft,
-                        child: Text(
-                          dispLabel,
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                            color: isDark
-                                ? Colors.white
-                                : const Color(0xFF0F172A),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        child: Row(
+                          children: [
+                            if (_isRemovalMode) ...[
+                              InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () => _removeSizeFromCategory(title, size),
+                                child: const Padding(
+                                  padding: EdgeInsets.only(right: 6.0),
+                                  child: Icon(
+                                    Icons.remove_circle,
+                                    size: 16,
+                                    color: Color(0xFFDC2626),
+                                  ),
+                                ),
+                              ),
+                            ],
+                            Expanded(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      dispLabel,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: isDark
+                                            ? Colors.white
+                                            : const Color(0xFF0F172A),
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  if (size.isCustom) ...[
+                                    const SizedBox(width: 4),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 4, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: isDark
+                                            ? const Color(0xFF1E3A8A).withValues(alpha: 0.4)
+                                            : const Color(0xFFEFF6FF),
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(
+                                          color: isDark
+                                              ? const Color(0xFF3B82F6).withValues(alpha: 0.4)
+                                              : const Color(0xFFBFDBFE),
+                                          width: 0.5,
+                                        ),
+                                      ),
+                                      child: const Text(
+                                        "CUSTOM",
+                                        style: TextStyle(
+                                          fontSize: 8.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF2563EB),
+                                          letterSpacing: 0.3,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            if (!_isRemovalMode && size.isCustom)
+                              InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () => _removeSizeFromCategory(title, size),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(2.0),
+                                  child: Icon(
+                                    Icons.close_rounded,
+                                    size: 15,
+                                    color: isDark
+                                        ? const Color(0xFF94A3B8)
+                                        : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
 
-                      // Col 2: SD Value Badge
+                      // Col 2: SD Value Badge (flex: 2, Center Aligned)
                       _TableCell(
-                        alignment: Alignment.centerRight,
+                        alignment: Alignment.center,
                         child: size.sd != 0
                             ? Container(
                                 padding: const EdgeInsets.symmetric(
@@ -1370,7 +1714,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                                       ? "+₹${size.sd.toStringAsFixed(0)}"
                                       : "-₹${size.sd.abs().toStringAsFixed(0)}",
                                   style: TextStyle(
-                                    fontSize: 11,
+                                    fontSize: 10.5,
                                     fontWeight: FontWeight.w700,
                                     color: size.sd > 0
                                         ? const Color(0xFF059669)
@@ -1381,21 +1725,21 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                             : const Text(
                                 "Base",
                                 style: TextStyle(
-                                  fontSize: 11.5,
+                                  fontSize: 11,
                                   fontWeight: FontWeight.w500,
                                   color: Color(0xFF94A3B8),
                                 ),
                               ),
                       ),
 
-                      // Col 3: Net Computed Rate
+                      // Col 3: Net Computed Rate (flex: 3, Right Aligned)
                       _TableCell(
                         alignment: Alignment.centerRight,
                         child: hasCalculated
                             ? Text(
-                                "₹ ${formatIndianCurrency(finalRate.round())}/MT",
+                                "₹${formatIndianCurrency(finalRate.round())}",
                                 style: const TextStyle(
-                                  fontSize: 12.5,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.w800,
                                   color: Color(0xFF059669),
                                 ),
@@ -1602,16 +1946,16 @@ class _TableHeaderCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 34,
+      constraints: const BoxConstraints(minHeight: 38),
       alignment: alignment,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Text(
         title,
         style: const TextStyle(
           fontWeight: FontWeight.w700,
-          fontSize: 10.5,
+          fontSize: 10,
           color: Color(0xFF64748B),
-          letterSpacing: 0.4,
+          letterSpacing: 0.3,
         ),
       ),
     );
@@ -1628,10 +1972,411 @@ class _TableCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 38,
+      constraints: const BoxConstraints(minHeight: 44),
       alignment: alignment,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: child,
+    );
+  }
+}
+
+// ── ADD SIZE BOTTOM SHEET / MODAL ──
+class _AddSizeBottomSheet extends StatefulWidget {
+  final String category;
+  final bool isDark;
+  final List<SampleRateSize> existingSizes;
+  final ValueChanged<SampleRateSize> onSizeSelected;
+
+  const _AddSizeBottomSheet({
+    required this.category,
+    required this.isDark,
+    required this.existingSizes,
+    required this.onSizeSelected,
+  });
+
+  @override
+  State<_AddSizeBottomSheet> createState() => _AddSizeBottomSheetState();
+}
+
+class _AddSizeBottomSheetState extends State<_AddSizeBottomSheet> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  List<SampleRateSize> _allMasterSizes = [];
+  List<SampleRateSize> _filteredSizes = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchCtrl.addListener(_onSearchChanged);
+    _loadSizes();
+  }
+
+  void _loadSizes() {
+    final inv = context.read<InventoryProvider>();
+    final masterList = inv.getMasterSizesForCategory(widget.category);
+    setState(() {
+      _allMasterSizes = masterList;
+      _filteredSizes = masterList;
+      _isLoading = false;
+    });
+  }
+
+  void _onSearchChanged() {
+    final q = _searchCtrl.text.trim().toLowerCase();
+    if (q.isEmpty) {
+      setState(() => _filteredSizes = _allMasterSizes);
+    } else {
+      final cleanQ = q.replaceAll('"', '').replaceAll("'", '').replaceAll(' ', '');
+      setState(() {
+        _filteredSizes = _allMasterSizes.where((s) {
+          final label = s.label.toLowerCase();
+          final cleanLabel = label.replaceAll('"', '').replaceAll("'", '').replaceAll(' ', '');
+          final w = s.weight.toString();
+          final sd = s.sd.toString();
+          return label.contains(q) ||
+              cleanLabel.contains(cleanQ) ||
+              w.contains(q) ||
+              sd.contains(q);
+        }).toList();
+      });
+    }
+  }
+
+  bool _isSizeAlreadyAdded(SampleRateSize size) {
+    String cleanA = _cleanForCompare(size.label);
+    return widget.existingSizes.any((existing) {
+      if (existing.label.trim().toUpperCase() == size.label.trim().toUpperCase()) return true;
+      String cleanB = _cleanForCompare(existing.label);
+      return cleanA == cleanB;
+    });
+  }
+
+  String _cleanForCompare(String s) {
+    return s
+        .replaceAll('"', '')
+        .replaceAll("'", '')
+        .replaceAll('”', '')
+        .replaceAll('“', '')
+        .replaceAll('’', '')
+        .replaceAll('‘', '')
+        .replaceAll('×', 'X')
+        .replaceAll('x', 'X')
+        .replaceAll('*', 'X')
+        .replaceAll(RegExp(r'\s+'), '')
+        .toUpperCase();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = widget.isDark;
+    final mediaQuery = MediaQuery.of(context);
+    final bottomInset = mediaQuery.viewInsets.bottom;
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: Container(
+          height: mediaQuery.size.height * 0.82,
+          margin: EdgeInsets.only(bottom: bottomInset),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF0F172A) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            border: Border.all(
+              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+            ),
+          ),
+          child: Column(
+            children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 10, bottom: 6),
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+
+              // Header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFD32F2F).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(
+                            Icons.add_circle_outline,
+                            color: Color(0xFFD32F2F),
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Add Size: ${widget.category}",
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              ),
+                            ),
+                            Text(
+                              "${_allMasterSizes.length} master sizes cataloged",
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: isDark ? Colors.white70 : const Color(0xFF64748B),
+                      ),
+                      tooltip: "Close",
+                    ),
+                  ],
+                ),
+              ),
+
+              // Search Box
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: TextField(
+                  controller: _searchCtrl,
+                  autofocus: false,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  ),
+                  decoration: InputDecoration(
+                    hintText: "Search size (e.g. 2\", 50x50, 2.5mm)...",
+                    hintStyle: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                    ),
+                    prefixIcon: const Icon(Icons.search_rounded, size: 20, color: Color(0xFF94A3B8)),
+                    suffixIcon: _searchCtrl.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 18),
+                            onPressed: () => _searchCtrl.clear(),
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(
+                        color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFFD32F2F), width: 1.5),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+
+              // List of Master Sizes
+              Expanded(
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _filteredSizes.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.search_off_rounded,
+                                  size: 40,
+                                  color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  _searchCtrl.text.isEmpty
+                                      ? "No master sizes found for ${widget.category}"
+                                      : "No matching sizes found for \"${_searchCtrl.text}\"",
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            itemCount: _filteredSizes.length,
+                            separatorBuilder: (_, __) => Divider(
+                              height: 1,
+                              thickness: 0.5,
+                              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                            ),
+                            itemBuilder: (context, index) {
+                              final size = _filteredSizes[index];
+                              final isAdded = _isSizeAlreadyAdded(size);
+
+                              String weightSuffix = '';
+                              final w = size.weight.toDouble();
+                              if (w > 0) {
+                                final fw = w % 1 == 0 ? w.toInt().toString() : w.toStringAsFixed(1);
+                                weightSuffix = " (${fw} kg)";
+                              }
+
+                              return InkWell(
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: isAdded
+                                    ? null
+                                    : () {
+                                        widget.onSizeSelected(size);
+                                        Navigator.pop(context);
+                                      },
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        isAdded
+                                            ? Icons.check_circle_rounded
+                                            : Icons.add_circle_outline_rounded,
+                                        size: 20,
+                                        color: isAdded
+                                            ? const Color(0xFF10B981)
+                                            : (isDark ? Colors.white70 : const Color(0xFFD32F2F)),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              "${size.label}$weightSuffix",
+                                              style: TextStyle(
+                                                fontSize: 13.5,
+                                                fontWeight: FontWeight.w600,
+                                                color: isAdded
+                                                    ? (isDark
+                                                        ? const Color(0xFF64748B)
+                                                        : const Color(0xFF94A3B8))
+                                                    : (isDark
+                                                        ? Colors.white
+                                                        : const Color(0xFF0F172A)),
+                                                decoration: isAdded ? TextDecoration.none : null,
+                                              ),
+                                            ),
+                                            if (size.sd != 0)
+                                              Text(
+                                                size.sd > 0
+                                                    ? "SD: +₹${size.sd.toStringAsFixed(0)}"
+                                                    : "SD: -₹${size.sd.abs().toStringAsFixed(0)}",
+                                                style: TextStyle(
+                                                  fontSize: 11.5,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: size.sd > 0
+                                                      ? const Color(0xFF059669)
+                                                      : const Color(0xFFD97706),
+                                                ),
+                                              )
+                                            else
+                                              const Text(
+                                                "SD: Base Rate",
+                                                style: TextStyle(
+                                                  fontSize: 11.5,
+                                                  color: Color(0xFF94A3B8),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (isAdded)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFECFDF5),
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: Border.all(
+                                              color: const Color(0xFFA7F3D0),
+                                              width: 0.5,
+                                            ),
+                                          ),
+                                          child: const Text(
+                                            "Added",
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF059669),
+                                            ),
+                                          ),
+                                        )
+                                      else
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: isDark
+                                                ? const Color(0xFF1E293B)
+                                                : const Color(0xFFF1F5F9),
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: Border.all(
+                                              color: isDark
+                                                  ? const Color(0xFF334155)
+                                                  : const Color(0xFFCBD5E1),
+                                              width: 0.5,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: const [
+                                              Icon(Icons.add, size: 12, color: Color(0xFFD32F2F)),
+                                              SizedBox(width: 2),
+                                              Text(
+                                                "Add",
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: Color(0xFFD32F2F),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

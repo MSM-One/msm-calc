@@ -29,6 +29,7 @@ import '../widgets/dashboard/unified_stock_distribution_card.dart';
 import '../widgets/dashboard/enterprise_quick_actions_grid.dart';
 import '../services/auth_service.dart';
 import '../services/app_update_service.dart';
+import '../widgets/app_version_badge.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -1534,7 +1535,9 @@ class _ProfileBottomSheetContentState
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
+          const AppVersionBadge(showBuildNumber: true),
+          const SizedBox(height: 4),
         ],
       ),
     );

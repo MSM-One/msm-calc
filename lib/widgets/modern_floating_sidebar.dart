@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../models/user_session_notifier.dart';
 import '../models/stock_role.dart';
+import 'app_version_badge.dart';
 
 class ModernFloatingSidebar extends StatefulWidget {
   final String selectedTab;
@@ -164,7 +165,11 @@ class _ModernFloatingSidebarState extends State<ModernFloatingSidebar> {
                           isExpanded: _isExpanded,
                           onTap: widget.onLogout,
                         ),
-                        const SizedBox(height: 24),
+                        if (_isExpanded) ...[
+                          const SizedBox(height: 12),
+                          const AppVersionBadge(),
+                        ],
+                        const SizedBox(height: 20),
                       ],
                     ),
                   );

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'app_version_service.dart';
 import 'supabase_service.dart';
 import '../widgets/update_dialog.dart';
 
@@ -45,9 +46,24 @@ class AppUpdateService {
         return;
       }
 
-      final packageInfo = await PackageInfo.fromPlatform();
-      final String currentSemver = packageInfo.version.trim();
-      final String currentFullVersion = '${packageInfo.version.trim()}+${packageInfo.buildNumber.trim()}';
+      String currentSemver = AppVersionService.rawVersion;
+      String currentFullVersion =
+          '${AppVersionService.rawVersion}+${AppVersionService.buildNumber}';
+      try {
+        final packageInfo = await PackageInfo.fromPlatform().timeout(
+          const Duration(milliseconds: 1500),
+        );
+        if (packageInfo.version.trim().isNotEmpty) {
+          currentSemver = packageInfo.version.trim();
+        }
+        final bNum = packageInfo.buildNumber.trim().isNotEmpty
+            ? packageInfo.buildNumber.trim()
+            : AppVersionService.buildNumber;
+        currentFullVersion = '$currentSemver+$bNum';
+      } catch (e) {
+        debugPrint(
+            'DEBUG UPDATE CHECK: PackageInfo platform check fallback: $e');
+      }
       final String latestVersion =
           (response['latest_version']?.toString() ?? '1.0.0').trim();
       final String minSupportedVersion =

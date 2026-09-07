@@ -5,6 +5,7 @@ import 'package:msm_calc/providers/inventory_provider.dart';
 import 'package:msm_calc/screens/sauda_booking_screen.dart';
 import 'package:msm_calc/services/data_repository.dart';
 import 'package:msm_calc/models/user_model.dart';
+import 'package:msm_calc/models/delivery_order_model.dart';
 import 'package:msm_calc/core/app_permissions.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -14,9 +15,17 @@ void main() {
       'user_email': 'test@msm.com',
       'user_role': 'Admin',
       'sauda_firm': 'Test Steel Traders',
+      'sauda_shipping_address': 'Plot 42, MIDC Industrial Area, Nagpur',
       'sauda_vehicle': 'MH-20-AA-1234',
       'sauda_remarks': 'Urgent dispatch required',
+      'customer_addresses_cache':
+          '{"Test Steel Traders":"Plot 42, MIDC Industrial Area, Nagpur","Apex Builders":"Sector 5, Pune"}',
     });
+
+    DataRepository.customerAddressCache.clear();
+    DataRepository.customerAddressCache['Test Steel Traders'] =
+        'Plot 42, MIDC Industrial Area, Nagpur';
+    DataRepository.customerAddressCache['Apex Builders'] = 'Sector 5, Pune';
 
     DataRepository.currentUserNotifier.value = UserModel(
       email: 'test@msm.com',
@@ -73,9 +82,51 @@ void main() {
     });
   });
 
+  group('DeliveryOrderDataModel Unit Tests', () {
+    test('serializes and deserializes shippingAddress correctly', () {
+      final order = DeliveryOrderDataModel(
+        poNo: 'PO-101',
+        poDate: '07/09/2026',
+        dealerName: 'Apex Builders',
+        billingName: 'Apex Builders',
+        billingAddress: 'Sector 5, Pune',
+        consigneeName: 'Apex Site 1',
+        dispatchAddress: 'Sector 5, Pune',
+        shippingAddress: 'Sector 5, Warehouse B, Pune',
+        orderDate: '07/09/2026',
+        billType: 'BILL',
+        ob: '',
+        freight: '',
+        lorryNo: 'MH-12-PQ-9999',
+        note: 'Handle with care',
+        signedBy: 'Admin',
+        approvedBy: 'Lead',
+        items: [],
+      );
+
+      final json = order.toJson();
+      expect(json['shippingAddress'], 'Sector 5, Warehouse B, Pune');
+
+      final deserialized = DeliveryOrderDataModel.fromJson(json);
+      expect(deserialized.shippingAddress, 'Sector 5, Warehouse B, Pune');
+    });
+
+    test('falls back to dispatchAddress if shippingAddress is empty in json', () {
+      final json = {
+        'poNo': 'PO-102',
+        'dealerName': 'Test Traders',
+        'dispatchAddress': 'MIDC Wardha',
+        'items': <dynamic>[],
+      };
+
+      final deserialized = DeliveryOrderDataModel.fromJson(json);
+      expect(deserialized.shippingAddress, 'MIDC Wardha');
+    });
+  });
+
   group('SaudaBookingScreen Widget Tests', () {
     testWidgets(
-        'renders basic details, items, other details and actions on desktop',
+        'renders basic details with Shipping / Delivery Address on desktop',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1400, 900);
       tester.view.devicePixelRatio = 1.0;
@@ -97,8 +148,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Sauda Booking & Delivery Order'), findsOneWidget);
+      expect(find.text('Sauda & Delivery Order'), findsOneWidget);
       expect(find.text('Basic Details'), findsOneWidget);
+      expect(find.text('Firm / Customer Name'), findsOneWidget);
+      expect(find.text('Shipping / Delivery Address'), findsOneWidget);
       expect(find.text('Items & Rates'), findsOneWidget);
       expect(find.text('+ Add Material Item'), findsOneWidget);
       expect(find.text('Other Details'), findsOneWidget);
@@ -132,6 +185,7 @@ void main() {
       expect(find.text('Total Quantity Booked'), findsOneWidget);
       expect(find.text('Share Order'), findsOneWidget);
       expect(find.text('Print Order'), findsOneWidget);
+      expect(find.text('Shipping / Delivery Address'), findsOneWidget);
     });
   });
 }

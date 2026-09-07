@@ -7,6 +7,7 @@ class DeliveryOrderDataModel {
   final String billingAddress;
   final String consigneeName;
   final String dispatchAddress;
+  final String shippingAddress;
   final String orderDate;
   final String billType; // "BILL" | "NC"
   final dynamic ob;
@@ -26,6 +27,7 @@ class DeliveryOrderDataModel {
     required this.billingAddress,
     required this.consigneeName,
     required this.dispatchAddress,
+    this.shippingAddress = '',
     required this.orderDate,
     required this.billType,
     required this.ob,
@@ -55,6 +57,8 @@ class DeliveryOrderDataModel {
         'billingAddress': billingAddress,
         'consigneeName': consigneeName,
         'dispatchAddress': dispatchAddress,
+        'shippingAddress':
+            shippingAddress.isNotEmpty ? shippingAddress : dispatchAddress,
         'orderDate': orderDate,
         'billType': billType,
         'ob': ob,
@@ -67,6 +71,9 @@ class DeliveryOrderDataModel {
       };
 
   factory DeliveryOrderDataModel.fromJson(Map<String, dynamic> json) {
+    final sAddr = json['shippingAddress']?.toString() ??
+        json['dispatchAddress']?.toString() ??
+        '';
     return DeliveryOrderDataModel(
       documentTitle: json['documentTitle']?.toString() ??
           'SAUDA BOOK / DELIVERY ORDER',
@@ -76,7 +83,8 @@ class DeliveryOrderDataModel {
       billingName: json['billingName']?.toString() ?? '',
       billingAddress: json['billingAddress']?.toString() ?? '',
       consigneeName: json['consigneeName']?.toString() ?? '',
-      dispatchAddress: json['dispatchAddress']?.toString() ?? '',
+      dispatchAddress: json['dispatchAddress']?.toString() ?? sAddr,
+      shippingAddress: sAddr,
       orderDate: json['orderDate']?.toString() ?? '',
       billType: json['billType']?.toString() ?? 'BILL',
       ob: json['ob'] ?? '',
@@ -101,6 +109,7 @@ class DeliveryOrderDataModel {
     String? billingAddress,
     String? consigneeName,
     String? dispatchAddress,
+    String? shippingAddress,
     String? orderDate,
     String? billType,
     dynamic ob,
@@ -120,6 +129,7 @@ class DeliveryOrderDataModel {
       billingAddress: billingAddress ?? this.billingAddress,
       consigneeName: consigneeName ?? this.consigneeName,
       dispatchAddress: dispatchAddress ?? this.dispatchAddress,
+      shippingAddress: shippingAddress ?? this.shippingAddress,
       orderDate: orderDate ?? this.orderDate,
       billType: billType ?? this.billType,
       ob: ob ?? this.ob,

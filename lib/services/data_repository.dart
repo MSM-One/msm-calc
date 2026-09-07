@@ -104,8 +104,9 @@ class DataRepository {
     for (final entry in defaults.entries) {
       filled.putIfAbsent(entry.key, () => entry.value.isAllowed);
     }
-    if (filled.length == user.permissions.length)
+    if (filled.length == user.permissions.length) {
       return user; // Nothing changed
+    }
     return user.copyWith(permissions: filled);
   }
 
@@ -346,6 +347,9 @@ class DataRepository {
       debugPrint("[DataRepository] Loaded cached total stock: $cachedTotal MT");
     }
 
+    // Load customer addresses cache for Sauda / Delivery Order auto-fill
+    loadCustomerAddresses();
+
     // Trigger authoritative refresh from v_current_stock on startup
     refreshAllStockData(forceRefresh: true);
 
@@ -427,7 +431,7 @@ class DataRepository {
 
         // Requirement 8: Exact requested debug log format
         // [AUTH SYNC] platform userEmail role permissionsCount
-        final platform = kIsWeb ? "DESKTOP" : "MOBILE";
+        const platform = kIsWeb ? "DESKTOP" : "MOBILE";
         debugPrint(
             "[AUTH SYNC] $platform $email ${newUser.role.name} perms=${newUser.permissions.length}");
       } else {
@@ -595,7 +599,7 @@ class DataRepository {
         }
       }
     } catch (e) {
-      if (context != null) ErrorHandler.showError(context, e);
+      if (context != null && context.mounted) ErrorHandler.showError(context, e);
       debugPrint('[DataRepository] syncSheetData error: $e');
     } finally {
       isSyncing.value = false;
@@ -1999,5 +2003,65 @@ class DataRepository {
         (v['closing'] as double) == 0.0);
 
     return ledgerMap;
+  }
+
+  // ── Customer / Delivery Addresses Cache ─────────────────────────────────────
+  static final Map<String, String> customerAddressCache = {};
+
+  /// Loads cached customer addresses from SharedPreferences / Hive
+  static Future<void> loadCustomerAddresses() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final rawJson = prefs.getString('customer_addresses_cache');
+      if (rawJson != null && rawJson.isNotEmpty) {
+        final Map<String, dynamic> decoded = jsonDecode(rawJson);
+        for (final entry in decoded.entries) {
+          customerAddressCache[entry.key.toLowerCase()] = entry.value.toString();
+        }
+      }
+    } catch (e) {
+      debugPrint('[DataRepository] Error loading customer addresses cache: $e');
+    }
+
+    // Attempt to seed from Supabase parties/dealers if available
+    try {
+      final parties = await SupabaseService.client
+          .from('parties')
+          .select('name, address, city, location')
+          .limit(100);
+      for (final row in parties) {
+        final name = row['name']?.toString().trim();
+        final addr = (row['address']?.toString().trim().isNotEmpty == true)
+            ? row['address']?.toString().trim()
+            : (row['city']?.toString().trim().isNotEmpty == true
+                ? row['city']?.toString().trim()
+                : row['location']?.toString().trim());
+        if (name != null && name.isNotEmpty && addr != null && addr.isNotEmpty) {
+          customerAddressCache[name.toLowerCase()] = addr;
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Gets stored address for customer / firm name (case-insensitive)
+  static String? getCustomerAddress(String customerName) {
+    final key = customerName.trim().toLowerCase();
+    return customerAddressCache[key];
+  }
+
+  /// Saves or updates a customer address mapping into cache & SharedPreferences
+  static Future<void> saveCustomerAddress(
+      String customerName, String address) async {
+    final trimmedName = customerName.trim();
+    final trimmedAddr = address.trim();
+    if (trimmedName.isEmpty || trimmedAddr.isEmpty) return;
+    customerAddressCache[trimmedName.toLowerCase()] = trimmedAddr;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+          'customer_addresses_cache', jsonEncode(customerAddressCache));
+    } catch (e) {
+      debugPrint('[DataRepository] Error saving customer address cache: $e');
+    }
   }
 }

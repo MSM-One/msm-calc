@@ -26,9 +26,11 @@ class SaudaBookingScreen extends StatefulWidget {
 
 class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
   final TextEditingController firmNameCtrl = TextEditingController();
+  final TextEditingController shippingAddressCtrl = TextEditingController();
   final TextEditingController vehicleCtrl = TextEditingController();
   final TextEditingController remarksCtrl = TextEditingController();
   final TextEditingController _dateCtrl = TextEditingController();
+  bool _isAddressAutoFilled = false;
   DateTime bookingDate = DateTime.now();
   String _documentTitle = 'SAUDA BOOK / DELIVERY ORDER';
   List<SaudaItem> items = [];
@@ -51,6 +53,7 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
     final provider = context.read<InventoryProvider>();
     provider.loadSaudaData();
     DataRepository.ensureMasterLookupData();
+    DataRepository.loadCustomerAddresses();
 
     _dateCtrl.text = DateFormat('dd MMM yyyy').format(bookingDate);
     if (items.isEmpty) addItem();
@@ -59,6 +62,7 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
   @override
   void dispose() {
     firmNameCtrl.dispose();
+    shippingAddressCtrl.dispose();
     vehicleCtrl.dispose();
     remarksCtrl.dispose();
     _dateCtrl.dispose();
@@ -72,6 +76,8 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       firmNameCtrl.text = prefs.getString('sauda_firm') ?? "";
+      shippingAddressCtrl.text =
+          prefs.getString('sauda_shipping_address') ?? "";
       vehicleCtrl.text = prefs.getString('sauda_vehicle') ?? "";
       remarksCtrl.text = prefs.getString('sauda_remarks') ?? "";
       _documentTitle = prefs.getString('sauda_document_title') ??
@@ -82,9 +88,16 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
   Future<void> _saveData() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('sauda_firm', firmNameCtrl.text);
+    await prefs.setString(
+        'sauda_shipping_address', shippingAddressCtrl.text);
     await prefs.setString('sauda_vehicle', vehicleCtrl.text);
     await prefs.setString('sauda_remarks', remarksCtrl.text);
     await prefs.setString('sauda_document_title', _documentTitle);
+    if (firmNameCtrl.text.trim().isNotEmpty &&
+        shippingAddressCtrl.text.trim().isNotEmpty) {
+      DataRepository.saveCustomerAddress(
+          firmNameCtrl.text.trim(), shippingAddressCtrl.text.trim());
+    }
   }
 
   void addItem() {
@@ -115,6 +128,9 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
     msg.writeln("*Sauda Booking*");
     msg.writeln("Date: $dateStr");
     msg.writeln("*Firm: ${firmNameCtrl.text}*");
+    if (shippingAddressCtrl.text.trim().isNotEmpty) {
+      msg.writeln("📍 Delivery Address: ${shippingAddressCtrl.text.trim()}");
+    }
     if (vehicleCtrl.text.isNotEmpty) {
       msg.writeln("Vehicle No.: ${vehicleCtrl.text.toUpperCase()}");
     }
@@ -281,6 +297,7 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
       }
     }
 
+    final sAddr = shippingAddressCtrl.text.trim();
     return DeliveryOrderDataModel(
       documentTitle: _documentTitle,
       poNo: autoPoNo,
@@ -289,7 +306,8 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
       billingName: firmNameCtrl.text.trim(),
       billingAddress: "",
       consigneeName: firmNameCtrl.text.trim(),
-      dispatchAddress: "",
+      dispatchAddress: sAddr,
+      shippingAddress: sAddr,
       orderDate: dateStr,
       billType: detectedBillType,
       ob: "",
@@ -520,6 +538,8 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
                           items.clear();
                           addItem();
                           firmNameCtrl.clear();
+                          shippingAddressCtrl.clear();
+                          _isAddressAutoFilled = false;
                           vehicleCtrl.clear();
                           remarksCtrl.clear();
                           bookingDate = DateTime.now();
@@ -812,22 +832,175 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
             ],
           ),
         const SizedBox(height: 10),
-        TextField(
-          controller: firmNameCtrl,
+        _buildFirmNameField(),
+        const SizedBox(height: 10),
+        _buildShippingAddressField(),
+      ],
+    );
+  }
+
+  void _onFirmChanged(String val) {
+    _saveData();
+    if (val.trim().isNotEmpty) {
+      final defaultAddr = DataRepository.getCustomerAddress(val);
+      if (defaultAddr != null && defaultAddr.trim().isNotEmpty) {
+        if (shippingAddressCtrl.text.trim().isEmpty || _isAddressAutoFilled) {
+          setState(() {
+            shippingAddressCtrl.text = defaultAddr.trim();
+            _isAddressAutoFilled = true;
+          });
+          _saveData();
+        }
+      }
+    }
+  }
+
+  Widget _buildFirmNameField() {
+    final knownFirms = DataRepository.customerAddressCache.keys
+        .where((k) => k.trim().isNotEmpty)
+        .toList();
+
+    return RawAutocomplete<String>(
+      textEditingController: firmNameCtrl,
+      focusNode: FocusNode(),
+      optionsBuilder: (TextEditingValue textEditingValue) {
+        final query = textEditingValue.text.trim();
+        if (query.isEmpty) {
+          return knownFirms;
+        }
+        return knownFirms
+            .where((f) => f.toLowerCase().contains(query.toLowerCase()))
+            .toList();
+      },
+      onSelected: (String selection) {
+        firmNameCtrl.text = selection;
+        _onFirmChanged(selection);
+      },
+      fieldViewBuilder:
+          (context, textEditingController, focusNode, onFieldSubmitted) {
+        return TextField(
+          controller: textEditingController,
+          focusNode: focusNode,
           decoration: msmInputDeco(
             "Firm / Customer Name",
             prefix: const Icon(Icons.business_outlined,
                 size: 16, color: Color(0xFF64748B)),
             hint: "Enter client firm name",
+          ).copyWith(
+            suffixIcon: textEditingController.text.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear_rounded,
+                        size: 16, color: textGrey),
+                    onPressed: () {
+                      textEditingController.clear();
+                      _onFirmChanged('');
+                    },
+                  )
+                : null,
           ),
           style: const TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
             color: Color(0xFF0F172A),
           ),
-          onChanged: (_) => _saveData(),
-        ),
-      ],
+          onChanged: (val) => _onFirmChanged(val),
+        );
+      },
+      optionsViewBuilder: (context, onSelected, options) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(10),
+            color: Colors.white,
+            child: Container(
+              constraints: const BoxConstraints(maxHeight: 200, maxWidth: 380),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                shrinkWrap: true,
+                itemCount: options.length,
+                separatorBuilder: (_, __) =>
+                    const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                itemBuilder: (BuildContext context, int index) {
+                  final option = options.elementAt(index);
+                  final addr = DataRepository.getCustomerAddress(option);
+                  return ListTile(
+                    dense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                    leading: const Icon(Icons.business_rounded,
+                        size: 16, color: msmRed),
+                    title: Text(
+                      option,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    subtitle: addr != null && addr.isNotEmpty
+                        ? Text(
+                            addr,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 11, color: Color(0xFF64748B)),
+                          )
+                        : null,
+                    onTap: () => onSelected(option),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildShippingAddressField() {
+    return TextField(
+      controller: shippingAddressCtrl,
+      minLines: 1,
+      maxLines: 3,
+      decoration: msmInputDeco(
+        "Shipping / Delivery Address",
+        prefix: const Icon(Icons.local_shipping_outlined,
+            size: 16, color: Color(0xFF64748B)),
+        hint: "Enter destination / shipping address (optional)",
+      ).copyWith(
+        suffixIcon: shippingAddressCtrl.text.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.clear_rounded,
+                    size: 16, color: textGrey),
+                tooltip: "Clear address",
+                onPressed: () {
+                  setState(() {
+                    shippingAddressCtrl.clear();
+                    _isAddressAutoFilled = false;
+                  });
+                  _saveData();
+                },
+              )
+            : null,
+      ),
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        color: Color(0xFF0F172A),
+      ),
+      onChanged: (val) {
+        _isAddressAutoFilled = false;
+        _saveData();
+        if (firmNameCtrl.text.trim().isNotEmpty && val.trim().isNotEmpty) {
+          DataRepository.saveCustomerAddress(
+              firmNameCtrl.text.trim(), val.trim());
+        }
+      },
     );
   }
 

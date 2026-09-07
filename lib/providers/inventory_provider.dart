@@ -67,25 +67,49 @@ class InventoryProvider extends ChangeNotifier {
         label: "25x3",
         defaultWeight: 6.2,
         defaultSd: 3000,
-        matchKeys: ["25X3", "25 X 3"],
+        matchKeys: ["25X3", "1\" 25X3", "25 X 3", "25*3", "ISA 25X3", "25X25X3"],
+      ),
+      SampleRateSpec(
+        label: "25x5",
+        defaultWeight: 10.0,
+        defaultSd: 3000,
+        matchKeys: ["25X5", "1\" 25X5", "25 X 5", "25*5", "ISA 25X5", "25X25X5"],
+      ),
+      SampleRateSpec(
+        label: "32x3",
+        defaultWeight: 8.5,
+        defaultSd: 2500,
+        matchKeys: ["32X3", "1.25\" 32X3", "32 X 3", "32*3", "ISA 32X3", "32X32X3"],
       ),
       SampleRateSpec(
         label: "35x5",
         defaultWeight: 14.5,
         defaultSd: 2000,
-        matchKeys: ["35X5", "35 X 5"],
+        matchKeys: ["35X5", "1.25\" 35X5", "35 X 5", "35*5", "ISA 35X5", "35X35X5"],
+      ),
+      SampleRateSpec(
+        label: "40x4",
+        defaultWeight: 14.5,
+        defaultSd: 1500,
+        matchKeys: ["40X4", "1.5\" 40X4", "40 X 4", "40*4", "ISA 40X4", "40X40X4"],
       ),
       SampleRateSpec(
         label: "40x5",
         defaultWeight: 18.0,
         defaultSd: 1000,
-        matchKeys: ["40X5", "40 X 5"],
+        matchKeys: ["40X5", "1.5\" 40X5", "40 X 5", "40*5", "ISA 40X5", "40X40X5"],
       ),
       SampleRateSpec(
         label: "50x5",
         defaultWeight: 21.5,
         defaultSd: 0,
-        matchKeys: ["50X5", "50 X 5"],
+        matchKeys: ["50X5", "2\" 50X5", "50 X 5", "50*5", "ISA 50X5", "50X50X5"],
+      ),
+      SampleRateSpec(
+        label: "65x5",
+        defaultWeight: 30.0,
+        defaultSd: 0,
+        matchKeys: ["65X5", "2.5\" 65X5", "65 X 5", "65*5", "ISA 65X5", "65X65X5"],
       ),
     ],
     "MS Channel": [
@@ -93,33 +117,33 @@ class InventoryProvider extends ChangeNotifier {
         label: "70x35 (3\"X1.5\")",
         defaultWeight: 22.0,
         defaultSd: 2500,
-        matchKeys: ["70X35", "C 70X35", "70X35 (3\"X1.5\")"],
+        matchKeys: ["70X35", "C 70X35", "70X35 (3\"X1.5\")", "70 X 35", "MC 70X35", "ISMC 70X35"],
       ),
       SampleRateSpec(
         label: "75x40 (3\"X1.5\")",
         defaultWeight: 36.0,
         defaultSd: 1500,
-        matchKeys: ["75X40", "C 75X40", "75X40 (3\"X1.5\")"],
+        matchKeys: ["75X40", "C 75X40", "75X40 (3\"X1.5\")", "75 X 40", "MC 75X40", "ISMC 75X40"],
       ),
       SampleRateSpec(
         label: "100x50 (4\"x 2\")",
         defaultWeight: 56.0,
         defaultSd: 0,
-        matchKeys: ["100X50", "C 100X50", "100X50 (4\"X2\")"],
+        matchKeys: ["100X50", "C 100X50", "100X50 (4\"X2\")", "100 X 50", "MC 100X50", "ISMC 100X50"],
       ),
     ],
     "Sqr Bar": [
       SampleRateSpec(
+        label: "8MM",
+        defaultWeight: 0.0,
+        defaultSd: 2000,
+        matchKeys: ["8MM", "08MM", "8 MM", "08 MM", "SQ 8", "SQ 08", "8"],
+      ),
+      SampleRateSpec(
         label: "10MM",
         defaultWeight: 0.0,
         defaultSd: 1500,
-        matchKeys: ["10MM", "10 MM"],
-      ),
-      SampleRateSpec(
-        label: "12MM",
-        defaultWeight: 0.0,
-        defaultSd: 0,
-        matchKeys: ["12MM", "12 MM"],
+        matchKeys: ["10MM", "10 MM", "SQ 10", "10"],
       ),
     ],
     "Round Bar": [
@@ -127,101 +151,155 @@ class InventoryProvider extends ChangeNotifier {
         label: "10MM",
         defaultWeight: 0.0,
         defaultSd: 1500,
-        matchKeys: ["10MM", "10 MM"],
+        matchKeys: ["10MM", "10 MM", "RD 10", "10"],
       ),
       SampleRateSpec(
         label: "12MM",
         defaultWeight: 0.0,
         defaultSd: 0,
-        matchKeys: ["12MM", "12 MM"],
+        matchKeys: ["12MM", "12 MM", "RD 12", "12"],
+      ),
+      SampleRateSpec(
+        label: "16MM",
+        defaultWeight: 0.0,
+        defaultSd: 0,
+        matchKeys: ["16MM", "16 MM", "RD 16", "16"],
       ),
     ],
     "Flats": [
       SampleRateSpec(
-        label: "F 25x5",
+        label: "F 25x3",
         defaultWeight: 0.0,
-        defaultSd: 2000,
-        matchKeys: ["25X5", "F 25X5", "F25X5"],
+        defaultSd: 2500,
+        matchKeys: ["25X3", "F 25X3", "F25X3", "25 X 3", "F 25 X 3", "25*3"],
       ),
       SampleRateSpec(
-        label: "F 32x5",
+        label: "F 40x3",
+        defaultWeight: 0.0,
+        defaultSd: 2000,
+        matchKeys: ["40X3", "F 40X3", "F40X3", "40 X 3", "F 40 X 3", "40*3"],
+      ),
+      SampleRateSpec(
+        label: "F 40x5",
         defaultWeight: 0.0,
         defaultSd: 1000,
-        matchKeys: ["32X5", "F 32X5", "F32X5"],
+        matchKeys: ["40X5", "F 40X5", "F40X5", "40 X 5", "F 40 X 5", "40*5"],
+      ),
+      SampleRateSpec(
+        label: "F 50x5",
+        defaultWeight: 0.0,
+        defaultSd: 0,
+        matchKeys: ["50X5", "F 50X5", "F50X5", "50 X 5", "F 50 X 5", "50*5"],
       ),
     ],
     "MS Pipe": [
       SampleRateSpec(
-        label: "1\" 25x25(1.2)",
-        defaultWeight: 6.0,
-        defaultSd: 5500,
-        matchKeys: ["1\" 25X25(1.2)", "1\" 25X25 (1.2)", "25X25(1.2)", "25X25 (1.2)", "25X25", "1\" 25X25"],
+        label: "0.75\" 19x19(1.6)",
+        defaultWeight: 5.0,
+        defaultSd: 6500,
+        matchKeys: ["0.75\" 19X19(1.6)", "0.75\" 19X19 (1.6)", "3/4\" 19X19", "19X19(1.6)", "19X19 (1.6)", "19X19", "0.75\" 19X19"],
       ),
       SampleRateSpec(
-        label: "1.25\" 41OD (1.2)",
+        label: "1\" 25x25(1.6)",
         defaultWeight: 7.0,
+        defaultSd: 4500,
+        matchKeys: ["1\" 25X25(1.6)", "1\" 25X25 (1.6)", "25X25(1.6)", "25X25 (1.6)", "25X25", "1\" 25X25"],
+      ),
+      SampleRateSpec(
+        label: "1.25\" 32x32(1.6)",
+        defaultWeight: 9.0,
+        defaultSd: 4000,
+        matchKeys: ["1.25\" 32X32(1.6)", "1.25\" 32X32 (1.6)", "1-1/4\" 32X32", "32X32(1.6)", "32X32 (1.6)", "32X32", "1.25\" 32X32"],
+      ),
+      SampleRateSpec(
+        label: "1.5\" 38x38(2.0)",
+        defaultWeight: 13.0,
+        defaultSd: 3500,
+        matchKeys: ["1.5\" 38X38(2.0)", "1.5\" 38X38 (2.0)", "1-1/2\" 38X38", "38X38(2.0)", "38X38 (2.0)", "38X38", "1.5\" 38X38"],
+      ),
+      SampleRateSpec(
+        label: "2\" 50x50(1.6)",
+        defaultWeight: 15.0,
+        defaultSd: 3500,
+        matchKeys: ["2\" 50X50(1.6)", "2\" 50X50 (1.6)", "50X50(1.6)", "50X50 (1.6)", "2\" 50X50"],
+      ),
+      SampleRateSpec(
+        label: "2\" 50x50(2.0)",
+        defaultWeight: 18.0,
+        defaultSd: 3500,
+        matchKeys: ["2\" 50X50(2.0)", "2\" 50X50 (2.0)", "50X50(2.0)", "50X50 (2.0)"],
+      ),
+      SampleRateSpec(
+        label: "2.5\" 60x60(2.0)",
+        defaultWeight: 22.0,
+        defaultSd: 4000,
+        matchKeys: ["2.5\" 60X60(2.0)", "2.5\" 60X60 (2.0)", "2-1/2\" 60X60", "60X60(2.0)", "60X60 (2.0)", "60X60", "2.5\" 60X60"],
+      ),
+      SampleRateSpec(
+        label: "3\" 72x72(2.0)",
+        defaultWeight: 27.0,
+        defaultSd: 4500,
+        matchKeys: ["3\" 72X72(2.0)", "3\" 72X72 (2.0)", "72X72(2.0)", "72X72 (2.0)", "72X72", "3\" 72X72", "75X75", "80X80"],
+      ),
+      SampleRateSpec(
+        label: "1.5\"x 0.75\" 40x20 (1.6)",
+        defaultWeight: 9.0,
         defaultSd: 5000,
-        matchKeys: ["1.25\" 41OD (1.2)", "1.25\" 41OD(1.2)", "41OD (1.2)", "41OD(1.2)", "1.25\" 41OD", "41OD", "41.3OD"],
+        matchKeys: ["1.5\"X 0.75\" 40X20 (1.6)", "1.5\"X0.75\" 40X20 (1.6)", "1.5\"X0.75\" 40X20(1.6)", "40X20 (1.6)", "40X20(1.6)", "40X20", "1.5\"X0.75\""],
       ),
       SampleRateSpec(
-        label: "1.5\" 38x38(1.2)",
-        defaultWeight: 8.5,
-        defaultSd: 4500,
-        matchKeys: ["1.5\" 38X38(1.2)", "1.5\" 38X38 (1.2)", "38X38(1.2)", "38X38 (1.2)", "1.5\" 38X38", "38X38"],
+        label: "2\"x1\" 50x25 (2.0)",
+        defaultWeight: 13.0,
+        defaultSd: 3500,
+        matchKeys: ["2\"X1\" 50X25 (2.0)", "2\"X1\" 50X25(2.0)", "50X25 (2.0)", "50X25(2.0)", "2\"X1\" 50X25", "50X25", "2\"X1\""],
       ),
       SampleRateSpec(
-        label: "1.5\" 48.3OD (1.2)",
-        defaultWeight: 8.5,
-        defaultSd: 4500,
-        matchKeys: ["1.5\" 48.3OD (1.2)", "1.5\" 48.3OD(1.2)", "48.3OD (1.2)", "48.3OD(1.2)", "1.5\" 48.3OD", "48.3OD", "48OD"],
-      ),
-      SampleRateSpec(
-        label: "2\"x1\" 50x25 (1.2)",
-        defaultWeight: 8.5,
-        defaultSd: 4500,
-        matchKeys: ["2\"X1\" 50X25 (1.2)", "2\"X1\" 50X25(1.2)", "50X25 (1.2)", "50X25(1.2)", "2\"X1\" 50X25", "50X25", "2\"X1\""],
-      ),
-      SampleRateSpec(
-        label: "2\" 50x50(1.2)",
-        defaultWeight: 11.0,
-        defaultSd: 4500,
-        matchKeys: ["2\" 50X50(1.2)", "2\" 50X50 (1.2)", "50X50(1.2)", "50X50 (1.2)", "2\" 50X50", "50X50"],
-      ),
-      SampleRateSpec(
-        label: "2\" 60.3OD (1.2)",
-        defaultWeight: 10.0,
-        defaultSd: 4500,
-        matchKeys: ["2\" 60.3OD (1.2)", "2\" 60.3OD(1.2)", "60.3OD (1.2)", "60.3OD(1.2)", "2\" 60.3OD", "60.3OD", "60OD"],
-      ),
-      SampleRateSpec(
-        label: "2.5\"x1.5\" 60x40 (1.2)",
-        defaultWeight: 10.0,
-        defaultSd: 4500,
-        matchKeys: ["2.5\"X1.5\" 60X40 (1.2)", "2.5\"X1.5\" 60X40(1.2)", "60X40 (1.2)", "60X40(1.2)", "2.5\"X1.5\" 60X40", "60X40", "2.5\"X1.5\""],
-      ),
-      SampleRateSpec(
-        label: "2.5\" 60x60(1.6)",
+        label: "3\"x1\" 75x25 (2.0)",
         defaultWeight: 17.0,
         defaultSd: 4500,
-        matchKeys: ["2.5\" 60X60(1.6)", "2.5\" 60X60 (1.6)", "60X60(1.6)", "60X60 (1.6)", "2.5\" 60X60", "60X60"],
+        matchKeys: ["3\"X1\" 75X25 (2.0)", "3\"X1\" 75X25(2.0)", "75X25 (2.0)", "75X25(2.0)", "3\"X1\" 75X25", "75X25", "3\"X1\""],
       ),
       SampleRateSpec(
-        label: "3\"x1.5\" 80x40 (1.6)",
-        defaultWeight: 17.0,
+        label: "3\"x1.5\" 80x40 (2.0)",
+        defaultWeight: 22.0,
+        defaultSd: 4000,
+        matchKeys: ["3\"X1.5\" 80X40 (2.0)", "3\"X1.5\" 80X40(2.0)", "80X40 (2.0)", "80X40(2.0)", "3\"X1.5\" 80X40", "80X40", "3\"X1.5\""],
+      ),
+      SampleRateSpec(
+        label: "4\"x2\" 96x48 (2.0)",
+        defaultWeight: 27.0,
         defaultSd: 4500,
-        matchKeys: ["3\"X1.5\" 80X40 (1.6)", "3\"X1.5\" 80X40(1.6)", "80X40 (1.6)", "80X40(1.6)", "3\"X1.5\" 80X40", "80X40", "3\"X1.5\""],
+        matchKeys: ["4\"X2\" 96X48 (2.0)", "4\"X2\" 96X48(2.0)", "96X48 (2.0)", "96X48(2.0)", "4\"X2\" 96X48", "96X48", "4\"X2\"", "100X50"],
       ),
       SampleRateSpec(
-        label: "3\" 72x72(1.6)",
-        defaultWeight: 21.0,
-        defaultSd: 5500,
-        matchKeys: ["3\" 72X72(1.6)", "3\" 72X72 (1.6)", "72X72(1.6)", "72X72 (1.6)", "3\" 72X72", "72X72"],
+        label: "0.75\" 25OD (1.6)",
+        defaultWeight: 5.0,
+        defaultSd: 6500,
+        matchKeys: ["0.75\" 25OD (1.6)", "0.75\" 25OD(1.6)", "25OD (1.6)", "25OD(1.6)", "25OD", "0.75\" 25OD", "3/4\" 25OD", "25.4OD"],
       ),
       SampleRateSpec(
-        label: "4\"x2\" 96x48 (1.6)",
-        defaultWeight: 21.0,
-        defaultSd: 5500,
-        matchKeys: ["4\"X2\" 96X48 (1.6)", "4\"X2\" 96X48(1.6)", "96X48 (1.6)", "96X48(1.6)", "4\"X2\" 96X48", "96X48", "4\"X2\""],
+        label: "1\" 33.4OD (1.6)",
+        defaultWeight: 7.0,
+        defaultSd: 4500,
+        matchKeys: ["1\" 33.4OD (1.6)", "1\" 33.4OD(1.6)", "1\" 32OD (1.6)", "33.4OD (1.6)", "33.4OD(1.6)", "33.4OD", "1\" 33.4OD", "32OD"],
+      ),
+      SampleRateSpec(
+        label: "1.25\" 41OD (1.6)",
+        defaultWeight: 9.0,
+        defaultSd: 4500,
+        matchKeys: ["1.25\" 41OD (1.6)", "1.25\" 41OD(1.6)", "41OD (1.6)", "41OD(1.6)", "1.25\" 41OD", "41OD", "41.3OD"],
+      ),
+      SampleRateSpec(
+        label: "1.5\" 48.3OD (2.0)",
+        defaultWeight: 13.0,
+        defaultSd: 3500,
+        matchKeys: ["1.5\" 48.3OD (2.0)", "1.5\" 48.3OD(2.0)", "48.3OD (2.0)", "48.3OD(2.0)", "1.5\" 48.3OD", "48.3OD", "48OD"],
+      ),
+      SampleRateSpec(
+        label: "2\" 60.3OD (1.6)",
+        defaultWeight: 14.0,
+        defaultSd: 3500,
+        matchKeys: ["2\" 60.3OD (1.6)", "2\" 60.3OD(1.6)", "60.3OD (1.6)", "60.3OD(1.6)", "2\" 60.3OD", "60.3OD", "60OD"],
       ),
     ],
   };
@@ -308,8 +386,27 @@ class InventoryProvider extends ChangeNotifier {
     return s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
   }
 
+  String _cleanSizeForMatch(String s) {
+    return s
+        .replaceAll('"', '')
+        .replaceAll("'", '')
+        .replaceAll('”', '')
+        .replaceAll('“', '')
+        .replaceAll('’', '')
+        .replaceAll('‘', '')
+        .replaceAll('×', 'X')
+        .replaceAll('x', 'X')
+        .replaceAll('*', 'X')
+        .replaceAll(' (', '(')
+        .replaceAll('( ', '(')
+        .replaceAll(' )', ')')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim()
+        .toUpperCase();
+  }
+
   String _normalizeSize(String s) {
-    return s.replaceAll('×', 'X').replaceAll('x', 'X').replaceAll(RegExp(r'\s+'), ' ').trim().toUpperCase();
+    return _cleanSizeForMatch(s);
   }
 
   Future<void> fetchSampleRateData({bool force = false}) async {
@@ -389,13 +486,18 @@ class InventoryProvider extends ChangeNotifier {
             final String rawLabel =
                 (s['size_label'] ?? s['label'] ?? s['size'] ?? '').toString().trim();
             if (rawLabel.isEmpty) continue;
-            final String normRaw = _normalizeSize(rawLabel);
+            final String normRaw = _cleanSizeForMatch(rawLabel);
+            final String noSpaceRaw = normRaw.replaceAll(' ', '');
 
             bool isMatch = spec.matchKeys.any((k) {
-              final String normK = _normalizeSize(k);
+              final String normK = _cleanSizeForMatch(k);
+              final String noSpaceK = normK.replaceAll(' ', '');
               return normRaw == normK ||
+                  noSpaceRaw == noSpaceK ||
                   normRaw.startsWith(normK) ||
-                  normRaw.contains(normK);
+                  noSpaceRaw.startsWith(noSpaceK) ||
+                  normRaw.contains(normK) ||
+                  noSpaceRaw.contains(noSpaceK);
             });
 
             if (isMatch) {
@@ -444,6 +546,104 @@ class InventoryProvider extends ChangeNotifier {
       _isLoadingSampleRates = false;
       notifyListeners();
     }
+  }
+
+  /// Retrieves all master catalog sizes for a given category from Supabase / Google Sheets.
+  List<SampleRateSize> getMasterSizesForCategory(String category) {
+    String targetCatName = category;
+    for (final catName in _orderedSampleRateCategories) {
+      if (_normalizeCategory(catName) == _normalizeCategory(category)) {
+        targetCatName = catName;
+        break;
+      }
+    }
+
+    final List<String> aliases = _sampleRateAliases[targetCatName] ?? [targetCatName];
+    final String normCatName = _normalizeCategory(targetCatName);
+
+    final List rawSizes = [];
+
+    // 1. From Google Sheets (sheetDataNotifier)
+    final items = DataRepository.sheetDataNotifier.value['items'] as List? ?? [];
+    final categoryItemsFromSheet = items.where((catItem) {
+      final String sheetCatName = (catItem['name'] ?? '').toString();
+      final String normSheetCat = _normalizeCategory(sheetCatName);
+      final String upperSheetCat = sheetCatName.toUpperCase().trim();
+
+      if (upperSheetCat.contains('HR PIPE') ||
+          upperSheetCat.contains('CR PIPE') ||
+          upperSheetCat.contains('ISMB') ||
+          upperSheetCat.contains('ISMC') ||
+          upperSheetCat.contains('STRUCTURE') ||
+          upperSheetCat.contains('BEAM') ||
+          upperSheetCat.contains('BARBED') ||
+          upperSheetCat.contains('GATE') ||
+          upperSheetCat.contains('BINDING') ||
+          upperSheetCat.contains('NAIL') ||
+          upperSheetCat.contains('ERW')) {
+        return false;
+      }
+
+      bool matchesAlias = aliases
+          .any((alias) => alias.toUpperCase().trim() == upperSheetCat);
+      bool matchesNorm = normSheetCat == normCatName;
+      return matchesAlias || matchesNorm;
+    }).toList();
+
+    for (var catItem in categoryItemsFromSheet) {
+      final List sizesRaw = catItem['sizes'] ?? [];
+      rawSizes.addAll(sizesRaw);
+    }
+
+    // 2. From Supabase master table item_sizes (itemSizesNotifier)
+    if (DataRepository.itemSizesNotifier.value.isNotEmpty) {
+      for (final s in DataRepository.itemSizesNotifier.value) {
+        final String matName = (s['material_name'] ?? s['category'] ?? s['item_name'] ?? '').toString();
+        final String upperMat = matName.toUpperCase().trim();
+        final String normMat = _normalizeCategory(matName);
+
+        bool matchesAlias = aliases.any((alias) => alias.toUpperCase().trim() == upperMat);
+        bool matchesNorm = normMat == normCatName;
+        if (matchesAlias || matchesNorm) {
+          rawSizes.add(s);
+        }
+      }
+    }
+
+    // Parse and deduplicate
+    final Map<String, SampleRateSize> uniqueMap = {};
+    for (var s in rawSizes) {
+      final String rawLabel =
+          (s['size_label'] ?? s['label'] ?? s['size'] ?? '').toString().trim();
+      if (rawLabel.isEmpty) continue;
+
+      final rawSd = s['size_difference'] ?? s['sd'] ?? s['diffRate'] ?? s['diff_rate'];
+      final rawWeight = s['unit_weight_kg'] ?? s['weight'] ?? s['std_weight'] ?? s['std_wt'];
+
+      num parsedSd = 0;
+      if (rawSd != null) {
+        parsedSd = (rawSd is num) ? rawSd : (num.tryParse(rawSd.toString()) ?? 0);
+      }
+
+      num parsedWeight = 0;
+      if (rawWeight != null) {
+        parsedWeight = (rawWeight is num) ? rawWeight : (num.tryParse(rawWeight.toString()) ?? 0);
+      }
+
+      final key = _cleanSizeForMatch(rawLabel);
+      if (!uniqueMap.containsKey(key)) {
+        uniqueMap[key] = SampleRateSize(
+          rawLabel,
+          parsedSd,
+          parsedWeight,
+          isCustom: true,
+        );
+      }
+    }
+
+    final result = uniqueMap.values.toList();
+    result.sort((a, b) => SortingUtils.compareSizes(a.label, b.label));
+    return result;
   }
 
   /// Updates a user's role and permissions on the server.

@@ -22,6 +22,7 @@ import '../widgets/m_loader.dart';
 import '../widgets/low_stock_widgets.dart';
 import '../widgets/msm_date_filter_sheet.dart';
 import '../widgets/motion_toast.dart';
+import '../widgets/app_version_badge.dart';
 import 'reports/low_stock_report_screen.dart';
 import 'reports/todays_summary_screen.dart';
 import 'reports/stock_ledger_screen.dart';
@@ -4694,6 +4695,12 @@ class _ReportsSidebar extends StatelessWidget {
               ),
             ),
             const _SupportCenterCard(),
+            const Padding(
+              padding: EdgeInsets.only(bottom: 12, top: 2),
+              child: Center(
+                child: AppVersionBadge(),
+              ),
+            ),
           ],
         ),
       ),

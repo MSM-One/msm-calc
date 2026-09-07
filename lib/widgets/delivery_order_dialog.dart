@@ -32,6 +32,7 @@ class DeliveryOrderPrintDialog extends StatefulWidget {
 class _DeliveryOrderPrintDialogState extends State<DeliveryOrderPrintDialog> {
   late TextEditingController _orderDateCtrl;
   late TextEditingController _dealerNameCtrl;
+  late TextEditingController _shippingAddressCtrl;
   late TextEditingController _lorryNoCtrl;
   late TextEditingController _noteCtrl;
   late TextEditingController _signedByCtrl;
@@ -50,6 +51,10 @@ class _DeliveryOrderPrintDialogState extends State<DeliveryOrderPrintDialog> {
     _orderDateCtrl = TextEditingController(text: m.orderDate);
     _dealerNameCtrl = TextEditingController(
         text: m.dealerName.isNotEmpty ? m.dealerName : m.billingName);
+    _shippingAddressCtrl = TextEditingController(
+        text: m.shippingAddress.isNotEmpty
+            ? m.shippingAddress
+            : m.dispatchAddress);
     _lorryNoCtrl = TextEditingController(text: m.lorryNo);
     _noteCtrl = TextEditingController(text: m.note);
     _signedByCtrl = TextEditingController(text: m.signedBy);
@@ -61,6 +66,7 @@ class _DeliveryOrderPrintDialogState extends State<DeliveryOrderPrintDialog> {
   void dispose() {
     _orderDateCtrl.dispose();
     _dealerNameCtrl.dispose();
+    _shippingAddressCtrl.dispose();
     _lorryNoCtrl.dispose();
     _noteCtrl.dispose();
     _signedByCtrl.dispose();
@@ -74,6 +80,8 @@ class _DeliveryOrderPrintDialogState extends State<DeliveryOrderPrintDialog> {
       orderDate: _orderDateCtrl.text.trim(),
       dealerName: _dealerNameCtrl.text.trim(),
       billingName: _dealerNameCtrl.text.trim(),
+      shippingAddress: _shippingAddressCtrl.text.trim(),
+      dispatchAddress: _shippingAddressCtrl.text.trim(),
       billType: _billType,
       lorryNo: _lorryNoCtrl.text.trim(),
       note: _noteCtrl.text.trim(),
@@ -197,6 +205,9 @@ class _DeliveryOrderPrintDialogState extends State<DeliveryOrderPrintDialog> {
                         ],
                       ),
                     ],
+                    const SizedBox(height: 10),
+                    _buildTextField(_shippingAddressCtrl, "Shipping / Delivery Address",
+                        maxLines: 2),
                     const SizedBox(height: 12),
 
                     // Document Title Selector

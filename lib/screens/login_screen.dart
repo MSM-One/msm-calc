@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/app_colors.dart';
 import '../services/auth_service.dart';
 import '../services/data_repository.dart';
+import '../widgets/app_version_badge.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -373,6 +374,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ],
                         ),
+                        const SizedBox(height: 12),
+                        const AppVersionBadge(),
                       ],
                     ),
                   ),

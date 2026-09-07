@@ -91,6 +91,9 @@ class DeliveryOrderPrintService {
     final date = model.orderDate.isNotEmpty ? model.orderDate : "-";
     final vehicle =
         model.lorryNo.isNotEmpty ? model.lorryNo.toUpperCase() : "-";
+    final shippingAddress = model.shippingAddress.isNotEmpty
+        ? model.shippingAddress
+        : (model.dispatchAddress.isNotEmpty ? model.dispatchAddress : "NA");
 
     return pw.Table(
       border: pw.TableBorder.all(color: _borderColor, width: 0.8),
@@ -101,15 +104,17 @@ class DeliveryOrderPrintService {
       children: [
         pw.TableRow(
           children: [
-            // Left Column (Firm Name & Remarks)
+            // Left Column (Firm Name, Shipping Address & Remarks)
             pw.Padding(
               padding: const pw.EdgeInsets.all(6),
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
                   _buildPartyField("Firm Name:", firm),
+                  pw.SizedBox(height: 3),
+                  _buildPartyField("Shipping Address:", shippingAddress),
                   if (model.note.isNotEmpty) ...[
-                    pw.SizedBox(height: 4),
+                    pw.SizedBox(height: 3),
                     _buildPartyField("Remarks:", model.note),
                   ],
                 ],
@@ -729,6 +734,7 @@ class DeliveryOrderPrintService {
       <tr>
         <td style="width:66%;">
           <strong>Firm Name:</strong> ${model.dealerName.isNotEmpty ? model.dealerName : (model.billingName.isNotEmpty ? model.billingName : "-")}<br>
+          <strong>Shipping Address:</strong> ${(model.shippingAddress.isNotEmpty ? model.shippingAddress : (model.dispatchAddress.isNotEmpty ? model.dispatchAddress : "NA"))}<br>
           ${model.note.isNotEmpty ? "<strong>Remarks:</strong> ${model.note}" : ""}
         </td>
         <td style="width:34%;">

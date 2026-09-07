@@ -110,7 +110,14 @@ class SampleRateSize {
   final num sd;
   final num weight;
   final bool isMissing;
-  SampleRateSize(this.label, this.sd, this.weight, {this.isMissing = false});
+  final bool isCustom;
+  SampleRateSize(
+    this.label,
+    this.sd,
+    this.weight, {
+    this.isMissing = false,
+    this.isCustom = false,
+  });
 }
 
 class SampleRateSpec {

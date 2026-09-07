@@ -25,6 +25,7 @@ import '../models/stock_role.dart';
 
 import '../screens/master_size_management_screen.dart';
 import '../screens/dealer_stock_share_screen.dart';
+import 'app_version_badge.dart';
 
 class MainScaffold extends StatefulWidget {
   const MainScaffold({super.key});
@@ -288,6 +289,13 @@ class _MainScaffoldState extends State<MainScaffold> {
                   },
                 );
               }),
+              const SizedBox(height: 8),
+              const Divider(height: 1, color: borderLight),
+              const SizedBox(height: 8),
+              const Center(
+                child: AppVersionBadge(),
+              ),
+              const SizedBox(height: 4),
             ],
           ),
         ),
@@ -425,13 +433,13 @@ class _PremiumSidebarState extends State<_PremiumSidebar> {
           const _LiveSyncStatusBar(),
           const SizedBox(height: 4),
           Padding(
-            padding: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.only(bottom: 8),
             child: InkWell(
               onTap: widget.onLogout,
               borderRadius: BorderRadius.circular(8),
               child: Padding(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                 child: Row(
                   children: [
                     Icon(Icons.logout_rounded,
@@ -448,6 +456,12 @@ class _PremiumSidebarState extends State<_PremiumSidebar> {
                   ],
                 ),
               ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Center(
+              child: AppVersionBadge(),
             ),
           ),
         ],
