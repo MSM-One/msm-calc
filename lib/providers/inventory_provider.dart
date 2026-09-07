@@ -152,76 +152,76 @@ class InventoryProvider extends ChangeNotifier {
     ],
     "MS Pipe": [
       SampleRateSpec(
-        label: "1\" 25x25 (1.6)",
+        label: "1\" 25x25(1.2)",
+        defaultWeight: 6.0,
+        defaultSd: 5500,
+        matchKeys: ["1\" 25X25(1.2)", "1\" 25X25 (1.2)", "25X25(1.2)", "25X25 (1.2)", "25X25", "1\" 25X25"],
+      ),
+      SampleRateSpec(
+        label: "1.25\" 41OD (1.2)",
         defaultWeight: 7.0,
+        defaultSd: 5000,
+        matchKeys: ["1.25\" 41OD (1.2)", "1.25\" 41OD(1.2)", "41OD (1.2)", "41OD(1.2)", "1.25\" 41OD", "41OD", "41.3OD"],
+      ),
+      SampleRateSpec(
+        label: "1.5\" 38x38(1.2)",
+        defaultWeight: 8.5,
         defaultSd: 4500,
-        matchKeys: ["1\" 25X25", "25X25 (1.6)", "25X25"],
+        matchKeys: ["1.5\" 38X38(1.2)", "1.5\" 38X38 (1.2)", "38X38(1.2)", "38X38 (1.2)", "1.5\" 38X38", "38X38"],
       ),
       SampleRateSpec(
-        label: "1.25\" 41OD (2.0)",
+        label: "1.5\" 48.3OD (1.2)",
+        defaultWeight: 8.5,
+        defaultSd: 4500,
+        matchKeys: ["1.5\" 48.3OD (1.2)", "1.5\" 48.3OD(1.2)", "48.3OD (1.2)", "48.3OD(1.2)", "1.5\" 48.3OD", "48.3OD", "48OD"],
+      ),
+      SampleRateSpec(
+        label: "2\"x1\" 50x25 (1.2)",
+        defaultWeight: 8.5,
+        defaultSd: 4500,
+        matchKeys: ["2\"X1\" 50X25 (1.2)", "2\"X1\" 50X25(1.2)", "50X25 (1.2)", "50X25(1.2)", "2\"X1\" 50X25", "50X25", "2\"X1\""],
+      ),
+      SampleRateSpec(
+        label: "2\" 50x50(1.2)",
         defaultWeight: 11.0,
         defaultSd: 4500,
-        matchKeys: ["1.25\" 41OD", "41OD (2.0)", "41OD", "41.3OD"],
+        matchKeys: ["2\" 50X50(1.2)", "2\" 50X50 (1.2)", "50X50(1.2)", "50X50 (1.2)", "2\" 50X50", "50X50"],
       ),
       SampleRateSpec(
-        label: "1.5\" 38x38 (1.6)",
-        defaultWeight: 11.0,
-        defaultSd: 3500,
-        matchKeys: ["1.5\" 38X38", "38X38 (1.6)", "38X38"],
+        label: "2\" 60.3OD (1.2)",
+        defaultWeight: 10.0,
+        defaultSd: 4500,
+        matchKeys: ["2\" 60.3OD (1.2)", "2\" 60.3OD(1.2)", "60.3OD (1.2)", "60.3OD(1.2)", "2\" 60.3OD", "60.3OD", "60OD"],
       ),
       SampleRateSpec(
-        label: "1.5\" 48.3OD (2.0)",
-        defaultWeight: 13.0,
-        defaultSd: 3500,
-        matchKeys: ["1.5\" 48.3OD", "48.3OD (2.0)", "48.3OD", "48OD"],
+        label: "2.5\"x1.5\" 60x40 (1.2)",
+        defaultWeight: 10.0,
+        defaultSd: 4500,
+        matchKeys: ["2.5\"X1.5\" 60X40 (1.2)", "2.5\"X1.5\" 60X40(1.2)", "60X40 (1.2)", "60X40(1.2)", "2.5\"X1.5\" 60X40", "60X40", "2.5\"X1.5\""],
       ),
       SampleRateSpec(
-        label: "2\"x1\" 50x25 (1.6)",
-        defaultWeight: 11.0,
-        defaultSd: 3500,
-        matchKeys: ["2\"X1\" 50X25", "50X25 (1.6)", "50X25", "2\"X1\""],
-      ),
-      SampleRateSpec(
-        label: "2\" 50x50 (1.6)",
-        defaultWeight: 15.0,
-        defaultSd: 3500,
-        matchKeys: ["2\" 50X50", "50X50 (1.6)", "50X50"],
-      ),
-      SampleRateSpec(
-        label: "2\" 60.3OD (2.0)",
+        label: "2.5\" 60x60(1.6)",
         defaultWeight: 17.0,
-        defaultSd: 3500,
-        matchKeys: ["2\" 60.3OD", "60.3OD (2.0)", "60.3OD", "60OD"],
-      ),
-      SampleRateSpec(
-        label: "2.5\"x1.5\" 60x40 (1.6)",
-        defaultWeight: 14.0,
-        defaultSd: 3500,
-        matchKeys: ["2.5\"X1.5\" 60X40", "60X40 (1.6)", "60X40", "2.5\"X1.5\""],
-      ),
-      SampleRateSpec(
-        label: "2.5\" 60x60 (2.0)",
-        defaultWeight: 22.0,
-        defaultSd: 4000,
-        matchKeys: ["2.5\" 60X60", "60X60 (2.0)", "60X60"],
+        defaultSd: 4500,
+        matchKeys: ["2.5\" 60X60(1.6)", "2.5\" 60X60 (1.6)", "60X60(1.6)", "60X60 (1.6)", "2.5\" 60X60", "60X60"],
       ),
       SampleRateSpec(
         label: "3\"x1.5\" 80x40 (1.6)",
         defaultWeight: 17.0,
         defaultSd: 4500,
-        matchKeys: ["3\"X1.5\" 80X40", "80X40 (1.6)", "80X40", "3\"X1.5\""],
+        matchKeys: ["3\"X1.5\" 80X40 (1.6)", "3\"X1.5\" 80X40(1.6)", "80X40 (1.6)", "80X40(1.6)", "3\"X1.5\" 80X40", "80X40", "3\"X1.5\""],
       ),
       SampleRateSpec(
-        label: "3\" 72x72 (2.0)",
-        defaultWeight: 27.0,
-        defaultSd: 4500,
-        matchKeys: ["3\" 72X72", "72X72 (2.0)", "72X72"],
+        label: "3\" 72x72(1.6)",
+        defaultWeight: 21.0,
+        defaultSd: 5500,
+        matchKeys: ["3\" 72X72(1.6)", "3\" 72X72 (1.6)", "72X72(1.6)", "72X72 (1.6)", "3\" 72X72", "72X72"],
       ),
       SampleRateSpec(
         label: "4\"x2\" 96x48 (1.6)",
         defaultWeight: 21.0,
         defaultSd: 5500,
-        matchKeys: ["4\"X2\" 96X48", "96X48 (1.6)", "96X48", "4\"X2\""],
+        matchKeys: ["4\"X2\" 96X48 (1.6)", "4\"X2\" 96X48(1.6)", "96X48 (1.6)", "96X48(1.6)", "4\"X2\" 96X48", "96X48", "4\"X2\""],
       ),
     ],
   };
@@ -235,10 +235,10 @@ class InventoryProvider extends ChangeNotifier {
   List<String> _saudaItemTypes = [];
   List<String> get saudaItemTypes => _saudaItemTypes;
 
-  double _sheetLoading = 255;
+  final double _sheetLoading = 255;
   double get sheetLoading => _sheetLoading;
 
-  double _sheetGst = 0.18;
+  final double _sheetGst = 0.18;
   double get sheetGst => _sheetGst;
 
   // --- Normalization for Sample Rate Calc ---
@@ -318,10 +318,10 @@ class InventoryProvider extends ChangeNotifier {
     _isLoadingSampleRates = true;
 
     try {
-      debugPrint("DEBUG: [SampleRate-Dynamic] Starting data fetch (force: $force)");
+      debugPrint("DEBUG: [SampleRate-Dynamic] Starting dynamic data fetch (force: $force)");
       final data =
           await DataRepository.getSheetDataAsync(null, forceRefresh: force);
-      final List items = data['items'] ?? [];
+      final List items = data['items'] as List? ?? [];
 
       final Map<String, List<SampleRateSize>> grouped = {};
 
@@ -363,6 +363,21 @@ class InventoryProvider extends ChangeNotifier {
           rawSizes.addAll(sizesRaw);
         }
 
+        // Also check DataRepository.itemSizesNotifier (Supabase master table item_sizes)
+        if (DataRepository.itemSizesNotifier.value.isNotEmpty) {
+          for (final s in DataRepository.itemSizesNotifier.value) {
+            final String matName = (s['material_name'] ?? s['category'] ?? s['item_name'] ?? '').toString();
+            final String upperMat = matName.toUpperCase().trim();
+            final String normMat = _normalizeCategory(matName);
+
+            bool matchesAlias = aliases.any((alias) => alias.toUpperCase().trim() == upperMat);
+            bool matchesNorm = normMat == normCatName;
+            if (matchesAlias || matchesNorm) {
+              rawSizes.add(s);
+            }
+          }
+        }
+
         final List<SampleRateSize> categorySizes = [];
         final List<SampleRateSpec> specs = _sampleSpecifications[catName] ?? [];
 
@@ -372,7 +387,7 @@ class InventoryProvider extends ChangeNotifier {
 
           for (var s in rawSizes) {
             final String rawLabel =
-                (s['label'] ?? s['size'] ?? '').toString().trim();
+                (s['size_label'] ?? s['label'] ?? s['size'] ?? '').toString().trim();
             if (rawLabel.isEmpty) continue;
             final String normRaw = _normalizeSize(rawLabel);
 
@@ -384,8 +399,8 @@ class InventoryProvider extends ChangeNotifier {
             });
 
             if (isMatch) {
-              final rawSd = s['sd'] ?? s['size_difference'];
-              final rawWeight = s['weight'] ?? s['unit_weight_kg'];
+              final rawSd = s['size_difference'] ?? s['sd'] ?? s['diffRate'] ?? s['diff_rate'];
+              final rawWeight = s['unit_weight_kg'] ?? s['weight'] ?? s['std_weight'] ?? s['std_wt'];
               if (rawSd != null) {
                 matchedSd = (rawSd is num)
                     ? rawSd
@@ -418,7 +433,7 @@ class InventoryProvider extends ChangeNotifier {
         totalMatched += sizes.length;
       });
       debugPrint(
-          "DEBUG: [SampleRate-Dynamic] Load complete. Strictly filtered sample rows: $totalMatched");
+          "DEBUG: [SampleRate-Dynamic] Load complete. Benchmark categories: ${grouped.length}, sizes: $totalMatched");
 
       _sampleRateCategories = grouped;
       notifyListeners();

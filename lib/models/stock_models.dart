@@ -63,7 +63,7 @@ class ItemVariant {
     this.stockStatus = 'In Stock',
     this.yardTotal = 0.0,
     this.factoryTotal = 0.0,
-  })  : this.category = (category.trim().isNotEmpty
+  })  : category = (category.trim().isNotEmpty
             ? category.trim()
             : (itemName.trim().isNotEmpty
                 ? detectCategory(itemName)

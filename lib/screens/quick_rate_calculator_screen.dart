@@ -8,6 +8,7 @@ import '../core/app_permissions.dart';
 import '../models/stock_models.dart';
 import '../providers/inventory_provider.dart';
 import '../services/access_guard.dart';
+import '../services/data_repository.dart';
 import '../utils/formatters.dart';
 import '../utils/item_order_util.dart';
 import '../utils/sorting_utils.dart';
@@ -32,13 +33,31 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
   final TextEditingController _sqrBarBasicCtrl = TextEditingController();
   final TextEditingController _roundFlatsBasicCtrl = TextEditingController();
 
+  // Dynamic controller map for any master catalog categories
+  final Map<String, TextEditingController> _dynamicControllers = {};
+
   // Global & Formula Toggles
   bool _gstEnabled = true;
   bool _ncDiscountEnabled = false;
   final bool _hasLoadingCharge = true;
-  final double _loading = 255.0;
-  final double _ncDiscount = 3000.0;
-  final double _gstRate = 0.18;
+
+  double get _loading => DataRepository.currentCharges.lcRate > 0
+      ? DataRepository.currentCharges.lcRate
+      : (double.tryParse(DataRepository.sheetDataNotifier.value['meta']?['loading_charge']?.toString() ?? '255') ?? 255.0);
+
+  double get _ncDiscount => DataRepository.currentCharges.ncDiscount > 0
+      ? DataRepository.currentCharges.ncDiscount
+      : (double.tryParse(DataRepository.sheetDataNotifier.value['meta']?['nc_discount']?.toString() ?? '3000') ?? 3000.0);
+
+  double get _gstRate {
+    final chargesGst = DataRepository.currentCharges.gstRate;
+    if (chargesGst > 0) {
+      return chargesGst > 1.0 ? chargesGst / 100.0 : chargesGst;
+    }
+    final rawGst = double.tryParse(DataRepository.sheetDataNotifier.value['meta']?['gst_rate']?.toString() ?? '0.18') ?? 0.18;
+    return rawGst > 1.0 ? rawGst / 100.0 : rawGst;
+  }
+
   final double _freight = 0.0;
   final double _ob = 0.0;
 
@@ -80,32 +99,35 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     _channelBasicCtrl.dispose();
     _sqrBarBasicCtrl.dispose();
     _roundFlatsBasicCtrl.dispose();
+    for (final ctrl in _dynamicControllers.values) {
+      ctrl.dispose();
+    }
     super.dispose();
   }
 
   TextEditingController _getControllerForCategory(String category) {
     String cat = category.toUpperCase().trim();
-    if (cat.contains('PIPE')) return _pipeBasicCtrl;
-    if (cat.contains('ANGLE')) return _angleBasicCtrl;
-    if (cat.contains('CHANNEL')) return _channelBasicCtrl;
-    if (cat.contains('SQR') || cat.contains('SQUARE')) return _sqrBarBasicCtrl;
-    if (cat.contains('ROUND') || cat.contains('FLAT')) {
+    if (cat == 'MS PIPE' || (cat.contains('PIPE') && !cat.contains('HR') && !cat.contains('CR') && !cat.contains('ERW'))) {
+      return _pipeBasicCtrl;
+    }
+    if (cat == 'MS ANGLE' || cat.contains('ANGLE')) return _angleBasicCtrl;
+    if (cat == 'MS CHANNEL' || cat.contains('CHANNEL')) return _channelBasicCtrl;
+    if (cat == 'SQR BAR' || (cat.contains('SQR') || cat.contains('SQUARE'))) {
+      return _sqrBarBasicCtrl;
+    }
+    if (cat == 'ROUND BAR' || cat == 'FLATS' || cat.contains('ROUND') || cat.contains('FLAT')) {
       return _roundFlatsBasicCtrl;
     }
-    return _pipeBasicCtrl;
+    return _dynamicControllers.putIfAbsent(
+      cat,
+      () => TextEditingController()..addListener(_onRateChanged),
+    );
   }
 
   double _calculateFinalRate(String category, num sd) {
-    final String selectedCategory = category.toUpperCase().trim();
-    double basic = 0.0;
-
-    if (selectedCategory == 'MS CHANNEL') {
-      basic = double.tryParse(_channelBasicCtrl.text) ?? 0.0;
-    } else {
-      TextEditingController ctrl = _getControllerForCategory(category);
-      String rateText = ctrl.text;
-      basic = double.tryParse(rateText) ?? 0.0;
-    }
+    TextEditingController ctrl = _getControllerForCategory(category);
+    String rateText = ctrl.text.trim();
+    double basic = double.tryParse(rateText) ?? 0.0;
 
     if (basic == 0.0) return 0.0;
 
@@ -134,50 +156,33 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
       _channelBasicCtrl.text = sourceRate;
       _sqrBarBasicCtrl.text = sourceRate;
       _roundFlatsBasicCtrl.text = sourceRate;
+      for (final ctrl in _dynamicControllers.values) {
+        ctrl.text = sourceRate;
+      }
     });
-    MotionToast.show(context, "Rate ₹$sourceRate applied to all base categories!");
+    MotionToast.show(context, "Rate ₹$sourceRate applied to all categories!");
   }
 
-  /// Allowed canonical categories whitelist (strictly 6 structural categories)
-  static const List<String> allowedCategories = [
+  static const Set<String> _allowedCoreCategories = {
     'MS PIPE',
     'MS ANGLE',
     'MS CHANNEL',
     'SQR BAR',
     'ROUND BAR',
     'FLATS',
-  ];
+  };
 
-  /// Checks if a category is part of the 6 allowed structural categories whitelist.
-  static bool isAllowedCategory(String cat) {
-    final upper = cat.toUpperCase().trim();
-    if (upper.contains('HR PIPE') ||
-        upper.contains('CR PIPE') ||
-        upper.contains('ISMB') ||
-        upper.contains('ISMC') ||
-        upper.contains('STRUCTURE') ||
-        upper.contains('BEAM') ||
-        upper.contains('BARBED') ||
-        upper.contains('GATE') ||
-        upper.contains('BINDING') ||
-        upper.contains('NAIL') ||
-        upper.contains('ERW')) {
-      return false;
-    }
-    return allowedCategories.any((allowed) =>
-        upper == allowed ||
-        (allowed == 'MS PIPE' && upper.contains('PIPE')) ||
-        (allowed == 'MS ANGLE' && upper.contains('ANGLE')) ||
-        (allowed == 'MS CHANNEL' && upper.contains('CHANNEL')) ||
-        (allowed == 'SQR BAR' &&
-            (upper.contains('SQR') || upper.contains('SQUARE'))) ||
-        (allowed == 'ROUND BAR' && upper.contains('ROUND')) ||
-        (allowed == 'FLATS' &&
-            (upper.contains('FLAT') || upper.contains('FLATS'))));
+  static bool _isAllowedCategory(String category) {
+    final cat = category.toUpperCase().trim();
+    if (_allowedCoreCategories.contains(cat)) return true;
+    if (cat == 'PIPE' || cat == 'MS PIPES') return true;
+    if (cat == 'ANGLE' || cat == 'MS ANGLES') return true;
+    if (cat == 'CHANNEL' || cat == 'MS CHANNELS') return true;
+    if (cat == 'SQUARE BAR' || cat == 'SQ BAR' || cat == 'MS SQR BAR') return true;
+    if (cat == 'ROUND' || cat == 'MS ROUND' || cat == 'MS ROUND BAR') return true;
+    if (cat == 'FLAT' || cat == 'MS FLAT' || cat == 'MS FLATS') return true;
+    return false;
   }
-
-  /// Checks if a category should be excluded from the Sample Rate Calculator.
-  static bool isExcludedCategory(String cat) => !isAllowedCategory(cat);
 
   String _generateRateMessage({String? specificCategory}) {
     StringBuffer sb = StringBuffer();
@@ -190,7 +195,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     bool hasAnySelected = false;
 
     final sortedCategoryKeys = _categories.keys
-        .where((cat) => !isExcludedCategory(cat))
+        .where(_isAllowedCategory)
         .where((cat) {
           if (specificCategory != null &&
               specificCategory.isNotEmpty &&
@@ -282,7 +287,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final availableCategories = _categories.keys
-        .where((cat) => !isExcludedCategory(cat))
+        .where(_isAllowedCategory)
         .toList()
       ..sort(ItemOrderUtil.compare);
 
@@ -713,7 +718,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
             }
 
             final sortedCategories = inv.sampleRateCategories.keys
-                .where((cat) => !isExcludedCategory(cat))
+                .where(_isAllowedCategory)
                 .toList()
               ..sort(ItemOrderUtil.compare);
 
