@@ -601,6 +601,26 @@ class _DashboardScreenState extends State<DashboardScreen>
         await _refreshCurrentUserData();
       }
 
+      // Restricted Sales Mode Guard
+      if (DataRepository.salesOnlyModeNotifier.value &&
+          !UserSession.isSuperAdmin &&
+          !const {
+            'Quotation',
+            'Calculator',
+            'Netrate Calc',
+            'Sample Rate',
+            'Sales Docs',
+            'Sales Document Center'
+          }.contains(screenName)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("🔒 Restricted Mode: This module is currently locked."),
+            backgroundColor: Colors.red,
+          ));
+        }
+        return;
+      }
+
       if (!AccessGuard.can(permission)) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -703,9 +723,22 @@ class _DashboardScreenState extends State<DashboardScreen>
       ),
     ];
 
+    final bool isRestricted =
+        DataRepository.salesOnlyModeNotifier.value && !UserSession.isSuperAdmin;
+    const salesOnlyAllowed = {
+      'Quotation',
+      'Netrate Calc',
+      'Sample Rate',
+      'Sales Docs',
+      'Sales Document Center'
+    };
+
     // Filter to only visible and enabled actions
     return masterList
-        .where((a) => a.isVisible && a.isEnabled)
+        .where((a) {
+          if (isRestricted && !salesOnlyAllowed.contains(a.title)) return false;
+          return a.isVisible && a.isEnabled;
+        })
         .map((a) => _DashboardCard(
               title: a.title,
               icon: a.icon,
@@ -1030,27 +1063,43 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 fontWeight: FontWeight.bold))
                       ])),
 
-                  ValueListenableBuilder<PermissionSnapshot>(
-                    valueListenable: UserSessionNotifier.instance,
-                    builder: (context, s, _) {
-                      if (!s.canAccessUsers) return const SizedBox.shrink();
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 24, vertical: 16),
-                        child: ERPSegmentedFilter(
-                          options: const ['Overview', 'Users'],
-                          selectedOption: _selectedTab,
-                          onOptionSelected: (val) {
-                            setState(() => _selectedTab = val);
-                            if (val == 'Users') {
-                              _loadUsersData();
-                            }
-                          },
-                          activeBgColor: msmRed,
-                          inactiveBgColor: Colors.grey.shade300,
-                          activeTextColor: Colors.white,
-                          inactiveTextColor: textDark,
-                        ),
+                  ValueListenableBuilder<bool>(
+                    valueListenable: DataRepository.salesOnlyModeNotifier,
+                    builder: (context, isSalesOnly, _) {
+                      final bool isRestricted =
+                          isSalesOnly && !UserSession.isSuperAdmin;
+
+                      if (isRestricted && _selectedTab == 'Users') {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) setState(() => _selectedTab = 'Overview');
+                        });
+                      }
+
+                      return ValueListenableBuilder<PermissionSnapshot>(
+                        valueListenable: UserSessionNotifier.instance,
+                        builder: (context, s, _) {
+                          if (!s.canAccessUsers || isRestricted) {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 24, vertical: 16),
+                            child: ERPSegmentedFilter(
+                              options: const ['Overview', 'Users'],
+                              selectedOption: _selectedTab,
+                              onOptionSelected: (val) {
+                                setState(() => _selectedTab = val);
+                                if (val == 'Users') {
+                                  _loadUsersData();
+                                }
+                              },
+                              activeBgColor: msmRed,
+                              inactiveBgColor: Colors.grey.shade300,
+                              activeTextColor: Colors.white,
+                              inactiveTextColor: textDark,
+                            ),
+                          );
+                        },
                       );
                     },
                   ),
@@ -1087,43 +1136,53 @@ class _DashboardScreenState extends State<DashboardScreen>
                                         fontWeight: FontWeight.bold,
                                         color: textDark)),
                                 const SizedBox(height: 16),
-                                ValueListenableBuilder<PermissionSnapshot>(
-                                    valueListenable:
-                                        UserSessionNotifier.instance,
-                                    builder: (context, snap, _) {
-                                      final actions = _getQuickActions(snap);
-                                      if (actions.isEmpty) {
-                                        return const Center(
-                                            child: Text(
-                                                "No accessible modules found.",
-                                                style: TextStyle(
-                                                    color: Colors.grey)));
-                                      }
-                                      List<Widget> rows = [];
-                                      for (int i = 0;
-                                          i < actions.length;
-                                          i += 2) {
-                                        rows.add(
-                                          Row(
-                                            children: [
-                                              Expanded(child: actions[i]),
-                                              if (i + 1 < actions.length)
-                                                const SizedBox(width: 12),
-                                              if (i + 1 < actions.length)
-                                                Expanded(child: actions[i + 1]),
-                                              if (i + 1 >= actions.length)
-                                                const SizedBox(width: 12),
-                                              if (i + 1 >= actions.length)
-                                                const Spacer(),
-                                            ],
-                                          ),
-                                        );
-                                        if (i + 2 < actions.length) {
-                                          rows.add(const SizedBox(height: 12));
+                                ValueListenableBuilder<bool>(
+                                  valueListenable:
+                                      DataRepository.salesOnlyModeNotifier,
+                                  builder: (context, _, __) {
+                                    return ValueListenableBuilder<
+                                        PermissionSnapshot>(
+                                      valueListenable:
+                                          UserSessionNotifier.instance,
+                                      builder: (context, snap, _) {
+                                        final actions = _getQuickActions(snap);
+                                        if (actions.isEmpty) {
+                                          return const Center(
+                                              child: Text(
+                                                  "No accessible modules found.",
+                                                  style: TextStyle(
+                                                      color: Colors.grey)));
                                         }
-                                      }
-                                      return Column(children: rows);
-                                    }),
+                                        List<Widget> rows = [];
+                                        for (int i = 0;
+                                            i < actions.length;
+                                            i += 2) {
+                                          rows.add(
+                                            Row(
+                                              children: [
+                                                Expanded(child: actions[i]),
+                                                if (i + 1 < actions.length)
+                                                  const SizedBox(width: 12),
+                                                if (i + 1 < actions.length)
+                                                  Expanded(
+                                                      child: actions[i + 1]),
+                                                if (i + 1 >= actions.length)
+                                                  const SizedBox(width: 12),
+                                                if (i + 1 >= actions.length)
+                                                  const Spacer(),
+                                              ],
+                                            ),
+                                          );
+                                          if (i + 2 < actions.length) {
+                                            rows.add(
+                                                const SizedBox(height: 12));
+                                          }
+                                        }
+                                        return Column(children: rows);
+                                      },
+                                    );
+                                  },
+                                ),
                               ],
                             ),
                           ),
@@ -2667,10 +2726,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Widget build(BuildContext context) {
     debugPrint("Current User Role: ${UserSession.currentRole}");
 
-    // Corrected condition: handles Enum comparison via toString()
-    bool isAdmin =
-        (UserSession.currentRole.toString().toUpperCase().contains('ADMIN')) ||
-            (UserSession.userEmail == 'j2833945@gmail.com');
+    // Super Admin or Admin access check
+    bool isAdmin = UserSession.isSuperAdmin || UserSession.isUserAdmin;
     debugPrint("isAdmin: $isAdmin"); // Verification for console logs
 
     return Scaffold(

@@ -56,11 +56,6 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
   int _offset = 0;
   final int _limit = 25;
 
-  /// Cached display name read from SharedPreferences (set at Google Sign-In).
-  /// Used alongside email for RBAC matching so both old (email) and
-  /// new (display name) transactions are visible to the owner.
-  String _currentDisplayName = '';
-
   List<StockTransaction> _allTxs = [];
   List<StockTransaction> _filteredTxs = [];
   List<dynamic> _flatList = [];
@@ -109,8 +104,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     final lastReset = await DataRepository.getLastResetTimestamp();
     final prefs = await SharedPreferences.getInstance();
 
-    // Load the user's display name for RBAC matching.
-    _currentDisplayName = prefs.getString('user_display_name') ?? '';
+    await DataRepository.ensureUserLookupData();
 
     final raw = prefs.getString('stock_transactions_v2');
     if (raw != null) {
@@ -144,9 +138,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
 
     try {
       await DataRepository.ensureMasterLookupData();
-      final DateFormat dateFmt = DateFormat('yyyy-MM-dd');
-      final String startStr = dateFmt.format(_startDate);
-      final String endStr = dateFmt.format(_endDate);
+      await DataRepository.ensureUserLookupData();
 
       dynamic response;
       try {
@@ -190,7 +182,23 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
               row['party_name']?.toString() ?? row['vendor_name']?.toString(),
           contactNo: row['contact_no']?.toString(),
           batchId: row['batch_id']?.toString(),
-          user: row['user']?.toString(),
+          user: row['user_name']?.toString() ??
+              row['userName']?.toString() ??
+              row['created_by_name']?.toString() ??
+              row['createdByName']?.toString() ??
+              row['user_email']?.toString() ??
+              row['userEmail']?.toString() ??
+              row['created_by_email']?.toString() ??
+              row['createdByEmail']?.toString() ??
+              row['operator_name']?.toString() ??
+              row['operatorName']?.toString() ??
+              row['created_by']?.toString() ??
+              row['createdBy']?.toString() ??
+              row['user']?.toString() ??
+              row['User']?.toString() ??
+              row['USER']?.toString() ??
+              row['entry_by']?.toString() ??
+              row['Entry By']?.toString(),
           isReversed: row['is_reversed'] == true,
         );
       }).toList();
@@ -847,9 +855,9 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 3),
                       Text(
-                        "$sizeDisplay • ${tx.location}",
+                        sizeDisplay,
                         style: const TextStyle(
                           fontSize: 12,
                           color: textGrey,
@@ -858,7 +866,8 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      if (tx.lorryNo != null && tx.lorryNo!.isNotEmpty)
+                      if (tx.lorryNo != null && tx.lorryNo!.isNotEmpty) ...[
+                        const SizedBox(height: 2),
                         Text(
                           "Lorry: ${tx.lorryNo}",
                           style: const TextStyle(
@@ -868,35 +877,55 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                      // "Entry by" attribution - prioritized for admins
-                      if (tx.user != null && tx.user!.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Text(
-                            "Entry by: ${tx.user}",
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: (DataRepository
-                                          .currentUserNotifier.value?.isAdmin ??
-                                      false)
-                                  ? Colors.indigo
-                                      .shade700 // Clearly visible for admins
-                                  : textGrey.withValues(alpha: 0.7),
-                              fontWeight: (DataRepository
-                                          .currentUserNotifier.value?.isAdmin ??
-                                      false)
-                                  ? FontWeight.bold
-                                  : FontWeight.w600,
-                              fontStyle: (DataRepository
-                                          .currentUserNotifier.value?.isAdmin ??
-                                      false)
-                                  ? FontStyle.normal
-                                  : FontStyle.italic,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                      ],
+                      const SizedBox(height: 6),
+                      // Metadata row: Location & Time + User Attribution Tag
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.location_on_outlined,
+                                  size: 12, color: Colors.grey.shade600),
+                              const SizedBox(width: 2),
+                              Text(
+                                '${tx.location}${tx.toLocation != null && tx.toLocation!.isNotEmpty ? ' ➔ ${tx.toLocation}' : ''} • ${DateFormat('hh:mm a').format(tx.dateTime)}',
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.grey.shade600),
+                              ),
+                            ],
                           ),
-                        ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.blueGrey.shade50,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                  color: Colors.blueGrey.shade200, width: 0.5),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.person_outline,
+                                    size: 11, color: Colors.blueGrey.shade700),
+                                const SizedBox(width: 3),
+                                Text(
+                                  tx.displayUserName,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.blueGrey.shade800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),

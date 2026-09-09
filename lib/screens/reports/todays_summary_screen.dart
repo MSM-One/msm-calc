@@ -5,6 +5,7 @@ import '../../utils/item_order_util.dart';
 import '../../utils/sorting_utils.dart';
 import '../../widgets/m_loader.dart';
 import '../../widgets/reports/enterprise_stock_movement_table.dart';
+import '../../widgets/reports/report_bottom_action_bar.dart';
 
 enum TransactionFlowFilter { inward, outward, net }
 
@@ -326,6 +327,13 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
     return categories;
   }
 
+  double _computeTotalQty(List<_CategorySummaryData> filteredList) {
+    return filteredList.fold<double>(
+      0.0,
+      (sum, item) => sum + _getCategoryQty(item),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.isLoading) return const Center(child: MLoader());
@@ -344,17 +352,17 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
       builder: (context, constraints) {
         final double width = constraints.maxWidth;
         final bool isSmallScreen = width < 1024;
+        final filteredCategories = _filterCategoriesByFlow(categories);
+        final double grandInward =
+            filteredCategories.fold(0.0, (sum, c) => sum + c.totalInward);
+        final double grandOutward =
+            filteredCategories.fold(0.0, (sum, c) => sum + c.totalOutward);
+        final double grandNet = grandInward - grandOutward;
+        final double totalQty = _computeTotalQty(filteredCategories);
 
         // When 'Summary' is active:
         if (widget.selectedTab == 'Summary') {
           if (isSmallScreen) {
-            final filteredCategories = _filterCategoriesByFlow(categories);
-            final double grandInward =
-                filteredCategories.fold(0.0, (sum, c) => sum + c.totalInward);
-            final double grandOutward =
-                filteredCategories.fold(0.0, (sum, c) => sum + c.totalOutward);
-            final double grandNet = grandInward - grandOutward;
-
             return Column(
               children: [
                 Expanded(
@@ -365,7 +373,7 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                     grandNet: grandNet,
                   ),
                 ),
-                _buildMobileBottomActionBar(grandNet),
+                _buildMobileBottomActionBar(grandNet, totalQty: totalQty),
               ],
             );
           }
@@ -379,19 +387,12 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
         }
 
         // Mobile & Tablet Detailed Accordion View (< 1024px)
-        final filteredCategories = _filterCategoriesByFlow(categories);
-        final double grandInward =
-            filteredCategories.fold(0.0, (sum, c) => sum + c.totalInward);
-        final double grandOutward =
-            filteredCategories.fold(0.0, (sum, c) => sum + c.totalOutward);
-        final double grandNet = grandInward - grandOutward;
-
         return Column(
           children: [
             Expanded(
               child: _buildMobileDetailedAccordionView(filteredCategories),
             ),
-            _buildMobileBottomActionBar(grandNet),
+            _buildMobileBottomActionBar(grandNet, totalQty: totalQty),
           ],
         );
       },
@@ -767,10 +768,10 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
                   color: netQty.abs() < 0.00001
-                      ? const Color(0xFF94A3B8)
-                      : (isNegative
-                          ? const Color(0xFFDC2626)
-                          : const Color(0xFF0F172A)),
+                    ? const Color(0xFF94A3B8)
+                    : (isNegative
+                        ? const Color(0xFFDC2626)
+                        : const Color(0xFF0F172A)),
                   fontFamily: 'monospace',
                 ),
               ),
@@ -894,9 +895,9 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Left Sidebar (300px fixed) ──
+          // ── Left Sidebar (270px fixed) ──
           SizedBox(
-            width: 300,
+            width: 270,
             child: Container(
               color: const Color(0xFFFAFAFA),
               child: Column(
@@ -908,7 +909,8 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                     decoration: const BoxDecoration(
                       color: Colors.white,
                       border: Border(
-                        bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1.0),
+                        bottom: BorderSide(
+                            color: Color(0xFFE2E8F0), width: 1.0),
                       ),
                     ),
                     child: Row(
@@ -956,7 +958,8 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                           categoryData: catData,
                           isSelected: isSelected,
                           onTap: () {
-                            setState(() => _selectedCategory = catData.name);
+                            setState(
+                                () => _selectedCategory = catData.name);
                           },
                         );
                       },
@@ -968,7 +971,8 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
           ),
 
           // ── Divider ──
-          const VerticalDivider(width: 1, thickness: 1, color: Color(0xFFE2E8F0)),
+          const VerticalDivider(
+              width: 1, thickness: 1, color: Color(0xFFE2E8F0)),
 
           // ── Right Data Pane (Expanded) ──
           Expanded(
@@ -984,7 +988,8 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                         ? () => widget.onExportCategoryPdf!(activeCat.name)
                         : null,
                     isDownloading:
-                        widget.categoryDownloading[activeCat.name] == true,
+                        widget.categoryDownloading[activeCat.name] ==
+                            true,
                   ),
 
                   // Table Header
@@ -994,7 +999,8 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                   Expanded(
                     child: Builder(
                       builder: (context) {
-                        final displaySizes = _filterSizesByFlow(activeCat.sizes);
+                        final displaySizes =
+                            _filterSizesByFlow(activeCat.sizes);
 
                         if (displaySizes.isEmpty) {
                           return Center(
@@ -1008,7 +1014,8 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                                     decoration: BoxDecoration(
                                       color: const Color(0xFFF1F5F9),
                                       shape: BoxShape.circle,
-                                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                                      border: Border.all(
+                                          color: const Color(0xFFE2E8F0)),
                                     ),
                                     child: const Icon(
                                       Icons.inbox_outlined,
@@ -1356,7 +1363,7 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
       child: const Row(
         children: [
           SizedBox(
-            width: 32,
+            width: 44,
             child: Text(
               '#',
               textAlign: TextAlign.center,
@@ -1455,9 +1462,9 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
       ),
       child: Row(
         children: [
-          // 1. Index # (width: 32, text-align: center)
+          // 1. Index # (width: 44, text-align: center)
           SizedBox(
-            width: 32,
+            width: 44,
             child: Text(
               '${row.index}',
               textAlign: TextAlign.center,
@@ -1574,7 +1581,7 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
       ),
       child: Row(
         children: [
-          const SizedBox(width: 32),
+          const SizedBox(width: 44),
           const SizedBox(width: 8),
           const Expanded(
             flex: 4,
@@ -1909,60 +1916,46 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // MOBILE PINNED BOTTOM BAR (Full-width Red Export PDF Button)
+  // MOBILE PINNED BOTTOM BAR (Total Qty Summary Indicator + Export PDF Button)
   // ───────────────────────────────────────────────────────────────────────────
-  Widget _buildMobileBottomActionBar(double grandNet) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: const Border(
-          top: BorderSide(color: Color(0xFFE2E8F0), width: 1.0),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 48,
-          child: ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              elevation: 0,
-            ),
-            icon: widget.isPdfLoading
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.picture_as_pdf_rounded, size: 20),
-            label: Text(
-              widget.isPdfLoading ? 'Exporting...' : 'Export PDF',
-              style: const TextStyle(
-                fontSize: 14.5,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-              ),
-            ),
-            onPressed: widget.isPdfLoading ? null : widget.onExportPdf,
-          ),
-        ),
-      ),
+  // MOBILE PINNED BOTTOM BAR (Total Qty Summary Indicator + Export PDF Button)
+  // ───────────────────────────────────────────────────────────────────────────
+  Widget _buildMobileBottomActionBar(double grandNet, {required double totalQty}) {
+    final String flowTitle;
+    final Color badgeBgColor;
+    final Color badgeTextColor;
+
+    switch (_selectedFlow) {
+      case TransactionFlowFilter.inward:
+        flowTitle = 'Total Inward Qty';
+        badgeBgColor = const Color(0xFFE8F5E9);
+        badgeTextColor = const Color(0xFF2E7D32);
+        break;
+      case TransactionFlowFilter.outward:
+        flowTitle = 'Total Outward Qty';
+        badgeBgColor = const Color(0xFFFFEBEE);
+        badgeTextColor = const Color(0xFFC62828);
+        break;
+      case TransactionFlowFilter.net:
+        flowTitle = 'Total Net Qty';
+        if (totalQty < -0.0001) {
+          badgeBgColor = const Color(0xFFFFEBEE);
+          badgeTextColor = const Color(0xFFC62828);
+        } else {
+          badgeBgColor = const Color(0xFFE8F5E9);
+          badgeTextColor = const Color(0xFF2E7D32);
+        }
+        break;
+    }
+
+    return ReportBottomActionBar(
+      barKey: const Key('today_total_qty_bottom_bar'),
+      label: flowTitle,
+      totalQty: totalQty,
+      onExportPdf: widget.onExportPdf,
+      isPdfLoading: widget.isPdfLoading,
+      badgeColor: badgeBgColor,
+      badgeTextColor: badgeTextColor,
     );
   }
 }

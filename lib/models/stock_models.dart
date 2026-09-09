@@ -1,3 +1,4 @@
+import 'package:intl/intl.dart';
 import '../services/data_repository.dart';
 import '../utils/formatters.dart';
 
@@ -213,6 +214,16 @@ class StockTransaction {
   DateTime get date => dateTime;
   double get qty => qtyMT;
 
+  // User attribution & time helpers
+  String? get createdByName => user;
+  String? get createdByEmail => user?.contains('@') == true ? user : null;
+  String? get userName => user;
+  String? get createdBy => user;
+  String? get userEmail => user?.contains('@') == true ? user : null;
+  String? get operatorName => user;
+  String get formattedTime => DateFormat('hh:mm a').format(dateTime);
+  String get displayUserName => DataRepository.resolveUserDisplayName(user);
+
   StockTransaction({
     required this.txnId,
     required this.dateTime,
@@ -424,9 +435,23 @@ class StockTransaction {
           json['Crane (MT)'] ??
           json['CRANE (MT)']),
       user: (json['user_name'] ??
+              json['userName'] ??
+              json['created_by_name'] ??
+              json['createdByName'] ??
+              json['user_email'] ??
+              json['userEmail'] ??
+              json['created_by_email'] ??
+              json['createdByEmail'] ??
+              json['operator_name'] ??
+              json['operatorName'] ??
+              json['created_by'] ??
+              json['createdBy'] ??
               json['user'] ??
               json['User'] ??
-              json['USER'])
+              json['USER'] ??
+              json['Entry By'] ??
+              json['entry_by'] ??
+              json['entryBy'])
           ?.toString(),
       isReversed: (json['isReversed'] ?? json['Reversed'] ?? json['REVERSED'])
               ?.toString()

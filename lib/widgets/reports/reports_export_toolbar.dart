@@ -27,6 +27,11 @@ class ReportsExportToolbar extends StatelessWidget {
   final String? todayFlowMode;
   final ValueChanged<String>? onTodayFlowModeChanged;
   final String activeTabId;
+  final String? summaryMetricLabel;
+  final double? summaryMetricValue;
+  final Color? summaryMetricColor;
+  final Color? summaryMetricBgColor;
+  final String? pdfTooltip;
 
   const ReportsExportToolbar({
     super.key,
@@ -53,6 +58,11 @@ class ReportsExportToolbar extends StatelessWidget {
     this.todayFlowMode,
     this.onTodayFlowModeChanged,
     required this.activeTabId,
+    this.summaryMetricLabel,
+    this.summaryMetricValue,
+    this.summaryMetricColor,
+    this.summaryMetricBgColor,
+    this.pdfTooltip,
   });
 
   String _formatDateRange() {
@@ -193,7 +203,6 @@ class ReportsExportToolbar extends StatelessWidget {
 
         // Desktop Layout (Width >= 768px): Single Horizontal Command Bar
         return Container(
-          margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             color: Colors.white,
@@ -238,23 +247,69 @@ class ReportsExportToolbar extends StatelessWidget {
               ),
               const SizedBox(width: 10),
 
-              // 6. Export PDF
+              // 6. Summary Metric Pill Badge (Desktop)
+              if (summaryMetricLabel != null && summaryMetricValue != null) ...[
+                Container(
+                  height: 40,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: summaryMetricBgColor ?? const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(9),
+                    border: Border.all(
+                      color: summaryMetricBgColor != null
+                          ? (summaryMetricColor?.withValues(alpha: 0.3) ??
+                              const Color(0xFFCBD5E1))
+                          : const Color(0xFFCBD5E1),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '$summaryMetricLabel: ',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                      Text(
+                        '${summaryMetricValue!.toStringAsFixed(3)} MT',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w900,
+                          color: summaryMetricColor ?? const Color(0xFF0F172A),
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+              ],
+
+              // 7. Export PDF (Single source of truth)
               _buildActionButton(
                 label: 'Export PDF',
                 icon: Icons.picture_as_pdf_rounded,
                 color: const Color(0xFFD32F2F),
                 isLoading: isPdfLoading,
                 onTap: onExportPdf,
+                tooltip: pdfTooltip ??
+                    (activeTabId == 'low'
+                        ? 'Export Full Low Stock Report'
+                        : 'Export PDF'),
               ),
               const SizedBox(width: 8),
 
-              // 7. Export CSV
+              // 8. Export CSV
               _buildActionButton(
                 label: 'Export CSV',
                 icon: Icons.table_chart_rounded,
                 color: const Color(0xFF059669),
                 isLoading: isCsvLoading,
                 onTap: onExportCsv,
+                tooltip: 'Export CSV',
               ),
             ],
           ),
@@ -755,8 +810,9 @@ class ReportsExportToolbar extends StatelessWidget {
     required Color color,
     required bool isLoading,
     required VoidCallback onTap,
+    String? tooltip,
   }) {
-    return Material(
+    final button = Material(
       color: color,
       borderRadius: BorderRadius.circular(9),
       child: InkWell(
@@ -795,5 +851,13 @@ class ReportsExportToolbar extends StatelessWidget {
         ),
       ),
     );
+
+    if (tooltip != null) {
+      return Tooltip(
+        message: tooltip,
+        child: button,
+      );
+    }
+    return button;
   }
 }

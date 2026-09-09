@@ -1,7 +1,9 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:msm_calc/models/stock_models.dart';
 import 'package:msm_calc/services/report_calculators.dart';
 import 'package:msm_calc/services/pdf_report_service.dart';
+import 'package:msm_calc/widgets/reports/enterprise_low_stock_table.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -169,6 +171,118 @@ void main() {
 
       expect(pdfBytes, isNotNull);
       expect(pdfBytes.length, greaterThan(1000));
+    });
+
+    testWidgets('EnterpriseLowStockTable renders category cards in Summary mode and expands on tap', (tester) async {
+      final lowStock = ReportCalculators.calculateLowStock(
+        inventory: sampleInventory,
+        locationFilter: 'ALL',
+      );
+
+      final Set<String> expanded = {};
+      String? toggledCat;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) {
+                return EnterpriseLowStockTable(
+                  items: lowStock,
+                  isDetailed: false,
+                  expandedCategories: expanded,
+                  onCategoryToggle: (cat) {
+                    setState(() {
+                      toggledCat = cat;
+                      if (expanded.contains(cat)) {
+                        expanded.remove(cat);
+                      } else {
+                        expanded.add(cat);
+                      }
+                    });
+                  },
+                );
+              },
+            ),
+          ),
+        ),
+      );
+
+      // Verify category headers are present
+      expect(find.text('MS PIPE'), findsOneWidget);
+      expect(find.text('MS ANGLE'), findsOneWidget);
+      expect(find.text('MS CHANNEL'), findsOneWidget);
+
+      // In Summary mode with empty expanded set, nested sizes should not be visible
+      expect(find.textContaining('25x3'), findsNothing);
+
+      // Tap on MS ANGLE category card to expand
+      await tester.tap(find.text('MS ANGLE'));
+      await tester.pumpAndSettle();
+
+      expect(toggledCat, 'MS Angle');
+      expect(expanded.contains('MS Angle'), isTrue);
+      // Nested size 25x3 should now be visible
+      expect(find.textContaining('25x3'), findsOneWidget);
+    });
+
+    testWidgets('EnterpriseLowStockTable auto-expands all categories in Detailed mode', (tester) async {
+      final lowStock = ReportCalculators.calculateLowStock(
+        inventory: sampleInventory,
+        locationFilter: 'ALL',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: EnterpriseLowStockTable(
+              items: lowStock,
+              isDetailed: true,
+              expandedCategories: const {},
+              onCategoryToggle: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      // In Detailed mode, all sizes are visible directly
+      expect(find.text('MS PIPE'), findsOneWidget);
+      expect(find.text('MS ANGLE'), findsOneWidget);
+      expect(find.text('MS CHANNEL'), findsOneWidget);
+      expect(find.textContaining('25x3'), findsOneWidget);
+      expect(find.textContaining('95x45'), findsOneWidget);
+      expect(find.text('OUT OF STOCK'), findsNWidgets(2));
+      expect(find.text('DEFICIT'), findsOneWidget);
+    });
+
+    testWidgets('EnterpriseLowStockTable renders category PDF icon with "Export Category PDF" tooltip', (tester) async {
+      final lowStock = ReportCalculators.calculateLowStock(
+        inventory: sampleInventory,
+        locationFilter: 'ALL',
+      );
+
+      String? exportedCategory;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: EnterpriseLowStockTable(
+              items: lowStock,
+              isDetailed: false,
+              expandedCategories: const {},
+              onCategoryToggle: (_) {},
+              onExportCategoryPdf: (cat, _) => exportedCategory = cat,
+            ),
+          ),
+        ),
+      );
+
+      final categoryPdfButtons = find.byTooltip('Export Category PDF');
+      expect(categoryPdfButtons, findsNWidgets(3));
+
+      // Tap first category PDF export
+      await tester.tap(categoryPdfButtons.first);
+      await tester.pumpAndSettle();
+      expect(exportedCategory, 'MS Pipe');
     });
   });
 }

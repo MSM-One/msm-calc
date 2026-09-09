@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -94,6 +95,25 @@ class DataRepository {
   static final ValueNotifier<UserModel?> currentUserNotifier =
       ValueNotifier<UserModel?>(null);
 
+  // ── Restricted Sales Mode (Super Admin Master Toggle) ───────────────────────
+  /// When `true`, non-Super-Admin users are locked to only 4 sales screens.
+  /// Synced via Supabase Realtime on the `app_config` table.
+  static final ValueNotifier<bool> salesOnlyModeNotifier =
+      ValueNotifier<bool>(false);
+
+  /// Dynamic Super Admin Email Notifier (synced from app_config.super_admin_email).
+  static final ValueNotifier<String> superAdminEmailNotifier =
+      ValueNotifier<String>('j2833945@gmail.com');
+
+  /// Global static accessor for sales only mode status.
+  static bool get isSalesOnlyModeActive => salesOnlyModeNotifier.value;
+
+  /// Global static accessor for current Super Admin email.
+  static String get superAdminEmail => superAdminEmailNotifier.value;
+
+  /// Instance getter for Super Admin email.
+  String get instanceSuperAdminEmail => superAdminEmailNotifier.value;
+
   /// Ensures every known permission slug exists in the user's permissions map.
   /// Missing slugs are filled from staffDefaults so AccessGuard never silently
   /// denies access due to an absent key for a legacy user.
@@ -184,9 +204,180 @@ class DataRepository {
         });
       }
       itemSizesNotifier.value = allSizesList;
+      // Also ensure user attribution profiles are cached
+      unawaited(ensureUserLookupData());
+      // Fetch initial Restricted Sales Mode state
+      unawaited(fetchSalesOnlyMode());
     } catch (e) {
       debugPrint('[DataRepository] Error loading master lookup maps: $e');
     }
+  }
+
+  // In-memory user profile lookup cache for user attribution (id/email/username -> display name)
+  static final Map<String, String> userProfileLookupMap = {};
+
+  /// Ensures user lookup profiles are cached in memory for transaction attribution.
+  static Future<void> ensureUserLookupData() async {
+    if (userProfileLookupMap.isNotEmpty) return;
+    try {
+      final List<dynamic> users = await SupabaseService.client
+          .from('users')
+          .select('id, email, user_name, role');
+      for (final u in users) {
+        if (u is! Map) continue;
+        final id = u['id']?.toString();
+        final email = u['email']?.toString().trim();
+        final rawName = u['user_name']?.toString().trim() ?? '';
+        final role = u['role']?.toString().trim().toLowerCase();
+
+        String displayName = rawName.isNotEmpty
+            ? rawName
+            : (email != null && email.contains('@')
+                ? email.split('@').first
+                : (id ?? 'Staff'));
+
+        if (role == 'admin' && !displayName.toLowerCase().contains('admin')) {
+          displayName = 'Admin ($displayName)';
+        }
+
+        if (id != null && id.isNotEmpty) {
+          userProfileLookupMap[id] = displayName;
+          userProfileLookupMap[id.toLowerCase()] = displayName;
+        }
+        if (email != null && email.isNotEmpty) {
+          userProfileLookupMap[email] = displayName;
+          userProfileLookupMap[email.toLowerCase()] = displayName;
+          final prefix = email.split('@').first;
+          if (prefix.isNotEmpty) {
+            userProfileLookupMap[prefix] = displayName;
+            userProfileLookupMap[prefix.toLowerCase()] = displayName;
+          }
+        }
+        if (rawName.isNotEmpty) {
+          userProfileLookupMap[rawName] = displayName;
+          userProfileLookupMap[rawName.toLowerCase()] = displayName;
+        }
+      }
+    } catch (e) {
+      debugPrint('[DataRepository] Error loading user profile lookup data: $e');
+    }
+  }
+
+  // ── Restricted Sales Mode & Super Admin Config (fetch / set / transfer) ──────
+
+  /// Fetches the current `sales_only_mode` and `super_admin_email` from the `app_config` table.
+  static Future<void> fetchSalesOnlyMode() async {
+    try {
+      final row = await SupabaseService.client
+          .from('app_config')
+          .select('sales_only_mode, super_admin_email')
+          .eq('id', 1)
+          .maybeSingle();
+      if (row != null) {
+        salesOnlyModeNotifier.value = (row['sales_only_mode'] == true);
+        final dynamic superEmailRaw = row['super_admin_email'];
+        if (superEmailRaw != null &&
+            superEmailRaw.toString().trim().isNotEmpty) {
+          final String sEmail = superEmailRaw.toString().trim();
+          superAdminEmailNotifier.value = sEmail;
+          UserSession.superAdminEmail = sEmail;
+        }
+        debugPrint(
+            '[DataRepository] Fetched app_config: sales_only_mode=${salesOnlyModeNotifier.value}, super_admin_email=${superAdminEmailNotifier.value}');
+      }
+    } catch (e) {
+      debugPrint('[DataRepository] Error fetching app_config: $e');
+    }
+  }
+
+  /// Updates the `sales_only_mode` flag in the `app_config` table.
+  /// Should only be called by the active Super Admin.
+  static Future<void> setSalesOnlyMode(bool enabled) async {
+    try {
+      await SupabaseService.client.from('app_config').update({
+        'sales_only_mode': enabled,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', 1);
+      salesOnlyModeNotifier.value = enabled;
+      debugPrint('[DataRepository] sales_only_mode set to: $enabled');
+    } catch (e) {
+      debugPrint('[DataRepository] Error setting sales_only_mode: $e');
+      rethrow;
+    }
+  }
+
+  /// Transfers Super Admin ownership to [newEmail] in the `app_config` table.
+  /// Only the currently authenticated Super Admin should invoke this.
+  static Future<bool> transferSuperAdmin(String newEmail) async {
+    final normalized = newEmail.toLowerCase().trim();
+    if (normalized.isEmpty || !normalized.contains('@')) {
+      throw ArgumentError('Invalid email address for Super Admin transfer.');
+    }
+    try {
+      await SupabaseService.client.from('app_config').update({
+        'super_admin_email': normalized,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', 1);
+
+      superAdminEmailNotifier.value = normalized;
+      UserSession.superAdminEmail = normalized;
+
+      // Ensure the newly designated super admin is recorded as an approved admin
+      try {
+        await SupabaseService.client
+            .from('users')
+            .update({'role': 'admin', 'status': 'APPROVED'})
+            .eq('email', normalized);
+      } catch (_) {}
+
+      debugPrint(
+          '[DataRepository] Super Admin successfully transferred to: $normalized');
+      await syncCurrentUser();
+      return true;
+    } catch (e) {
+      debugPrint('[DataRepository] Error transferring Super Admin: $e');
+      rethrow;
+    }
+  }
+
+  /// Resolves any raw user identifier (UUID, email, username) into a clean, human-readable display name.
+  static String resolveUserDisplayName(String? userRaw) {
+    if (userRaw == null || userRaw.trim().isEmpty) {
+      return 'Staff';
+    }
+    final trimmed = userRaw.trim();
+
+    // 1. Direct or case-insensitive cache hit
+    if (userProfileLookupMap.containsKey(trimmed)) {
+      return userProfileLookupMap[trimmed]!;
+    }
+    if (userProfileLookupMap.containsKey(trimmed.toLowerCase())) {
+      return userProfileLookupMap[trimmed.toLowerCase()]!;
+    }
+
+    // 2. Email parsing & fallback
+    if (trimmed.contains('@')) {
+      final emailLower = trimmed.toLowerCase();
+      if (emailLower == superAdminEmail.toLowerCase().trim()) {
+        return userProfileLookupMap[emailLower] ?? 'Super Admin';
+      }
+      final prefix = trimmed.split('@').first;
+      if (userProfileLookupMap.containsKey(prefix.toLowerCase())) {
+        return userProfileLookupMap[prefix.toLowerCase()]!;
+      }
+      return prefix;
+    }
+
+    // 3. UUID formatting
+    final isUuid = RegExp(
+            r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+        .hasMatch(trimmed);
+    if (isUuid) {
+      return trimmed.substring(0, 8);
+    }
+
+    // 4. Default return trimmed as-is
+    return trimmed;
   }
 
   /// Returns the canonical category/material name, case-insensitively matched against materials.
@@ -318,6 +509,9 @@ class DataRepository {
     // ── Fetch live global charges from Supabase ───────────────────────────
     fetchGlobalCharges();
 
+    // ── Fetch live restricted sales mode status ───────────────────────────
+    fetchSalesOnlyMode();
+
     // ── Load user session from SharedPreferences ──────────────────────────
     final prefs = await SharedPreferences.getInstance();
     final savedUserJson = prefs.getString('currentUser');
@@ -372,6 +566,36 @@ class DataRepository {
         (_) => syncSheetData(null, force: true), onError: (e) {
       debugPrint("[DataRepository] Realtime materials stream error: $e");
     });
+
+    // Realtime listener for app_config (Restricted Sales Mode & Super Admin Email)
+    SupabaseService.client
+        .from('app_config')
+        .stream(primaryKey: ['id']).listen((rows) {
+      if (rows.isNotEmpty) {
+        final row = rows.first;
+        final bool newValue = row['sales_only_mode'] == true;
+        if (salesOnlyModeNotifier.value != newValue) {
+          salesOnlyModeNotifier.value = newValue;
+          debugPrint(
+              '[DataRepository] Realtime sales_only_mode updated: $newValue');
+        }
+        final dynamic superEmailRaw = row['super_admin_email'];
+        if (superEmailRaw != null &&
+            superEmailRaw.toString().trim().isNotEmpty) {
+          final String sEmail = superEmailRaw.toString().trim();
+          if (superAdminEmailNotifier.value.toLowerCase().trim() !=
+              sEmail.toLowerCase().trim()) {
+            superAdminEmailNotifier.value = sEmail;
+            UserSession.superAdminEmail = sEmail;
+            debugPrint(
+                '[DataRepository] Realtime super_admin_email updated: $sEmail');
+            refreshCurrentUser();
+          }
+        }
+      }
+    }, onError: (e) {
+      debugPrint('[DataRepository] Realtime app_config stream error: $e');
+    });
   }
 
   static Future<void> refreshCurrentUser([String? emailOverride]) async {
@@ -390,7 +614,8 @@ class DataRepository {
 
       UserModel? newUser;
 
-      if (email == 'j2833945@gmail.com') {
+      if (email == superAdminEmail.toLowerCase().trim() ||
+          UserSession.isSuperAdmin) {
         newUser = UserModel(
           email: email,
           role: UserRole.admin,

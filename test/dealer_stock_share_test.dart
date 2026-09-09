@@ -137,7 +137,6 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
 
-      bool categoryWhatsAppClicked = false;
       final items = [
         {
           'category_name': 'MS Pipe',
@@ -168,7 +167,6 @@ void main() {
                 onToggleCategorySelection: (_) {},
                 isItemSelected: (_) => true,
                 onToggleItemSelection: (_, __) {},
-                onCopyCategoryWhatsApp: () => categoryWhatsAppClicked = true,
               ),
             ),
           ),
@@ -182,8 +180,83 @@ void main() {
       expect(find.text('-0.320 MT'), findsOneWidget); // Raw deficit displayed
       expect(find.text('Subtotal (MS Pipe)'), findsOneWidget);
 
-      await tester.tap(find.text('WhatsApp'));
-      expect(categoryWhatsAppClicked, isTrue);
+      // Verify category WhatsApp chip is no longer rendered in the header
+      expect(find.text('WhatsApp'), findsNothing);
+    });
+
+    testWidgets('renders only header when isExpanded is false (default collapsed state)',
+        (WidgetTester tester) async {
+      final items = [
+        {
+          'category_name': 'MS Angle',
+          'size_label': '50x50x6',
+          'unit_weight_kg': 27.0,
+          'size_difference': 500.0,
+          'current_stock_mt': 15.250,
+        },
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: CategoryStockAccordion(
+                categoryName: 'MS Angle',
+                items: items,
+                isExpanded: false,
+                onToggleExpand: () {},
+                categorySelectionState: false,
+                onToggleCategorySelection: (_) {},
+                isItemSelected: (_) => false,
+                onToggleItemSelection: (_, __) {},
+                onCopyCategoryWhatsApp: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // Header summary is visible
+      expect(find.text('MS Angle'), findsOneWidget);
+      expect(find.text('15.250 MT'), findsOneWidget);
+
+      // Inner table contents are NOT rendered when collapsed
+      expect(find.text('SIZE & SECTION'), findsNothing);
+      expect(find.text('Subtotal (MS Angle)'), findsNothing);
+    });
+  });
+
+  group('DealerShareToolbar Selection State Tests', () {
+    testWidgets('renders unchecked Select All toggle when selectedCount is 0',
+        (WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: DealerShareToolbar(
+              activeLocation: 'YARD',
+              onLocationChanged: (_) {},
+              searchController: TextEditingController(),
+              searchQuery: '',
+              onSearchChanged: (_) {},
+              onClearSearch: () {},
+              selectedCount: 0,
+              totalCount: 30,
+              totalSelectedStockMT: 0.0,
+              onToggleSelectAll: () {},
+              onExportPdf: () {},
+              onShare: () {},
+            ),
+          ),
+        ),
+      );
+
+      // Verify unselected initial state
+      expect(find.text('Select All'), findsOneWidget);
+      expect(find.text('All Selected'), findsNothing);
+      expect(find.text('0 / 30'), findsOneWidget);
+      expect(find.byIcon(Icons.check_box_outline_blank_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.check_box_rounded), findsNothing);
     });
   });
 }
+

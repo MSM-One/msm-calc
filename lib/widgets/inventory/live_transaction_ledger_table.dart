@@ -565,13 +565,52 @@ class _LiveTransactionLedgerTableState extends State<LiveTransactionLedgerTable>
                   decoration: tx.isReversed ? TextDecoration.lineThrough : null,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '📍 ${tx.location}${tx.toLocation != null ? ' ➔ ${tx.toLocation}' : ''} · ${_timeFormat.format(tx.dateTime)}',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                  Expanded(
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.location_on_outlined, size: 12, color: Colors.grey.shade600),
+                            const SizedBox(width: 2),
+                            Text(
+                              '${tx.location}${tx.toLocation != null ? ' ➔ ${tx.toLocation}' : ''} • ${_timeFormat.format(tx.dateTime)}',
+                              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                            ),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.blueGrey.shade50,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: Colors.blueGrey.shade200, width: 0.5),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.person_outline, size: 11, color: Colors.blueGrey.shade700),
+                              const SizedBox(width: 3),
+                              Text(
+                                tx.displayUserName,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.blueGrey.shade800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   Row(
                     mainAxisSize: MainAxisSize.min,

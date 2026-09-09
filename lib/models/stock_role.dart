@@ -73,9 +73,12 @@ class UserSession {
     _syncLegacyBooleans();
   }
 
+  /// Dynamic Super Admin email configured in Supabase app_config.
+  static String superAdminEmail = 'j2833945@gmail.com';
+
   // ── Legacy action checks (kept for backward compat) ────────────────────────
   static bool canPerform(String action) {
-    if (userEmail == 'j2833945@gmail.com') return true;
+    if (isSuperAdmin) return true;
     if (currentRole == StockRole.ADMIN) return true;
     if (currentRole == StockRole.MANAGER) {
       if (action == 'WIPE_DATA') return false;
@@ -87,8 +90,16 @@ class UserSession {
     return false;
   }
 
+  /// True only for the active Super Admin account.
+  /// Used for features like the Restricted Sales Mode toggle and system-wide overrides.
+  static bool get isSuperAdmin {
+    final current = userEmail?.toLowerCase().trim();
+    final target = superAdminEmail.toLowerCase().trim();
+    return current != null && current.isNotEmpty && current == target;
+  }
+
   static bool get isUserAdmin {
-    if (userEmail?.toLowerCase().trim() == 'j2833945@gmail.com') return true;
+    if (isSuperAdmin) return true;
     return currentRole == StockRole.ADMIN;
   }
 }

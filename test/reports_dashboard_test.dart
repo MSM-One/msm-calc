@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:msm_calc/models/report_models.dart';
+import 'package:msm_calc/models/stock_models.dart';
+import 'package:msm_calc/services/data_repository.dart';
 import 'package:msm_calc/utils/item_order_util.dart';
 import 'package:msm_calc/widgets/reports/enterprise_stock_movement_table.dart';
 import 'package:msm_calc/widgets/reports/reports_sub_tab_bar.dart';
 import 'package:msm_calc/widgets/reports/stock_reports_kpi_banner.dart';
 import 'package:msm_calc/screens/reports/todays_summary_screen.dart';
+import 'package:msm_calc/screens/reports/low_stock_report_screen.dart';
+import 'package:msm_calc/screens/reports/stock_ledger_screen.dart';
+import 'package:msm_calc/screens/professional_reports_screen.dart';
 import 'package:msm_calc/widgets/reports/reports_export_toolbar.dart';
+import 'package:msm_calc/widgets/reports/report_bottom_action_bar.dart';
 
 void main() {
   group('ItemOrderUtil Canonical Sequence Tests', () {
@@ -519,6 +525,45 @@ void main() {
       expect(find.text('Active Only'), findsNothing);
       expect(find.text('All Sizes'), findsNothing);
     });
+
+    testWidgets('renders summary metric badge and single Export PDF button with tooltip on desktop', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      final searchCtrl = TextEditingController();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ReportsExportToolbar(
+              startDate: DateTime(2026, 9, 3),
+              endDate: DateTime(2026, 9, 3),
+              selectedDatePreset: 'Today',
+              locationFilter: 'ALL',
+              searchController: searchCtrl,
+              onSearch: (_) {},
+              onDateRangeTap: () {},
+              onLocationChanged: (_) {},
+              onRefresh: () {},
+              onExportPdf: () {},
+              onExportCsv: () {},
+              activeTabId: 'low',
+              summaryMetricLabel: 'Total Low Stock',
+              summaryMetricValue: 112.008,
+              summaryMetricColor: const Color(0xFFDC2626),
+              summaryMetricBgColor: const Color(0xFFFEE2E2),
+              pdfTooltip: 'Export Full Low Stock Report',
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Total Low Stock: '), findsOneWidget);
+      expect(find.text('112.008 MT'), findsOneWidget);
+      expect(find.byTooltip('Export Full Low Stock Report'), findsOneWidget);
+      expect(find.byTooltip('Export CSV'), findsOneWidget);
+
+      await tester.binding.setSurfaceSize(null);
+    });
   });
 
   group('TodaySummaryTab Active Only Filtering Tests', () {
@@ -748,7 +793,7 @@ void main() {
 
       // Verify Category Card Header
       expect(find.text('MS PIPE'), findsOneWidget);
-      expect(find.text('3.000 MT'), findsOneWidget);
+      expect(find.text('3.000 MT'), findsWidgets);
 
       // Verify Bottom Action Bar
       expect(find.text('Export PDF'), findsOneWidget);
@@ -807,5 +852,440 @@ void main() {
       await tester.binding.setSurfaceSize(null);
     });
   });
+
+  group('TodaySummaryTab Total Quantity Bottom Bar Tests', () {
+    final mockMovements = [
+      DailyMovementEntry(
+        category: 'MS Pipe',
+        itemName: 'MS Pipe',
+        size: '15 NB',
+        openingQty: 10.0,
+        inQty: 5.000,
+        outQty: 2.000,
+        closingQty: 13.000,
+      ),
+      DailyMovementEntry(
+        category: 'MS Angle',
+        itemName: 'MS Angle',
+        size: '25x3',
+        openingQty: 20.0,
+        inQty: 3.500,
+        outQty: 1.000,
+        closingQty: 22.500,
+      ),
+    ];
+
+    testWidgets('renders dynamic Total Inward Qty bottom bar with correct badge text in Inward flow mode', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TodaySummaryTab(
+              isLoading: false,
+              filteredDailyMovement: mockMovements,
+              selectedTab: 'Detailed',
+              selectedFlow: 'Inward',
+              emptyState: const Text('Empty'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Ensure no old top banner exists
+      expect(find.byKey(const Key('today_total_qty_banner')), findsNothing);
+
+      // Total Inward = 5.000 + 3.500 = 8.500 MT in bottom bar
+      expect(find.byKey(const Key('today_total_qty_bottom_bar')), findsOneWidget);
+      expect(find.text('Total Inward Qty'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('today_total_qty_bottom_bar')),
+          matching: find.text('8.500 MT'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Export PDF'), findsOneWidget);
+
+      await tester.binding.setSurfaceSize(null);
+    });
+
+    testWidgets('renders dynamic Total Outward Qty bottom bar with correct badge text in Outward flow mode', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TodaySummaryTab(
+              isLoading: false,
+              filteredDailyMovement: mockMovements,
+              selectedTab: 'Detailed',
+              selectedFlow: 'Outward',
+              emptyState: const Text('Empty'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Ensure no old top banner exists
+      expect(find.byKey(const Key('today_total_qty_banner')), findsNothing);
+
+      // Total Outward = 2.000 + 1.000 = 3.000 MT in bottom bar
+      expect(find.byKey(const Key('today_total_qty_bottom_bar')), findsOneWidget);
+      expect(find.text('Total Outward Qty'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('today_total_qty_bottom_bar')),
+          matching: find.text('3.000 MT'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Export PDF'), findsOneWidget);
+
+      await tester.binding.setSurfaceSize(null);
+    });
+
+    testWidgets('renders dynamic Total Net Qty bottom bar across mobile summary and detailed views', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+
+      // Mobile Summary View
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TodaySummaryTab(
+              isLoading: false,
+              filteredDailyMovement: mockMovements,
+              selectedTab: 'Summary',
+              selectedFlow: 'Net Qty',
+              emptyState: const Text('Empty'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Total Net = (5.000 - 2.000) + (3.500 - 1.000) = 3.000 + 2.500 = 5.500 MT
+      expect(find.byKey(const Key('today_total_qty_banner')), findsNothing);
+      expect(find.byKey(const Key('today_total_qty_bottom_bar')), findsOneWidget);
+      expect(find.text('Total Net Qty'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('today_total_qty_bottom_bar')),
+          matching: find.text('5.500 MT'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Export PDF'), findsOneWidget);
+
+      // Mobile Detailed View
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TodaySummaryTab(
+              isLoading: false,
+              filteredDailyMovement: mockMovements,
+              selectedTab: 'Detailed',
+              selectedFlow: 'Net Qty',
+              emptyState: const Text('Empty'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('today_total_qty_banner')), findsNothing);
+      expect(find.byKey(const Key('today_total_qty_bottom_bar')), findsOneWidget);
+      expect(find.text('Total Net Qty'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('today_total_qty_bottom_bar')),
+          matching: find.text('5.500 MT'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Export PDF'), findsOneWidget);
+
+      await tester.binding.setSurfaceSize(null);
+    });
+  });
+
+  group('ReportBottomActionBar Shared Widget Tests', () {
+    testWidgets('renders custom label, formatted MT quantity, custom badge colors, and triggers export callback', (tester) async {
+      bool exported = false;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            bottomNavigationBar: ReportBottomActionBar(
+              barKey: const Key('test_bottom_bar'),
+              label: 'Total Custom Metric',
+              totalQty: 145.789,
+              badgeColor: const Color(0xFFFEE2E2),
+              badgeTextColor: const Color(0xFFDC2626),
+              onExportPdf: () => exported = true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('test_bottom_bar')), findsOneWidget);
+      expect(find.text('Total Custom Metric'), findsOneWidget);
+      expect(find.text('145.789 MT'), findsOneWidget);
+      expect(find.text('Export PDF'), findsOneWidget);
+
+      await tester.tap(find.text('Export PDF'));
+      await tester.pumpAndSettle();
+      expect(exported, isTrue);
+    });
+
+    testWidgets('displays loading indicator when isPdfLoading is true', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            bottomNavigationBar: ReportBottomActionBar(
+              barKey: const Key('test_loading_bar'),
+              label: 'Total Qty',
+              totalQty: 10.0,
+              isPdfLoading: true,
+              onExportPdf: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('Exporting...'), findsOneWidget);
+    });
+  });
+
+  group('EnterpriseStockMovementTable Total Quantity Bottom Bar Tests', () {
+    testWidgets('renders Total Closing Stock bottom bar with aggregated closing quantity and export PDF button', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(600, 800));
+      bool pdfExported = false;
+
+      final mockData = <String, Map<String, List<StockMovementEntry>>>{
+        'MS Pipe': {
+          'Pipe 1"': [
+            StockMovementEntry(
+              category: 'MS Pipe',
+              item: 'Pipe 1"',
+              sizes: [
+                StockSizeMovement(
+                  label: '1" (1.20mm)',
+                  opening: 10.0,
+                  inQty: 5.0,
+                  outQty: 2.0,
+                  closing: 13.0,
+                ),
+                StockSizeMovement(
+                  label: '2" (1.60mm)',
+                  opening: 20.0,
+                  inQty: 2.0,
+                  outQty: 4.0,
+                  closing: 18.0,
+                ),
+              ],
+            ),
+          ],
+        },
+      };
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: EnterpriseStockMovementTable(
+              groupedReport: mockData,
+              isDetailed: true,
+              expandedCategories: const {'MS Pipe'},
+              onCategoryToggle: (_) {},
+              onExportPdf: () => pdfExported = true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Total Closing Stock = 13.0 + 18.0 = 31.000 MT
+      expect(find.byKey(const Key('stock_movement_total_qty_bottom_bar')), findsOneWidget);
+      expect(find.text('Total Closing Stock'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('stock_movement_total_qty_bottom_bar')),
+          matching: find.text('31.000 MT'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Export PDF'), findsOneWidget);
+
+      await tester.tap(find.text('Export PDF'));
+      await tester.pumpAndSettle();
+      expect(pdfExported, isTrue);
+
+      await tester.binding.setSurfaceSize(null);
+    });
+  });
+
+  group('LowStockReportScreen Total Quantity Bottom Bar Tests', () {
+    testWidgets('renders Total Low Stock Qty bottom bar on mobile (< 900px)', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(400, 800));
+      final mockItems = [
+        {
+          'id': '1',
+          'item_name': 'MS Pipe',
+          'category_name': 'MS Pipe',
+          'size_description': '1" (1.2mm)',
+          'low_stock_qty': 2.500,
+        },
+        {
+          'id': '2',
+          'item_name': 'MS Angle',
+          'category_name': 'MS Angle',
+          'size_description': '25x3',
+          'low_stock_qty': 1.250,
+        },
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LowStockReportScreen(
+            items: mockItems,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Total Low Stock = 2.500 + 1.250 = 3.750 MT
+      expect(find.byKey(const Key('low_stock_report_total_qty_bottom_bar')), findsOneWidget);
+      expect(find.text('Total Low Stock Qty'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('low_stock_report_total_qty_bottom_bar')),
+          matching: find.text('3.750 MT'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Export PDF'), findsOneWidget);
+
+      await tester.binding.setSurfaceSize(null);
+    });
+
+    testWidgets('removes sticky bottom bar and renders AppBar summary badge on desktop (>= 900px)', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      final mockItems = [
+        {
+          'id': '1',
+          'item_name': 'MS Pipe',
+          'category_name': 'MS Pipe',
+          'size_description': '1" (1.2mm)',
+          'low_stock_qty': 2.500,
+        },
+        {
+          'id': '2',
+          'item_name': 'MS Angle',
+          'category_name': 'MS Angle',
+          'size_description': '25x3',
+          'low_stock_qty': 1.250,
+        },
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LowStockReportScreen(
+            items: mockItems,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Sticky bottom bar must NOT be rendered on desktop
+      expect(find.byKey(const Key('low_stock_report_total_qty_bottom_bar')), findsNothing);
+      // AppBar summary badge and single Export PDF button must be present
+      expect(find.text('Total Low Stock: 3.750 MT'), findsOneWidget);
+      expect(find.text('Export PDF'), findsOneWidget);
+
+      await tester.binding.setSurfaceSize(null);
+    });
+  });
+
+  group('StockLedgerScreen Total Quantity Bottom Bar Tests', () {
+    testWidgets('renders Total Closing Stock bottom bar on mobile with calculated quantity', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+
+      final now = DateTime.now();
+      DataRepository.allTransactionsNotifier.value = [
+        StockTransaction(
+          txnId: '1',
+          itemName: 'MS Pipe',
+          size: '1" (1.2mm)',
+          qtyMT: 10.0,
+          type: 'INWARD',
+          dateTime: now,
+          location: 'YARD',
+        ),
+        StockTransaction(
+          txnId: '2',
+          itemName: 'MS Pipe',
+          size: '1" (1.2mm)',
+          qtyMT: 3.0,
+          type: 'OUTWARD',
+          dateTime: now,
+          location: 'YARD',
+        ),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StockLedgerScreen(
+            isLoading: false,
+            startDate: DateTime(now.year, now.month, 1),
+            endDate: now,
+            locationFilter: 'ALL',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('stock_ledger_total_qty_bottom_bar')), findsOneWidget);
+      expect(find.text('Total Closing Stock'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('stock_ledger_total_qty_bottom_bar')),
+          matching: find.text('7.000 MT'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Export PDF'), findsOneWidget);
+
+      await tester.binding.setSurfaceSize(null);
+    });
+  });
+
+  group('ProfessionalReportsScreen Total Quantity Bottom Bar Tests', () {
+    testWidgets('renders correct bottom action bar for stock movement tab', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: ProfessionalReportsScreen(
+            initialTabId: 'movement',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // On Movement tab
+      expect(find.byKey(const Key('movement_total_qty_bottom_bar')), findsOneWidget);
+      expect(find.text('Total Closing Stock'), findsOneWidget);
+      expect(find.text('Export PDF'), findsOneWidget);
+
+      await tester.binding.setSurfaceSize(null);
+    });
+  });
 }
+
+
 

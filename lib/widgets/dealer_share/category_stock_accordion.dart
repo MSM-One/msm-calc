@@ -3,7 +3,7 @@ import '../../utils/formatters.dart';
 
 /// Clean expandable category accordion card displaying high-density item & size rows.
 /// Enforces raw deficit integrity (no zero-clamping), multi-column data grid,
-/// alternating zebra striping, and quick category WhatsApp text copy.
+/// and alternating zebra striping.
 class CategoryStockAccordion extends StatefulWidget {
   final String categoryName;
   final List<Map<String, dynamic>> items;
@@ -13,7 +13,7 @@ class CategoryStockAccordion extends StatefulWidget {
   final ValueChanged<bool?> onToggleCategorySelection;
   final bool Function(Map<String, dynamic> row) isItemSelected;
   final void Function(Map<String, dynamic> row, bool? selected) onToggleItemSelection;
-  final VoidCallback onCopyCategoryWhatsApp;
+  final VoidCallback? onCopyCategoryWhatsApp;
 
   const CategoryStockAccordion({
     super.key,
@@ -25,7 +25,7 @@ class CategoryStockAccordion extends StatefulWidget {
     required this.onToggleCategorySelection,
     required this.isItemSelected,
     required this.onToggleItemSelection,
-    required this.onCopyCategoryWhatsApp,
+    this.onCopyCategoryWhatsApp,
   });
 
   @override
@@ -153,42 +153,7 @@ class _CategoryStockAccordionState extends State<CategoryStockAccordion> {
               ),
             ),
 
-            // Quick Category Copy WhatsApp Button
-            Tooltip(
-              message: 'Copy ${widget.categoryName} WhatsApp text',
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: widget.onCopyCategoryWhatsApp,
-                  borderRadius: BorderRadius.circular(6),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFECFDF5),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFFA7F3D0)),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.chat_bubble_outline_rounded,
-                            size: 13, color: Color(0xFF10B981)),
-                        SizedBox(width: 4),
-                        Text(
-                          'WhatsApp',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF10B981),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
 
             // Category Total Tonnage Badge
             Container(
@@ -221,7 +186,7 @@ class _CategoryStockAccordionState extends State<CategoryStockAccordion> {
                 ],
               ),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 6),
 
             // Expand Arrow Icon
             Icon(

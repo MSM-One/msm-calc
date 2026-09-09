@@ -1,7 +1,17 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import '../../models/stock_models.dart';
 import '../../services/data_repository.dart';
+import '../../services/pdf_report_service.dart';
+import '../../utils/file_download_helper.dart' as download_helper;
 import '../../utils/formatters.dart';
+import '../../utils/item_order_util.dart';
 import '../../utils/sorting_utils.dart';
+import '../../widgets/reports/report_bottom_action_bar.dart';
 
 /// A card displaying a low stock item with corporate enterprise standards,
 /// supporting zero-quantity neutral styling and critical warning deep red styling.
@@ -64,7 +74,7 @@ class LowStockItemCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -165,23 +175,23 @@ class LowStockReportScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    double getItemQty(Map<String, dynamic> m) {
+      return ((m['low_stock_qty'] ??
+              m['closing_mt'] ??
+              m['closing_qty'] ??
+              m['net_stock_mt'] ??
+              m['qty'] ??
+              m['currentStockMT'] ??
+              0.0) as num)
+          .toDouble();
+    }
+
     final Map<dynamic, Map<String, dynamic>> uniqueSizesMap = {};
     for (var item in items) {
       final sizeId = item['size_id'] ??
           item['size_label'] ??
           item['size_description'] ??
           '${item['item_name'] ?? item['itemName'] ?? item['item']}|${item['size']}';
-
-      double getItemQty(Map<String, dynamic> m) {
-        return ((m['low_stock_qty'] ??
-                m['closing_mt'] ??
-                m['closing_qty'] ??
-                m['net_stock_mt'] ??
-                m['qty'] ??
-                m['currentStockMT'] ??
-                0.0) as num)
-            .toDouble();
-      }
 
       if (!uniqueSizesMap.containsKey(sizeId)) {
         final newItem = Map<String, dynamic>.from(item);
@@ -225,25 +235,111 @@ class LowStockReportScreen extends StatelessWidget {
       groupedItems[categoryName]!.add(item);
     }
     final List<String> sortedCategories = groupedItems.keys.toList()
-      ..sort(SortingUtils.compareCategories);
+      ..sort(ItemOrderUtil.compare);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFFFF8F8),
-      appBar: AppBar(
-        title: const Text("Low Stock Alert Details"),
-        backgroundColor: const Color(0xFFB71C1C),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
-          tooltip: 'Back',
-          onPressed: () {
-            if (Navigator.of(context).canPop()) {
-              Navigator.of(context).pop();
-            } else {
-              Navigator.of(context).pushReplacementNamed('/home');
-            }
-          },
-        ),
-      ),
+    final double grandTotalLowStock =
+        deduplicatedList.fold(0.0, (sum, item) => sum + getItemQty(item));
+
+    Future<void> exportPdf() async {
+      final List<ItemVariant> variants = items.map<ItemVariant>((m) {
+        return ItemVariant(
+          itemName: (m['item_name'] ?? m['itemName'] ?? m['item'] ?? '').toString(),
+          category: (m['category_name'] ?? m['category'] ?? '').toString(),
+          size: (m['size_label'] ?? m['size_description'] ?? m['size'] ?? '').toString(),
+          currentStockMT: ((m['low_stock_qty'] ?? m['qty'] ?? m['currentStockMT'] ?? 0.0) as num).toDouble(),
+          location: (m['location'] ?? 'ALL').toString(),
+        );
+      }).toList();
+      final bytes = await PdfReportService.generateCombinedLowStockPdf(
+        entries: variants,
+        location: 'ALL',
+        isDetailed: true,
+      );
+      final filename = 'MSM_Low_Stock_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf';
+      if (kIsWeb) {
+        download_helper.downloadFile(bytes, filename);
+      } else {
+        final directory = await getExternalStorageDirectory() ??
+            await getApplicationDocumentsDirectory();
+        final file = File('${directory.path}/$filename');
+        await file.writeAsBytes(bytes);
+        await Share.shareXFiles([XFile(file.path)], text: 'MSM Low Stock Report');
+      }
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bool isDesktop = constraints.maxWidth >= 900;
+
+        return Scaffold(
+          backgroundColor: const Color(0xFFFFF8F8),
+          appBar: AppBar(
+            title: const Text("Low Stock Alert Details"),
+            backgroundColor: const Color(0xFFB71C1C),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
+              tooltip: 'Back',
+              onPressed: () {
+                if (Navigator.of(context).canPop()) {
+                  Navigator.of(context).pop();
+                } else {
+                  Navigator.of(context).pushReplacementNamed('/home');
+                }
+              },
+            ),
+            actions: [
+              if (isDesktop && items.isNotEmpty) ...[
+                Container(
+                  margin: const EdgeInsets.symmetric(vertical: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.white38),
+                  ),
+                  child: Text(
+                    'Total Low Stock: ${grandTotalLowStock.toStringAsFixed(3)} MT',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFFB71C1C),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      elevation: 0,
+                    ),
+                    icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
+                    label: const Text(
+                      'Export PDF',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: exportPdf,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          bottomNavigationBar: items.isEmpty || isDesktop
+              ? null
+              : ReportBottomActionBar(
+                  barKey: const Key('low_stock_report_total_qty_bottom_bar'),
+                  label: 'Total Low Stock Qty',
+                  totalQty: grandTotalLowStock,
+                  badgeColor: const Color(0xFFFEE2E2),
+                  badgeTextColor: const Color(0xFFDC2626),
+                  onExportPdf: exportPdf,
+                ),
       body: items.isEmpty
           ? const Center(
               child: Text(
@@ -445,6 +541,8 @@ class LowStockReportScreen extends StatelessWidget {
                 );
               },
             ),
+        );
+      },
     );
   }
 }

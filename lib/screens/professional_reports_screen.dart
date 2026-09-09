@@ -23,6 +23,7 @@ import '../widgets/low_stock_widgets.dart';
 import '../widgets/msm_date_filter_sheet.dart';
 import '../widgets/motion_toast.dart';
 import '../widgets/app_version_badge.dart';
+import '../widgets/reports/report_bottom_action_bar.dart';
 import 'reports/low_stock_report_screen.dart';
 import 'reports/todays_summary_screen.dart';
 import 'reports/stock_ledger_screen.dart';
@@ -1214,59 +1215,68 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
   }
 
   Widget? _buildMobileBottomActionBar(BuildContext context) {
+    if (_activeTabs.isEmpty || _tabController.index >= _activeTabs.length) {
+      return null;
+    }
     final String tabId = _activeTabs[_tabController.index]['id'] as String;
-    // Today's Summary tab has its own dedicated pinned bottom action bar (Total Net + Export PDF)
+    // Today's Summary and Stock Ledger tabs manage their own embedded pinned bottom action bar
     if (tabId == 'ledger' || tabId == 'today') return null;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade100)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
-            offset: const Offset(0, -4),
-          )
-        ],
-      ),
-      child: ElevatedButton.icon(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: msmRed,
-          foregroundColor: Colors.white,
-          minimumSize: const Size.fromHeight(48),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          elevation: 0,
-        ),
-        onPressed: _isLoading
-            ? null
-            : () async {
-                setState(() {
-                  _isLoading = true;
-                });
-                try {
-                  await _exportPdf();
-                } catch (e) {
-                  debugPrint("PDF Generation Error tracking: $e");
-                } finally {
-                  if (mounted) {
-                    setState(() {
-                      _isLoading = false;
-                    });
-                  }
+
+    final String summaryLabel;
+    final double calculatedTotalQty;
+    final Color? badgeBgColor;
+    final Color? badgeTextColor;
+
+    if (tabId == 'movement') {
+      summaryLabel = 'Total Closing Stock';
+      calculatedTotalQty = _filteredStockReport.fold(
+          0.0, (sum, e) => sum + e.closing);
+      badgeBgColor = null;
+      badgeTextColor = null;
+    } else if (tabId == 'low') {
+      summaryLabel = 'Total Low Stock Qty';
+      calculatedTotalQty = _filteredLowStock.fold(
+          0.0, (sum, item) => sum + item.currentStockMT);
+      badgeBgColor = const Color(0xFFFEE2E2);
+      badgeTextColor = const Color(0xFFDC2626);
+    } else if (tabId == 'nonmoving') {
+      summaryLabel = 'Total Non-Moving Qty';
+      calculatedTotalQty =
+          _filteredDeadStock.fold(0.0, (sum, item) => sum + item.currentQty);
+      badgeBgColor = const Color(0xFFFEF3C7);
+      badgeTextColor = const Color(0xFFD97706);
+    } else {
+      summaryLabel = 'Total Qty';
+      calculatedTotalQty = 0.0;
+      badgeBgColor = null;
+      badgeTextColor = null;
+    }
+
+    return ReportBottomActionBar(
+      barKey: Key('${tabId}_total_qty_bottom_bar'),
+      label: summaryLabel,
+      totalQty: calculatedTotalQty,
+      badgeColor: badgeBgColor,
+      badgeTextColor: badgeTextColor,
+      isPdfLoading: _isLoading,
+      onExportPdf: _isLoading
+          ? null
+          : () async {
+              setState(() {
+                _isLoading = true;
+              });
+              try {
+                await _exportPdf();
+              } catch (e) {
+                debugPrint("PDF Generation Error tracking: $e");
+              } finally {
+                if (mounted) {
+                  setState(() {
+                    _isLoading = false;
+                  });
                 }
-              },
-        icon: _isLoading
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white))
-            : const Icon(Icons.picture_as_pdf_rounded, size: 20),
-        label: Text(_isLoading ? "Exporting..." : "Export PDF",
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-      ),
+              }
+            },
     );
   }
 
@@ -2066,65 +2076,67 @@ class _ProfessionalReportsScreenState extends State<ProfessionalReportsScreen>
       {String title = 'No results found',
       String subtitle = 'Try adjusting your search or filters'}) {
     return Center(
-      child: Container(
-        padding: const EdgeInsets.all(48),
-        constraints: const BoxConstraints(maxWidth: 500),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF1F3F4),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.analytics_outlined,
-                size: 64,
-                color: Colors.grey.shade400,
-              ),
-            ),
-            const SizedBox(height: 32),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w900,
-                color: textDark,
-                letterSpacing: -0.5,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                height: 1.5,
-                color: Colors.grey.shade500,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 32),
-            if (subtitle.contains('search'))
-              OutlinedButton.icon(
-                onPressed: () {
-                  _searchController.clear();
-                  _onSearchChanged('');
-                },
-                icon: const Icon(Icons.clear_all_rounded, size: 18),
-                label: const Text("Clear Filters"),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: msmRed,
-                  side: BorderSide(color: msmRed.withValues(alpha: 0.2)),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: Container(
+          padding: const EdgeInsets.all(32),
+          constraints: const BoxConstraints(maxWidth: 500),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFF1F3F4),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.analytics_outlined,
+                  size: 48,
+                  color: Colors.grey.shade400,
                 ),
               ),
-          ],
+              const SizedBox(height: 24),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  color: textDark,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  height: 1.4,
+                  color: Colors.grey.shade500,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 24),
+              if (subtitle.contains('search'))
+                OutlinedButton.icon(
+                  onPressed: () {
+                    _searchController.clear();
+                    _onSearchChanged('');
+                  },
+                  icon: const Icon(Icons.clear_rounded, size: 16),
+                  label: const Text("Clear Search"),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: msmRed,
+                    side: BorderSide(color: msmRed.withOpacity(0.3)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

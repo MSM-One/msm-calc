@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/report_models.dart';
 import '../../utils/item_order_util.dart';
 import '../../utils/formatters.dart';
+import 'report_bottom_action_bar.dart';
 
 /// Enterprise Data Table for Stock Movement & Inventory Analytics.
 /// Modernized into a compact, high-density ERP layout:
@@ -16,6 +17,8 @@ class EnterpriseStockMovementTable extends StatefulWidget {
   final ValueChanged<String> onCategoryToggle;
   final Function(String category, Map<String, List<StockMovementEntry>> items)?
       onExportCategoryPdf;
+  final VoidCallback? onExportPdf;
+  final bool isPdfLoading;
   final Map<String, bool> categoryDownloading;
   final String locationFilter;
   final Widget? emptyState;
@@ -28,6 +31,8 @@ class EnterpriseStockMovementTable extends StatefulWidget {
     required this.expandedCategories,
     required this.onCategoryToggle,
     this.onExportCategoryPdf,
+    this.onExportPdf,
+    this.isPdfLoading = false,
     this.categoryDownloading = const {},
     this.locationFilter = 'ALL',
     this.emptyState,
@@ -146,9 +151,9 @@ class _EnterpriseStockMovementTableState
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Left Sidebar (320px fixed) ──
+          // ── Left Sidebar (270px fixed) ──
           SizedBox(
-            width: 320,
+            width: 270,
             child: Container(
               color: const Color(0xFFFAFAFA),
               child: Column(
@@ -615,6 +620,7 @@ class _EnterpriseStockMovementTableState
             width: 44,
             child: Text(
               '#',
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
@@ -622,20 +628,23 @@ class _EnterpriseStockMovementTableState
               ),
             ),
           ),
+          SizedBox(width: 8),
           Expanded(
-            flex: 3,
+            flex: 4,
             child: Text(
               'SIZE & SECTION',
+              textAlign: TextAlign.left,
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
-                color: Color(0xFF475569),
+                color: Color(0xFF1E293B),
                 letterSpacing: 0.2,
               ),
             ),
           ),
+          SizedBox(width: 12),
           SizedBox(
-            width: 105,
+            width: 110,
             child: Text(
               'OPENING',
               textAlign: TextAlign.right,
@@ -648,7 +657,7 @@ class _EnterpriseStockMovementTableState
           ),
           SizedBox(width: 12),
           SizedBox(
-            width: 105,
+            width: 110,
             child: Text(
               'INWARD',
               textAlign: TextAlign.right,
@@ -661,7 +670,7 @@ class _EnterpriseStockMovementTableState
           ),
           SizedBox(width: 12),
           SizedBox(
-            width: 105,
+            width: 110,
             child: Text(
               'OUTWARD',
               textAlign: TextAlign.right,
@@ -716,6 +725,7 @@ class _EnterpriseStockMovementTableState
             width: 44,
             child: Text(
               '${row.index}',
+              textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
@@ -723,27 +733,30 @@ class _EnterpriseStockMovementTableState
               ),
             ),
           ),
+          const SizedBox(width: 8),
 
           // 2. Size & Section
           Expanded(
-            flex: 3,
+            flex: 4,
             child: Text(
               displayLabel,
+              textAlign: TextAlign.left,
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
                 color: isNegative
                     ? const Color(0xFFDC2626)
-                    : const Color(0xFF0F172A),
+                    : const Color(0xFF1E293B),
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          const SizedBox(width: 12),
 
           // 3. Opening
           SizedBox(
-            width: 105,
+            width: 110,
             child: Text(
               row.opening == 0 ? '-' : row.opening.toStringAsFixed(3),
               textAlign: TextAlign.right,
@@ -761,7 +774,7 @@ class _EnterpriseStockMovementTableState
 
           // 4. Inward
           SizedBox(
-            width: 105,
+            width: 110,
             child: Text(
               row.inward == 0 ? '-' : '+${row.inward.toStringAsFixed(3)}',
               textAlign: TextAlign.right,
@@ -779,7 +792,7 @@ class _EnterpriseStockMovementTableState
 
           // 5. Outward
           SizedBox(
-            width: 105,
+            width: 110,
             child: Text(
               row.outward == 0 ? '-' : '-${row.outward.toStringAsFixed(3)}',
               textAlign: TextAlign.right,
@@ -836,10 +849,12 @@ class _EnterpriseStockMovementTableState
       child: Row(
         children: [
           const SizedBox(width: 44),
+          const SizedBox(width: 8),
           const Expanded(
-            flex: 3,
+            flex: 4,
             child: Text(
               'TOTAL',
+              textAlign: TextAlign.left,
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w900,
@@ -848,8 +863,9 @@ class _EnterpriseStockMovementTableState
               ),
             ),
           ),
+          const SizedBox(width: 12),
           SizedBox(
-            width: 105,
+            width: 110,
             child: Text(
               totalOpening.toStringAsFixed(3),
               textAlign: TextAlign.right,
@@ -863,7 +879,7 @@ class _EnterpriseStockMovementTableState
           ),
           const SizedBox(width: 12),
           SizedBox(
-            width: 105,
+            width: 110,
             child: Text(
               '+${totalInward.toStringAsFixed(3)}',
               textAlign: TextAlign.right,
@@ -877,7 +893,7 @@ class _EnterpriseStockMovementTableState
           ),
           const SizedBox(width: 12),
           SizedBox(
-            width: 105,
+            width: 110,
             child: Text(
               '-${totalOutward.toStringAsFixed(3)}',
               textAlign: TextAlign.right,
@@ -1057,18 +1073,36 @@ class _EnterpriseStockMovementTableState
       },
     );
 
-    if (needsHorizontalScroll) {
-      return SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        child: SizedBox(
-          width: minTableWidth,
-          child: content,
-        ),
-      );
-    }
+    final allGroupEntries = widget.groupedReport.values
+        .expand((m) => m.values.expand((list) => list))
+        .toList();
+    final double grandClosingStock =
+        allGroupEntries.fold(0.0, (sum, e) => sum + e.closing);
 
-    return content;
+    final Widget tableWidget = needsHorizontalScroll
+        ? SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: SizedBox(
+              width: minTableWidth,
+              child: content,
+            ),
+          )
+        : content;
+
+    return Column(
+      children: [
+        Expanded(child: tableWidget),
+        if (widget.onExportPdf != null)
+          ReportBottomActionBar(
+            barKey: const Key('stock_movement_total_qty_bottom_bar'),
+            label: 'Total Closing Stock',
+            totalQty: grandClosingStock,
+            onExportPdf: widget.onExportPdf,
+            isPdfLoading: widget.isPdfLoading,
+          ),
+      ],
+    );
   }
 
   List<_MovementRowData> _flattenCategoryItems(

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../../constants/app_colors.dart';
 import '../../models/stock_models.dart';
 import '../../services/data_repository.dart';
@@ -7,6 +6,7 @@ import '../../utils/sorting_utils.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/m_loader.dart';
 import '../../services/pdf_report_service.dart';
+import '../../widgets/reports/report_bottom_action_bar.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SAFE PARSING & FORMATTING HELPERS
@@ -157,8 +157,6 @@ class StockLedgerScreen extends StatefulWidget {
 }
 
 class _StockLedgerScreenState extends State<StockLedgerScreen> {
-  static const double kExportBarHeight = 48.0;
-
   String? _expandedCategoryId;
   List<CategoryLedgerGroup> _cachedCategoryGroups = [];
   List<StockTransaction> _filteredTransactionsForPdf = [];
@@ -333,7 +331,7 @@ class _StockLedgerScreenState extends State<StockLedgerScreen> {
       final item = rawLedgerMap[itemKey]!;
       final String itemName = item['itemName']?.toString() ?? '';
       final String size = item['size']?.toString() ?? '';
-      final String rawCat = (item['category']?.toString()?.isNotEmpty == true &&
+      final String rawCat = (item['category']?.toString().isNotEmpty == true &&
               item['category'] != 'General')
           ? item['category'].toString()
           : (itemName.isNotEmpty ? itemName : detectCategory(itemName));
@@ -426,6 +424,9 @@ class _StockLedgerScreenState extends State<StockLedgerScreen> {
         double grandClosing = categoryGroups.fold(
             0.0, (sum, g) => sum + parseDouble(g.totalClosing));
 
+        final bool isDesktopLayout =
+            widget.isDesktop && MediaQuery.of(context).size.width >= 1024;
+
         return Scaffold(
           backgroundColor: const Color(0xFFF9FAFB),
           body: widget.isLoading
@@ -433,21 +434,40 @@ class _StockLedgerScreenState extends State<StockLedgerScreen> {
               : Column(
                   children: [
                     // ── Enterprise KPI Summary Strip ─────────────────────────
-                    if (widget.isDesktop) Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Row(
-                        children: [
-                          _buildEnterpriseKpiCard('Opening Stock', _formatQty(grandOpening, includeSuffix: true), const Color(0xFF64748B), Icons.inventory_2_outlined),
-                          const SizedBox(width: 12),
-                          _buildEnterpriseKpiCard('Period In', _formatQty(grandInward, includeSuffix: true), const Color(0xFF16A34A), Icons.arrow_downward_rounded),
-                          const SizedBox(width: 12),
-                          _buildEnterpriseKpiCard('Period Out', _formatQty(grandOutward, includeSuffix: true), const Color(0xFFDC2626), Icons.arrow_upward_rounded),
-                          const SizedBox(width: 12),
-                          _buildEnterpriseKpiCard('Net Remaining', _formatQty(grandClosing, includeSuffix: true), grandClosing >= 0 ? const Color(0xFF0284C7) : const Color(0xFFDC2626), Icons.account_balance_wallet_outlined),
-                        ],
+                    if (isDesktopLayout)
+                      Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Row(
+                          children: [
+                            _buildEnterpriseKpiCard(
+                                'Opening Stock',
+                                _formatQty(grandOpening, includeSuffix: true),
+                                const Color(0xFF64748B),
+                                Icons.inventory_2_outlined),
+                            const SizedBox(width: 12),
+                            _buildEnterpriseKpiCard(
+                                'Period In',
+                                _formatQty(grandInward, includeSuffix: true),
+                                const Color(0xFF16A34A),
+                                Icons.arrow_downward_rounded),
+                            const SizedBox(width: 12),
+                            _buildEnterpriseKpiCard(
+                                'Period Out',
+                                _formatQty(grandOutward, includeSuffix: true),
+                                const Color(0xFFDC2626),
+                                Icons.arrow_upward_rounded),
+                            const SizedBox(width: 12),
+                            _buildEnterpriseKpiCard(
+                                'Net Remaining',
+                                _formatQty(grandClosing, includeSuffix: true),
+                                grandClosing >= 0
+                                    ? const Color(0xFF0284C7)
+                                    : const Color(0xFFDC2626),
+                                Icons.account_balance_wallet_outlined),
+                          ],
+                        ),
                       ),
-                    ),
-                    
+
                     // ── Main Content ──────────────────────
                     Expanded(
                       child: categoryGroups.isEmpty
@@ -459,7 +479,7 @@ class _StockLedgerScreenState extends State<StockLedgerScreen> {
                                     fontWeight: FontWeight.bold),
                               ),
                             )
-                          : widget.isDesktop
+                          : isDesktopLayout
                               ? _EnterpriseStockLedgerTable(
                                   categoryGroups: categoryGroups,
                                   formatSize: _formatSize,
@@ -470,12 +490,12 @@ class _StockLedgerScreenState extends State<StockLedgerScreen> {
                                 )
                               : ListView.builder(
                                   padding: const EdgeInsets.only(
-                                      left: 14, right: 14, top: 4, bottom: 96),
+                                      left: 14, right: 14, top: 4, bottom: 16),
                                   itemCount: categoryGroups.length,
                                   itemBuilder: (context, index) {
                                     final group = categoryGroups[index];
-                                    final bool isExpanded =
-                                        group.categoryId == _expandedCategoryId;
+                                    final bool isExpanded = group.categoryId ==
+                                        _expandedCategoryId;
 
                                     return _CategorySummaryCard(
                                       group: group,
@@ -483,8 +503,9 @@ class _StockLedgerScreenState extends State<StockLedgerScreen> {
                                       formatSize: _formatSize,
                                       onExpansionChanged: (expanded) {
                                         setState(() {
-                                          _expandedCategoryId =
-                                              expanded ? group.categoryId : null;
+                                          _expandedCategoryId = expanded
+                                              ? group.categoryId
+                                              : null;
                                         });
                                       },
                                     );
@@ -493,22 +514,13 @@ class _StockLedgerScreenState extends State<StockLedgerScreen> {
                     ),
                   ],
                 ),
-          floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-          floatingActionButton: widget.isDesktop ? null : SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: SizedBox(
-                width: double.infinity,
-                height: kExportBarHeight,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFB71C1C),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    elevation: 4,
-                  ),
-                  onPressed: () async {
+          bottomNavigationBar: isDesktopLayout
+              ? null
+              : ReportBottomActionBar(
+                  barKey: const Key('stock_ledger_total_qty_bottom_bar'),
+                  label: 'Total Closing Stock',
+                  totalQty: grandClosing,
+                  onExportPdf: () async {
                     if (_filteredTransactionsForPdf.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -523,16 +535,7 @@ class _StockLedgerScreenState extends State<StockLedgerScreen> {
                       endDate: _effectiveEndDate,
                     );
                   },
-                  icon: const Icon(Icons.picture_as_pdf_rounded,
-                      color: Colors.white, size: 20),
-                  label: const Text(
-                    "Export PDF",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
                 ),
-              ),
-            ),
-          ),
         );
       },
     );
@@ -635,13 +638,15 @@ class _CategorySummaryCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Semantics(
-        label:
-            "${group.categoryName}, $skuCount sizes, closing stock $closingStr, ${isExpanded ? 'expanded' : 'collapsed'}",
-        button: true,
-        child: Theme(
-          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
+      child: Material(
+        color: Colors.transparent,
+        child: Semantics(
+          label:
+              "${group.categoryName}, $skuCount sizes, closing stock $closingStr, ${isExpanded ? 'expanded' : 'collapsed'}",
+          button: true,
+          child: Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
             key: PageStorageKey(group.categoryId),
             initiallyExpanded: isExpanded,
             onExpansionChanged: onExpansionChanged,
@@ -751,8 +756,9 @@ class _CategorySummaryCard extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1163,14 +1169,77 @@ class _EnterpriseStockLedgerTableState extends State<_EnterpriseStockLedgerTable
             ),
             child: Row(
               children: [
-                const SizedBox(width: 40, child: Text("#", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64748B), fontSize: 12))),
-                const Expanded(flex: 3, child: Text("Category / Material", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64748B), fontSize: 12))),
-                Expanded(flex: 2, child: _rightAlign("Opening (MT)")),
-                Expanded(flex: 2, child: _rightAlign("Period In (MT)", color: const Color(0xFF16A34A))),
-                Expanded(flex: 2, child: _rightAlign("Period Out (MT)", color: const Color(0xFFDC2626))),
-                Expanded(flex: 2, child: _rightAlign("Closing / Balance", color: const Color(0xFF0F172A))),
-                const Expanded(flex: 2, child: Center(child: Text("Status", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64748B), fontSize: 12)))),
-                const SizedBox(width: 60, child: Center(child: Text("Details", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64748B), fontSize: 12)))),
+                const SizedBox(
+                  width: 44,
+                  child: Text(
+                    "#",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF64748B),
+                        fontSize: 12),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Expanded(
+                  flex: 4,
+                  child: Text(
+                    "Category / Material",
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF64748B),
+                        fontSize: 12),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 110,
+                  child: _rightAlign("Opening (MT)"),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 110,
+                  child: _rightAlign("Period In (MT)",
+                      color: const Color(0xFF16A34A)),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 110,
+                  child: _rightAlign("Period Out (MT)",
+                      color: const Color(0xFFDC2626)),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 120,
+                  child: _rightAlign("Closing / Balance",
+                      color: const Color(0xFF0F172A)),
+                ),
+                const SizedBox(width: 12),
+                const SizedBox(
+                  width: 100,
+                  child: Center(
+                    child: Text(
+                      "Status",
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF64748B),
+                          fontSize: 12),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const SizedBox(
+                  width: 44,
+                  child: Center(
+                    child: Text(
+                      "Details",
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF64748B),
+                          fontSize: 12),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -1178,7 +1247,8 @@ class _EnterpriseStockLedgerTableState extends State<_EnterpriseStockLedgerTable
           Expanded(
             child: ListView.separated(
               itemCount: widget.categoryGroups.length,
-              separatorBuilder: (ctx, idx) => const Divider(height: 1, color: Color(0xFFF1F5F9)),
+              separatorBuilder: (ctx, idx) =>
+                  const Divider(height: 1, color: Color(0xFFF1F5F9)),
               itemBuilder: (context, index) {
                 final group = widget.categoryGroups[index];
                 final isExpanded = _expandedRows.contains(group.categoryId);
@@ -1196,17 +1266,46 @@ class _EnterpriseStockLedgerTableState extends State<_EnterpriseStockLedgerTable
             ),
             child: Row(
               children: [
-                const SizedBox(width: 40),
+                const SizedBox(width: 44),
+                const SizedBox(width: 8),
                 const Expanded(
-                  flex: 3,
-                  child: Text("GRAND TOTAL", style: TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF0F172A), fontSize: 14)),
+                  flex: 4,
+                  child: Text(
+                    "GRAND TOTAL",
+                    style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF0F172A),
+                        fontSize: 14),
+                  ),
                 ),
-                Expanded(flex: 2, child: _rightAlign(_formatQty(widget.grandOpening), isBold: true)),
-                Expanded(flex: 2, child: _rightAlign(_formatQty(widget.grandInward), isBold: true, color: const Color(0xFF16A34A))),
-                Expanded(flex: 2, child: _rightAlign(_formatQty(widget.grandOutward), isBold: true, color: const Color(0xFFDC2626))),
-                Expanded(flex: 2, child: _rightAlign(_formatQty(widget.grandClosing), isBold: true)),
-                const Expanded(flex: 2, child: SizedBox()),
-                const SizedBox(width: 60),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 110,
+                  child: _rightAlign(_formatQty(widget.grandOpening),
+                      isBold: true),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 110,
+                  child: _rightAlign(_formatQty(widget.grandInward),
+                      isBold: true, color: const Color(0xFF16A34A)),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 110,
+                  child: _rightAlign(_formatQty(widget.grandOutward),
+                      isBold: true, color: const Color(0xFFDC2626)),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 120,
+                  child: _rightAlign(_formatQty(widget.grandClosing),
+                      isBold: true),
+                ),
+                const SizedBox(width: 12),
+                const SizedBox(width: 100),
+                const SizedBox(width: 8),
+                const SizedBox(width: 44),
               ],
             ),
           ),
@@ -1238,41 +1337,101 @@ class _EnterpriseStockLedgerTableState extends State<_EnterpriseStockLedgerTable
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
-                SizedBox(width: 40, child: Text("$index", style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13))),
+                SizedBox(
+                  width: 44,
+                  child: Text(
+                    "$index",
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        color: Color(0xFF94A3B8), fontSize: 13),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
-                  flex: 3,
+                  flex: 4,
                   child: Row(
                     children: [
-                      Icon(_getCategoryIcon(group.categoryName), size: 18, color: const Color(0xFFB71C1C)),
+                      Icon(_getCategoryIcon(group.categoryName),
+                          size: 18, color: const Color(0xFFB71C1C)),
                       const SizedBox(width: 8),
-                      Text(group.categoryName, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A), fontSize: 13)),
+                      Text(group.categoryName,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF0F172A),
+                              fontSize: 13)),
                       const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(color: const Color(0xFFE2E8F0), borderRadius: BorderRadius.circular(10)),
-                        child: Text("${group.skus.length}", style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF475569))),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                            color: const Color(0xFFE2E8F0),
+                            borderRadius: BorderRadius.circular(10)),
+                        child: Text("${group.skus.length}",
+                            style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF475569))),
                       ),
                     ],
                   ),
                 ),
-                Expanded(flex: 2, child: _rightAlign(_formatQty(parseDouble(group.totalOpening)))),
-                Expanded(flex: 2, child: _rightAlign(_formatQty(parseDouble(group.totalInward)), color: const Color(0xFF16A34A))),
-                Expanded(flex: 2, child: _rightAlign(_formatQty(parseDouble(group.totalOutward)), color: const Color(0xFFDC2626))),
-                Expanded(flex: 2, child: _rightAlign(_formatQty(parseDouble(group.totalClosing)), isBold: true, color: parseDouble(group.totalClosing) < 0 ? const Color(0xFFDC2626) : const Color(0xFF0F172A))),
-                Expanded(
-                  flex: 2,
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 110,
+                  child: _rightAlign(
+                      _formatQty(parseDouble(group.totalOpening))),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 110,
+                  child: _rightAlign(
+                      _formatQty(parseDouble(group.totalInward)),
+                      color: const Color(0xFF16A34A)),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 110,
+                  child: _rightAlign(
+                      _formatQty(parseDouble(group.totalOutward)),
+                      color: const Color(0xFFDC2626)),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 120,
+                  child: _rightAlign(
+                      _formatQty(parseDouble(group.totalClosing)),
+                      isBold: true,
+                      color: parseDouble(group.totalClosing) < 0
+                          ? const Color(0xFFDC2626)
+                          : const Color(0xFF0F172A)),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 100,
                   child: Center(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(color: group.statusBg, borderRadius: BorderRadius.circular(6)),
-                      child: Text(group.statusText, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: group.statusTextColor)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                          color: group.statusBg,
+                          borderRadius: BorderRadius.circular(6)),
+                      child: Text(group.statusText,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: group.statusTextColor)),
                     ),
                   ),
                 ),
+                const SizedBox(width: 8),
                 SizedBox(
-                  width: 60,
+                  width: 44,
                   child: Center(
-                    child: Icon(isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, color: const Color(0xFF94A3B8)),
+                    child: Icon(
+                        isExpanded
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        color: const Color(0xFF94A3B8)),
                   ),
                 ),
               ],
@@ -1282,38 +1441,93 @@ class _EnterpriseStockLedgerTableState extends State<_EnterpriseStockLedgerTable
         if (isExpanded)
           Container(
             color: const Color(0xFFF8FAFC),
-            padding: const EdgeInsets.fromLTRB(56, 8, 16, 16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Column(
               children: [
                 Row(
                   children: [
-                    const Expanded(flex: 3, child: Text("Size / Spec", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF64748B)))),
-                    Expanded(flex: 2, child: _rightAlign("Opening")),
-                    Expanded(flex: 2, child: _rightAlign("In")),
-                    Expanded(flex: 2, child: _rightAlign("Out")),
-                    Expanded(flex: 2, child: _rightAlign("Closing")),
-                    const Expanded(flex: 2, child: SizedBox()), // spacer for status
-                    const SizedBox(width: 60), // spacer for details icon
+                    const SizedBox(width: 44),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      flex: 4,
+                      child: Text(
+                        "Size / Spec",
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                            color: Color(0xFF64748B)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 110,
+                      child: _rightAlign("Opening"),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 110,
+                      child: _rightAlign("In"),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 110,
+                      child: _rightAlign("Out"),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 120,
+                      child: _rightAlign("Closing"),
+                    ),
+                    const SizedBox(width: 12),
+                    const SizedBox(width: 100),
+                    const SizedBox(width: 8),
+                    const SizedBox(width: 44),
                   ],
                 ),
                 const SizedBox(height: 8),
                 ...group.skus.map((sku) => Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: Text(widget.formatSize(sku.itemName, sku.size), style: const TextStyle(fontSize: 12, color: Color(0xFF334155))),
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          const SizedBox(width: 44),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 4,
+                            child: Text(
+                              widget.formatSize(sku.itemName, sku.size),
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF334155)),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: 110,
+                            child: _rightAlign(_formatQty(sku.openingStock)),
+                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: 110,
+                            child: _rightAlign(_formatQty(sku.inwardQty)),
+                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: 110,
+                            child: _rightAlign(_formatQty(sku.outwardQty)),
+                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: 120,
+                            child: _rightAlign(
+                                _formatQty(sku.closingStock),
+                                isBold: true),
+                          ),
+                          const SizedBox(width: 12),
+                          const SizedBox(width: 100),
+                          const SizedBox(width: 8),
+                          const SizedBox(width: 44),
+                        ],
                       ),
-                      Expanded(flex: 2, child: _rightAlign(_formatQty(sku.openingStock))),
-                      Expanded(flex: 2, child: _rightAlign(_formatQty(sku.inwardQty))),
-                      Expanded(flex: 2, child: _rightAlign(_formatQty(sku.outwardQty))),
-                      Expanded(flex: 2, child: _rightAlign(_formatQty(sku.closingStock), isBold: true)),
-                      const Expanded(flex: 2, child: SizedBox()),
-                      const SizedBox(width: 60),
-                    ],
-                  ),
-                )),
+                    )),
               ],
             ),
           ),

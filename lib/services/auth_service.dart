@@ -34,7 +34,8 @@ class AuthService {
     // navigated to (RegistrationScreen, WaitingScreen, etc.) can display it.
     UserSession.userEmail = email;
 
-    if (email == 'j2833945@gmail.com') {
+    if (email == DataRepository.superAdminEmail.toLowerCase().trim() ||
+        UserSession.isSuperAdmin) {
       final appUser = AppUser.fromRaw({
         'email': email,
         'status': 'approved',

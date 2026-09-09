@@ -21,6 +21,7 @@ import '../widgets/m_loader.dart';
 import 'package:intl/intl.dart';
 import '../models/user_session_notifier.dart';
 import '../services/auth_service.dart';
+import '../services/data_repository.dart';
 import '../models/stock_role.dart';
 
 import '../screens/master_size_management_screen.dart';
@@ -123,8 +124,22 @@ class _MainScaffoldState extends State<MainScaffold> {
     ];
   }
 
-  List<NavMenuItem> _getFilteredItems() {
+  static const Set<String> _salesOnlyAllowedNavTitles = {
+    'Dashboard',
+    'Quotations',
+    'Netrate Calc',
+    'Sample Rate',
+  };
+
+  List<NavMenuItem> _getFilteredItems([bool? isSalesOnlyOverride]) {
+    final bool isSalesOnly =
+        isSalesOnlyOverride ?? DataRepository.salesOnlyModeNotifier.value;
+    final bool isRestricted = isSalesOnly && !UserSession.isSuperAdmin;
+
     return _getAllMenuItems().where((item) {
+      if (isRestricted && !_salesOnlyAllowedNavTitles.contains(item.title)) {
+        return false;
+      }
       if (item.permission == 'admin_only') {
         return UserSession.isUserAdmin;
       }
@@ -150,23 +165,28 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<PermissionSnapshot>(
-      valueListenable: UserSessionNotifier.instance,
-      builder: (context, snapshot, _) {
-        final filteredItems = _getFilteredItems();
+    return ValueListenableBuilder<bool>(
+      valueListenable: DataRepository.salesOnlyModeNotifier,
+      builder: (context, isSalesOnly, _) {
+        return ValueListenableBuilder<PermissionSnapshot>(
+          valueListenable: UserSessionNotifier.instance,
+          builder: (context, snapshot, _) {
+            final filteredItems = _getFilteredItems(isSalesOnly);
 
-        // Ensure selected index is within bounds if permissions changed
-        if (_selectedIndex >= filteredItems.length) {
-          _selectedIndex = 0;
-        }
+            // Ensure selected index is within bounds if permissions changed
+            if (_selectedIndex >= filteredItems.length) {
+              _selectedIndex = 0;
+            }
 
-        return Scaffold(
-          backgroundColor: const Color(0xFFFFF8F8),
-          body: IndexedStack(
-            index: _selectedIndex,
-            children: filteredItems.map((item) => item.screen).toList(),
-          ),
-          bottomNavigationBar: null, // Follows modern dashboard style
+            return Scaffold(
+              backgroundColor: const Color(0xFFFFF8F8),
+              body: IndexedStack(
+                index: _selectedIndex,
+                children: filteredItems.map((item) => item.screen).toList(),
+              ),
+              bottomNavigationBar: null, // Follows modern dashboard style
+            );
+          },
         );
       },
     );

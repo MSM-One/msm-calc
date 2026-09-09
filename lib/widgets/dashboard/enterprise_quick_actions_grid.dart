@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/user_session_notifier.dart';
 import '../../models/stock_role.dart';
+import '../../services/data_repository.dart';
 import '../../widgets/screen_gate.dart';
 import '../../screens/main_inventory_shell.dart';
 import '../../screens/sauda_booking_screen.dart';
@@ -40,11 +41,22 @@ class QuickActionItem {
 class EnterpriseQuickActionsGrid extends StatelessWidget {
   const EnterpriseQuickActionsGrid({super.key});
 
+  static const Set<String> _salesOnlyAllowedTitles = {
+    'Quotation',
+    'Netrate Calc',
+    'Sample Rate',
+    'Sales Document Center',
+  };
+
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<PermissionSnapshot>(
-      valueListenable: UserSessionNotifier.instance,
-      builder: (context, snap, _) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: DataRepository.salesOnlyModeNotifier,
+      builder: (context, isSalesOnly, _) {
+        return ValueListenableBuilder<PermissionSnapshot>(
+          valueListenable: UserSessionNotifier.instance,
+          builder: (context, snap, _) {
+            final bool isRestricted = isSalesOnly && !UserSession.isSuperAdmin;
         final List<QuickActionItem> primaryActions = [
           if (snap.canAccessStockInventory)
             QuickActionItem(
@@ -197,7 +209,7 @@ class EnterpriseQuickActionsGrid extends StatelessWidget {
                 ),
               ),
             ),
-          if (snap.role == StockRole.ADMIN)
+          if (snap.role == StockRole.ADMIN || isRestricted)
             QuickActionItem(
               title: 'Sales Document Center',
               subtitle: 'Invoices, DOs & gate passes',
@@ -208,7 +220,7 @@ class EnterpriseQuickActionsGrid extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (_) => ScreenGate(
-                    canAccess: (s) => s.role == StockRole.ADMIN,
+                    canAccess: (s) => s.role == StockRole.ADMIN || isRestricted,
                     screenName: 'Sales Document Center',
                     child: const SalesDocumentCenterScreen(),
                   ),
@@ -253,6 +265,17 @@ class EnterpriseQuickActionsGrid extends StatelessWidget {
               ),
             ),
         ];
+
+        final List<QuickActionItem> finalPrimary = isRestricted
+            ? primaryActions
+                .where((a) => _salesOnlyAllowedTitles.contains(a.title))
+                .toList()
+            : primaryActions;
+        final List<QuickActionItem> finalSecondary = isRestricted
+            ? secondaryActions
+                .where((a) => _salesOnlyAllowedTitles.contains(a.title))
+                .toList()
+            : secondaryActions;
 
         return Container(
           padding: const EdgeInsets.all(20),
@@ -308,7 +331,7 @@ class EnterpriseQuickActionsGrid extends StatelessWidget {
               const SizedBox(height: 16),
 
               // Section 1: Primary Operations
-              if (primaryActions.isNotEmpty) ...[
+              if (finalPrimary.isNotEmpty) ...[
                 const Text(
                   'CORE OPERATIONS',
                   style: TextStyle(
@@ -319,12 +342,12 @@ class EnterpriseQuickActionsGrid extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 10),
-                _buildActionGrid(primaryActions),
+                _buildActionGrid(finalPrimary),
                 const SizedBox(height: 18),
               ],
 
               // Section 2: Management & Utilities
-              if (secondaryActions.isNotEmpty) ...[
+              if (finalSecondary.isNotEmpty) ...[
                 const Text(
                   'MANAGEMENT & UTILITIES',
                   style: TextStyle(
@@ -335,13 +358,15 @@ class EnterpriseQuickActionsGrid extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 10),
-                _buildActionGrid(secondaryActions),
+                _buildActionGrid(finalSecondary),
               ],
             ],
           ),
         );
       },
     );
+  },
+);
   }
 
   Widget _buildActionGrid(List<QuickActionItem> items) {

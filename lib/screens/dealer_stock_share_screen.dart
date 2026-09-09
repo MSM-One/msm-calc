@@ -469,10 +469,7 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
           await DataRepository.fetchDealerStockChart(_activeLocation);
 
       _selectedItemKeys.clear();
-      // Select all by default for fast sharing
-      for (final row in list) {
-        _selectedItemKeys[_getItemKey(row)] = true;
-      }
+      _expandedCategories.clear();
 
       if (mounted) {
         setState(() {
@@ -506,7 +503,7 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
   // ---------------------------------------------------------------------------
   bool _isItemSelected(Map<String, dynamic> row) {
     final key = _getItemKey(row);
-    return _selectedItemKeys[key] ?? true;
+    return _selectedItemKeys[key] ?? false;
   }
 
   void _toggleItemSelection(Map<String, dynamic> row, bool? selected) {
@@ -914,7 +911,7 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
                               final bool? catSelection =
                                   _getCategorySelectionState(cat, categoryRows);
                               final bool isExpanded =
-                                  _expandedCategories[cat] ?? true;
+                                  _expandedCategories[cat] ?? false;
 
                               return CategoryStockAccordion(
                                 categoryName: cat,
@@ -1009,45 +1006,44 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
       ),
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
       child: SafeArea(
-        child: Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: _copyAllWhatsApp,
-                icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
-                label: Text(
-                  'Copy WhatsApp (${totalSelectedMT.toStringAsFixed(1)} MT)',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10B981),
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
+        child: SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: ElevatedButton.icon(
+            key: const Key('stock_sheet_export_pdf_button'),
+            onPressed: _isExporting ? null : _exportAndSharePDF,
+            icon: _isExporting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.picture_as_pdf_outlined, size: 20),
+            label: Text(
+              _isExporting
+                  ? 'Preparing PDF...'
+                  : (selectedCount > 0
+                      ? 'Export PDF (${totalSelectedMT.toStringAsFixed(3)} MT)'
+                      : 'Export PDF'),
+              style: const TextStyle(
+                fontSize: 14.5,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
               ),
             ),
-            const SizedBox(width: 10),
-            ElevatedButton(
-              onPressed: _isExporting ? null : _exportAndSharePDF,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFDC2626),
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+              padding: const EdgeInsets.symmetric(vertical: 12),
             ),
-          ],
+          ),
         ),
       ),
     );

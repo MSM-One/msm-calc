@@ -123,18 +123,18 @@ class ManageUsersScreenState extends State<ManageUsersScreen> {
     debugPrint("[USERS LOAD START]");
     if (mounted) setState(() => _isLoading = true);
     try {
-      final currentEmail = UserSession.userEmail;
-      if (currentEmail == 'j2833945@gmail.com') {
+      if (UserSession.isSuperAdmin && UserSession.userEmail != null) {
         try {
+          final currentEmail = UserSession.userEmail!;
           final existingAdmin = await SupabaseService.client
               .from('users')
               .select()
-              .eq('email', currentEmail!)
+              .eq('email', currentEmail)
               .maybeSingle();
           if (existingAdmin == null) {
             await SupabaseService.client.from('users').insert({
               'email': currentEmail,
-              'user_name': 'Admin',
+              'user_name': 'Super Admin',
               'role': 'admin',
               'status': 'APPROVED',
               'permissions': {},
@@ -801,7 +801,16 @@ class ManageUsersScreenState extends State<ManageUsersScreen> {
                           _buildSectionHeader('Admin Settings', isDark: isDark),
                           const SizedBox(height: 12),
                           _buildPricingConfigCard(isDark: isDark),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 16),
+
+                          // 4.5. Restricted Sales Mode & Super Admin Settings (Super Admin only)
+                          if (UserSession.isSuperAdmin) ...[
+                            _buildSalesOnlyToggleCard(isDark: isDark),
+                            const SizedBox(height: 16),
+                            _buildSuperAdminTransferCard(isDark: isDark),
+                            const SizedBox(height: 24),
+                          ] else
+                            const SizedBox(height: 24),
 
                           // 5. System Tools
                           _buildSectionHeader('System Tools', isDark: isDark),
@@ -1889,5 +1898,555 @@ class ManageUsersScreenState extends State<ManageUsersScreen> {
         ),
       ),
     );
+  }
+
+  // ── Restricted Sales Mode Toggle Card ──────────────────────────────────────
+  Widget _buildSalesOnlyToggleCard({required bool isDark}) {
+    final borderColor = isDark ? borderDark : borderLight;
+    final textColor = isDark ? Colors.white : textDark;
+
+    return ValueListenableBuilder<bool>(
+      valueListenable: DataRepository.salesOnlyModeNotifier,
+      builder: (context, isActive, _) {
+        final Color accentColor =
+            isActive ? const Color(0xFFEF6C00) : const Color(0xFF64748B);
+        final Color bgTint = isActive
+            ? const Color(0xFFFFF3E0)
+            : (isDark ? cardDark : cardLight);
+
+        return Container(
+          decoration: BoxDecoration(
+            color: bgTint,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isActive ? accentColor.withValues(alpha: 0.4) : borderColor,
+              width: isActive ? 1.5 : 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: isActive
+                    ? accentColor.withValues(alpha: 0.08)
+                    : Colors.black.withValues(alpha: 0.02),
+                blurRadius: isActive ? 12 : 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: Icon(
+                          isActive
+                              ? Icons.lock_rounded
+                              : Icons.lock_open_rounded,
+                          color: accentColor,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                'Restricted Sales Mode',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13.5,
+                                  color: textColor,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              if (isActive)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: accentColor,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Text(
+                                    'ACTIVE',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            isActive
+                                ? 'All regular Admins, Staff & Viewers are locked to 4 sales screens only.'
+                                : 'Lock all regular Admins, Staff & Viewers to 4 sales screens only.',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: isActive ? accentColor : textGrey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Switch.adaptive(
+                      value: isActive,
+                      activeColor: accentColor,
+                      onChanged: (val) async {
+                        try {
+                          await DataRepository.setSalesOnlyMode(val);
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                val
+                                    ? '🔒 Restricted Sales Mode ACTIVATED — all non-Super-Admin users locked to sales screens.'
+                                    : '🔓 Restricted Sales Mode DEACTIVATED — full access restored.',
+                              ),
+                              backgroundColor:
+                                  val ? warningOrange : successGreen,
+                              duration: const Duration(seconds: 3),
+                            ),
+                          );
+                        } catch (e) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Failed to update: $e'),
+                              backgroundColor: primaryRed,
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                ),
+                if (isActive) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.black.withValues(alpha: 0.2)
+                          : Colors.white.withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: accentColor.withValues(alpha: 0.2),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline_rounded,
+                            size: 14, color: accentColor),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Allowed: Quotation • Net Rate Calc • Sample Rate • Sales Docs',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: accentColor.withValues(alpha: 0.85),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Super Admin Transfer Settings Card ─────────────────────────────────────
+  Widget _buildSuperAdminTransferCard({required bool isDark}) {
+    final cardColor = isDark ? cardDark : cardLight;
+    final borderColor = isDark ? borderDark : borderLight;
+    final textColor = isDark ? Colors.white : textDark;
+
+    return ValueListenableBuilder<String>(
+      valueListenable: DataRepository.superAdminEmailNotifier,
+      builder: (context, currentSuperAdminEmail, _) {
+        return Container(
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor, width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.02),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.admin_panel_settings_outlined,
+                          color: Color(0xFF6366F1),
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                'Super Admin Settings',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13.5,
+                                  color: textColor,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF6366F1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Text(
+                                  'MASTER',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'Super Admin: $currentSuperAdminEmail',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              color: textGrey,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Divider(height: 1, color: isDark ? borderDark : borderLight),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Reassign master toggle and super administrative authority to another active user.',
+                        style: TextStyle(fontSize: 11.5, color: textGrey),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4F46E5),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      icon: const Icon(Icons.admin_panel_settings_outlined, size: 16),
+                      label: const Text(
+                        'Transfer Role',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      onPressed: () => _showTransferSuperAdminDialog(isDark: isDark),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Transfer Super Admin Confirmation Dialog ──────────────────────────────
+  Future<void> _showTransferSuperAdminDialog({required bool isDark}) async {
+    final currentSuperAdmin =
+        DataRepository.superAdminEmailNotifier.value.toLowerCase().trim();
+
+    // Eligible approved users excluding the current super admin
+    final eligibleUsers = _users.where((u) {
+      final email = (u['email']?.toString() ?? '').toLowerCase().trim();
+      final status = (u['status']?.toString() ?? '').toUpperCase().trim();
+      return email.isNotEmpty &&
+          email != currentSuperAdmin &&
+          status == 'APPROVED';
+    }).toList();
+
+    if (eligibleUsers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'No other approved users found to transfer Super Admin role to.'),
+          backgroundColor: warningOrange,
+        ),
+      );
+      return;
+    }
+
+    String? selectedEmail = eligibleUsers.first['email']?.toString();
+
+    final confirmedTarget = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              backgroundColor: isDark ? cardDark : Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.admin_panel_settings_outlined,
+                      color: Color(0xFF6366F1),
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Transfer Super Admin',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Select the approved user who will receive Super Admin rights:',
+                      style: TextStyle(fontSize: 12.5, color: textGrey),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: selectedEmail,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: 'Target User',
+                        labelStyle: const TextStyle(fontSize: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                      ),
+                      items: eligibleUsers.map((u) {
+                        final email = u['email']?.toString() ?? '';
+                        final name = u['user_name']?.toString() ?? 'User';
+                        final role =
+                            (u['role']?.toString() ?? 'staff').toUpperCase();
+                        return DropdownMenuItem<String>(
+                          value: email,
+                          child: Text(
+                            '$email ($name • $role)',
+                            style: const TextStyle(fontSize: 12),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (val) {
+                        setDialogState(() {
+                          selectedEmail = val;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF3E0),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: const Color(0xFFEF6C00).withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: const Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.warning_amber_rounded,
+                            color: Color(0xFFEF6C00),
+                            size: 18,
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Warning: Transferring Super Admin rights will revoke your master toggle privileges and grant them to the selected user.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFFB45309),
+                                height: 1.35,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, null),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4F46E5),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: selectedEmail == null
+                      ? null
+                      : () => Navigator.pop(ctx, selectedEmail),
+                  child: const Text('Continue Transfer'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmedTarget == null || !mounted) return;
+
+    // Step 2: Confirmation dialog
+    final bool? isFinalConfirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? cardDark : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.gavel_rounded, color: primaryRed, size: 22),
+            SizedBox(width: 8),
+            Text(
+              'Confirm Transfer',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you absolutely sure you want to transfer Super Admin authority to:\n\n'
+          '👉 $confirmedTarget\n\n'
+          'Transferring Super Admin rights will revoke your master toggle privileges and grant them to the selected user.',
+          style: const TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primaryRed,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirm Transfer'),
+          ),
+        ],
+      ),
+    );
+
+    if (isFinalConfirmed != true || !mounted) return;
+
+    try {
+      setState(() => _isLoading = true);
+      await DataRepository.transferSuperAdmin(confirmedTarget);
+      await loadUsers();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              '👑 Super Admin role successfully transferred to $confirmedTarget.'),
+          backgroundColor: successGreen,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to transfer Super Admin: $e'),
+          backgroundColor: primaryRed,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 }

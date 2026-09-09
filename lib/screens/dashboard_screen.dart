@@ -451,7 +451,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                         children: [
                           _buildExecutiveTelemetryHeader(),
                           const SizedBox(height: 16),
-                          if (isAdmin) ...[
+                          if (isAdmin &&
+                              (UserSession.isSuperAdmin ||
+                                  !DataRepository
+                                      .salesOnlyModeNotifier.value)) ...[
                             _buildKpiRibbon(),
                             const SizedBox(height: 16),
                             _buildStockDistributionCard(),
@@ -676,191 +679,213 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildMobileActionsGrid() {
-    return ValueListenableBuilder<PermissionSnapshot>(
-      valueListenable: UserSessionNotifier.instance,
-      builder: (context, snap, _) {
-        final actions = [
-          if (snap.canAccessQuotation)
-            _MobileActionData(
-              title: "Quotation",
-              icon: Icons.description_rounded,
-              color: appRed,
-              onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => ScreenGate(
-                            canAccess: (s) => s.canAccessQuotation,
-                            screenName: "Quotation",
-                            child:
-                                const CalculatorScreen(isQuotationMode: true),
-                          ))),
-            ),
-          if (snap.canAccessCalculator)
-            _MobileActionData(
-              title: "Netrate Calc",
-              icon: Icons.calculate_outlined,
-              color: appRed,
-              onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => ScreenGate(
-                            canAccess: (s) => s.canAccessCalculator,
-                            screenName: "Netrate Calc",
-                            child:
-                                const CalculatorScreen(isQuotationMode: false),
-                          ))),
-            ),
-          if (snap.canAccessSaudaBooking)
-            _MobileActionData(
-              title: "Sauda & Delivery Order",
-              icon: Icons.menu_book_rounded,
-              color: appRed,
-              onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => ScreenGate(
-                            canAccess: (s) => s.canAccessSaudaBooking,
-                            screenName: "Sauda Book",
-                            child: const SaudaBookingScreen(),
-                          ))),
-            ),
-          if (snap.canAccessVendorPurchaseScreen)
-            _MobileActionData(
-              title: "Vendor Purchase",
-              icon: Icons.local_shipping_outlined,
-              color: appRed,
-              onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => ScreenGate(
-                            canAccess: (s) => s.canAccessVendorPurchaseScreen,
-                            screenName: "Vendor Purchase",
-                            child: const VendorPurchaseReportScreen(),
-                          ))),
-            ),
-          if (snap.canAccessStockInventory)
-            _MobileActionData(
-              title: "Inventory In & Out",
-              icon: Icons.inventory_2_rounded,
-              color: appRed,
-              onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => ScreenGate(
-                            canAccess: (s) => s.canAccessStockInventory,
-                            screenName: "Inventory In & Out",
-                            child: const MainInventoryShell(),
-                          ))),
-            ),
-          if (snap.canAccessStockInventory)
-            _MobileActionData(
-              title: "Stock Sheet",
-              icon: Icons.share_rounded,
-              color: appRed,
-              onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => ScreenGate(
-                            canAccess: (s) => s.canAccessStockInventory,
-                            screenName: "Stock Sheet",
-                            child: const DealerStockShareScreen(),
-                          ))),
-            ),
-          if (snap.canAccessReports)
-            _MobileActionData(
-              title: "Reports",
-              icon: Icons.bar_chart_rounded,
-              color: appRed,
-              onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => ScreenGate(
-                            canAccess: (s) => s.canAccessReports,
-                            screenName: "Reports",
-                            child: const ProfessionalReportsScreen(),
-                          ))),
-            ),
-          if (snap.canAccessSampleRate)
-            _MobileActionData(
-              title: "Sample Rate",
-              icon: Icons.bolt_rounded,
-              color: appRed,
-              onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => ScreenGate(
-                            canAccess: (s) => s.canAccessSampleRate,
-                            screenName: "Sample Rate",
-                            child: const SampleRateCalcScreen(),
-                          ))),
-            ),
-          if (snap.role == StockRole.ADMIN || snap.canAccessUsers)
-            _MobileActionData(
-              title: "Users",
-              icon: Icons.people_rounded,
-              color: appRed,
-              onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => ScreenGate(
-                            canAccess: (s) =>
-                                s.role == StockRole.ADMIN || s.canAccessUsers,
-                            screenName: "Users",
-                            child: const ManageUsersScreen(),
-                          ))),
-            ),
-          if (snap.role == StockRole.ADMIN)
-            _MobileActionData(
-              title: "Sales Document Center",
-              icon: Icons.assignment_turned_in_outlined,
-              color: const Color(0xFF1A237E),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => ScreenGate(
-                          canAccess: (s) => s.role == StockRole.ADMIN,
-                          screenName: "Sales Document Center",
-                          child: const SalesDocumentCenterScreen(),
-                        )),
-              ),
-            ),
-          if (snap.canAccessMasterSize)
-            _MobileActionData(
-              title: "Master Size",
-              icon: Icons.rule_rounded,
-              color: appRed,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => ScreenGate(
-                          canAccess: (s) => s.canAccessMasterSize,
-                          screenName: "Master Size",
-                          child: const MasterSizeManagementScreen(),
-                        )),
-              ),
-            ),
-        ];
+    return ValueListenableBuilder<bool>(
+      valueListenable: DataRepository.salesOnlyModeNotifier,
+      builder: (context, isSalesOnly, _) {
+        final bool isRestricted = isSalesOnly && !UserSession.isSuperAdmin;
 
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final double textScale =
-                MediaQuery.of(context).textScaler.scale(1.0);
-            final double cardWidth = (constraints.maxWidth - 16) / 2;
-            final double estimatedCardHeight =
-                28 + 44 + 10 + (12 * textScale * 1.4 * 2) + 28;
-            final double ratio =
-                (cardWidth / estimatedCardHeight).clamp(0.85, 1.35);
-            return GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: ratio,
-              ),
-              itemCount: actions.length,
-              itemBuilder: (context, i) => _buildMobileActionCard(actions[i]),
+        return ValueListenableBuilder<PermissionSnapshot>(
+          valueListenable: UserSessionNotifier.instance,
+          builder: (context, snap, _) {
+            final List<_MobileActionData> rawActions = [
+              if (snap.canAccessQuotation)
+                _MobileActionData(
+                  title: "Quotation",
+                  icon: Icons.description_rounded,
+                  color: appRed,
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => ScreenGate(
+                                canAccess: (s) => s.canAccessQuotation,
+                                screenName: "Quotation",
+                                child:
+                                    const CalculatorScreen(isQuotationMode: true),
+                              ))),
+                ),
+              if (snap.canAccessCalculator)
+                _MobileActionData(
+                  title: "Netrate Calc",
+                  icon: Icons.calculate_outlined,
+                  color: appRed,
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => ScreenGate(
+                                canAccess: (s) => s.canAccessCalculator,
+                                screenName: "Netrate Calc",
+                                child:
+                                    const CalculatorScreen(isQuotationMode: false),
+                              ))),
+                ),
+              if (snap.canAccessSaudaBooking)
+                _MobileActionData(
+                  title: "Sauda & Delivery Order",
+                  icon: Icons.menu_book_rounded,
+                  color: appRed,
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => ScreenGate(
+                                canAccess: (s) => s.canAccessSaudaBooking,
+                                screenName: "Sauda Book",
+                                child: const SaudaBookingScreen(),
+                              ))),
+                ),
+              if (snap.canAccessVendorPurchaseScreen)
+                _MobileActionData(
+                  title: "Vendor Purchase",
+                  icon: Icons.local_shipping_outlined,
+                  color: appRed,
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => ScreenGate(
+                                canAccess: (s) => s.canAccessVendorPurchaseScreen,
+                                screenName: "Vendor Purchase",
+                                child: const VendorPurchaseReportScreen(),
+                              ))),
+                ),
+              if (snap.canAccessStockInventory)
+                _MobileActionData(
+                  title: "Inventory In & Out",
+                  icon: Icons.inventory_2_rounded,
+                  color: appRed,
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => ScreenGate(
+                                canAccess: (s) => s.canAccessStockInventory,
+                                screenName: "Inventory In & Out",
+                                child: const MainInventoryShell(),
+                              ))),
+                ),
+              if (snap.canAccessStockInventory)
+                _MobileActionData(
+                  title: "Stock Sheet",
+                  icon: Icons.share_rounded,
+                  color: appRed,
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => ScreenGate(
+                                canAccess: (s) => s.canAccessStockInventory,
+                                screenName: "Stock Sheet",
+                                child: const DealerStockShareScreen(),
+                              ))),
+                ),
+              if (snap.canAccessReports)
+                _MobileActionData(
+                  title: "Reports",
+                  icon: Icons.bar_chart_rounded,
+                  color: appRed,
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => ScreenGate(
+                                canAccess: (s) => s.canAccessReports,
+                                screenName: "Reports",
+                                child: const ProfessionalReportsScreen(),
+                              ))),
+                ),
+              if (snap.canAccessSampleRate)
+                _MobileActionData(
+                  title: "Sample Rate",
+                  icon: Icons.bolt_rounded,
+                  color: appRed,
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => ScreenGate(
+                                canAccess: (s) => s.canAccessSampleRate,
+                                screenName: "Sample Rate",
+                                child: const SampleRateCalcScreen(),
+                              ))),
+                ),
+              if (snap.role == StockRole.ADMIN || snap.canAccessUsers)
+                _MobileActionData(
+                  title: "Users",
+                  icon: Icons.people_rounded,
+                  color: appRed,
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => ScreenGate(
+                                canAccess: (s) =>
+                                    s.role == StockRole.ADMIN || s.canAccessUsers,
+                                screenName: "Users",
+                                child: const ManageUsersScreen(),
+                              ))),
+                ),
+              if (snap.role == StockRole.ADMIN || isRestricted)
+                _MobileActionData(
+                  title: "Sales Document Center",
+                  icon: Icons.assignment_turned_in_outlined,
+                  color: const Color(0xFF1A237E),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => ScreenGate(
+                              canAccess: (s) =>
+                                  s.role == StockRole.ADMIN || isRestricted,
+                              screenName: "Sales Document Center",
+                              child: const SalesDocumentCenterScreen(),
+                            )),
+                  ),
+                ),
+              if (snap.canAccessMasterSize)
+                _MobileActionData(
+                  title: "Master Size",
+                  icon: Icons.rule_rounded,
+                  color: appRed,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => ScreenGate(
+                              canAccess: (s) => s.canAccessMasterSize,
+                              screenName: "Master Size",
+                              child: const MasterSizeManagementScreen(),
+                            )),
+                  ),
+                ),
+            ];
+
+            const allowedTitles = {
+              'Quotation',
+              'Netrate Calc',
+              'Sample Rate',
+              'Sales Document Center',
+            };
+
+            final actions = isRestricted
+                ? rawActions
+                    .where((a) => allowedTitles.contains(a.title))
+                    .toList()
+                : rawActions;
+
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                final double textScale =
+                    MediaQuery.of(context).textScaler.scale(1.0);
+                final double cardWidth = (constraints.maxWidth - 16) / 2;
+                final double estimatedCardHeight =
+                    28 + 44 + 10 + (12 * textScale * 1.4 * 2) + 28;
+                final double ratio =
+                    (cardWidth / estimatedCardHeight).clamp(0.85, 1.35);
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: ratio,
+                  ),
+                  itemCount: actions.length,
+                  itemBuilder: (context, i) =>
+                      _buildMobileActionCard(actions[i]),
+                );
+              },
             );
           },
         );

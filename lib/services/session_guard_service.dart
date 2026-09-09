@@ -46,7 +46,7 @@ class SessionGuardService {
     }
 
     // Super-admin account is never evicted by the DB stream.
-    if (email == 'j2833945@gmail.com') {
+    if (UserSession.isSuperAdmin) {
       debugPrint('[SessionGuard] Super-admin bypass — guard not attached.');
       return;
     }

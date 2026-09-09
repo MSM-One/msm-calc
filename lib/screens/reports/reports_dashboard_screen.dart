@@ -4,13 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/app_permissions.dart';
 import '../../models/report_models.dart';
 import '../../models/stock_models.dart';
-import '../../providers/inventory_provider.dart';
 import '../../services/access_guard.dart';
 import '../../services/csv_report_service.dart';
 import '../../services/data_repository.dart';
@@ -22,11 +20,12 @@ import '../../utils/file_download_helper.dart' as download_helper;
 import '../../utils/item_order_util.dart';
 import '../../utils/sorting_utils.dart';
 import '../../widgets/motion_toast.dart';
+import '../../widgets/reports/enterprise_low_stock_table.dart';
 import '../../widgets/reports/enterprise_stock_movement_table.dart';
+import '../../widgets/reports/report_bottom_action_bar.dart';
 import '../../widgets/reports/reports_export_toolbar.dart';
 import '../../widgets/reports/reports_sub_tab_bar.dart';
 import '../../widgets/reports/stock_reports_kpi_banner.dart';
-import 'low_stock_report_screen.dart';
 import 'stock_ledger_screen.dart';
 import 'todays_summary_screen.dart';
 
@@ -62,14 +61,14 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
   Timer? _searchDebounce;
 
   // View Modes
-  bool _isDetailedView = true;
+  bool _isDetailedView = false;
   String _todaySummaryTabMode = 'Detailed';
   String _todaySummaryFlowMode = 'Summary';
   final bool showActiveOnly = true; // Hardcoded default, always active
-  static const bool _activeOnlyFilter = true;
 
   // Expansion Sets
   final Set<String> _expandedMovementCategories = {};
+  final Set<String> _expandedLowStockCategories = {};
 
   // Data Loading & Reports
   bool _isLoading = false;
@@ -424,6 +423,15 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
       searchQuery: query,
     );
 
+    // Auto-expand categories containing matching sizes when search query is entered
+    if (query.isNotEmpty) {
+      for (final item in _filteredLowStock) {
+        final cat = DataRepository.canonicalizeCategory(
+            item.category.isNotEmpty ? item.category : item.itemName);
+        _expandedLowStockCategories.add(cat);
+      }
+    }
+
     // Non-Moving Filtering
     _filteredDeadStock = _deadStockReport.where((e) {
       if (query.isEmpty) return true;
@@ -741,6 +749,40 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
     }
   }
 
+  Future<void> _exportCategoryLowStockPdf(
+      String category, List<ItemVariant> items) async {
+    if (_categoryDownloading[category] == true) return;
+    setState(() => _categoryDownloading[category] = true);
+
+    try {
+      final bytes = await PdfReportService.generateCombinedLowStockPdf(
+        entries: items,
+        location: _locationFilter,
+        isDetailed: true,
+        startDate: _startDate,
+        endDate: _endDate,
+      );
+
+      final safeName =
+          category.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase();
+      final filename =
+          'MSM_${safeName}_low_stock_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf';
+
+      await _saveAndSharePdf(bytes, filename, 'MSM $category Low Stock Report');
+    } catch (e, st) {
+      debugPrint('[ReportsDashboardScreen] category low stock PDF error: $e');
+      debugPrint('[ReportsDashboardScreen] stackTrace: $st');
+      if (mounted) {
+        MotionToast.show(context, 'Failed to export $category report',
+            isError: true);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _categoryDownloading[category] = false);
+      }
+    }
+  }
+
   Future<void> _saveAndSharePdf(
       Uint8List bytes, String filename, String shareText) async {
     if (kIsWeb) {
@@ -760,6 +802,28 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    String? summaryLabel;
+    double? summaryValue;
+    Color? summaryColor;
+    Color? summaryBgColor;
+    String? pdfTooltip;
+
+    if (_activeTabId == 'low') {
+      final double totalLow = _filteredLowStock.fold(0.0, (sum, i) => sum + i.currentStockMT);
+      summaryLabel = 'Total Low Stock';
+      summaryValue = totalLow;
+      summaryColor = const Color(0xFFDC2626);
+      summaryBgColor = const Color(0xFFFEE2E2);
+      pdfTooltip = 'Export Full Low Stock Report';
+    } else if (_activeTabId == 'dead') {
+      final double totalDead = _filteredDeadStock.fold(0.0, (sum, i) => sum + i.currentQty);
+      summaryLabel = 'Total Non-Moving';
+      summaryValue = totalDead;
+      summaryColor = const Color(0xFFD97706);
+      summaryBgColor = const Color(0xFFFEF3C7);
+      pdfTooltip = 'Export Non-Moving Stock Report';
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC), // Slate 50
       appBar: AppBar(
@@ -794,64 +858,60 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh_rounded, color: Color(0xFF0F172A), size: 20),
+            icon: const Icon(Icons.refresh_rounded,
+                color: Color(0xFF0F172A), size: 20),
             tooltip: "Refresh Reports",
             onPressed: () => _loadReports(forceRefresh: true),
           ),
         ],
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            // 1. Sticky Compact Horizontal Metric Ribbon (48px)
-            StockReportsKpiBanner(
-              totalStockMT: _kpiTotalStockMT,
-              inwardMT: _kpiInwardMT,
-              outwardMT: _kpiOutwardMT,
-              criticalAlertsCount: _kpiCriticalAlertsCount,
-              locationLabel: _locationFilter == 'ALL'
-                  ? 'All Locations'
-                  : (_locationFilter == 'YARD'
-                      ? 'Yard Stock'
-                      : 'Factory Stock'),
-              dateRangeLabel: _selectedDatePreset == 'Custom'
-                  ? '${DateFormat('dd MMM').format(_startDate)} - ${DateFormat('dd MMM').format(_endDate)}'
-                  : _selectedDatePreset,
-              onTotalStockTap: () => _onTabSelected('movement'),
-              onInwardTap: () {
-                setState(() {
-                  _todaySummaryFlowMode = 'Inward';
-                  _onTabSelected('today');
-                });
-              },
-              onOutwardTap: () {
-                setState(() {
-                  _todaySummaryFlowMode = 'Outward';
-                  _onTabSelected('today');
-                });
-              },
-              onAlertsTap: () => _onTabSelected('low'),
-            ),
-
-            // Top Control Bar (Sub-tabs & Export toolbar)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1240),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // 2. Sub-Report Tab Switcher Bar
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ReportsSubTabBar(
-                          activeTabId: _activeTabId,
-                          tabs: _availableTabs,
-                          onTabSelected: _onTabSelected,
-                        ),
-                      ),
-                    ],
+                  // 1. Sticky Compact Horizontal Metric Ribbon (48px)
+                  StockReportsKpiBanner(
+                    totalStockMT: _kpiTotalStockMT,
+                    inwardMT: _kpiInwardMT,
+                    outwardMT: _kpiOutwardMT,
+                    criticalAlertsCount: _kpiCriticalAlertsCount,
+                    locationLabel: _locationFilter == 'ALL'
+                        ? 'All Locations'
+                        : (_locationFilter == 'YARD'
+                            ? 'Yard Stock'
+                            : 'Factory Stock'),
+                    dateRangeLabel: _selectedDatePreset == 'Custom'
+                        ? '${DateFormat('dd MMM').format(_startDate)} - ${DateFormat('dd MMM').format(_endDate)}'
+                        : _selectedDatePreset,
+                    onTotalStockTap: () => _onTabSelected('movement'),
+                    onInwardTap: () {
+                      setState(() {
+                        _todaySummaryFlowMode = 'Inward';
+                        _onTabSelected('today');
+                      });
+                    },
+                    onOutwardTap: () {
+                      setState(() {
+                        _todaySummaryFlowMode = 'Outward';
+                        _onTabSelected('today');
+                      });
+                    },
+                    onAlertsTap: () => _onTabSelected('low'),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
+
+                  // 2. Sub-Report Tab Switcher Bar
+                  ReportsSubTabBar(
+                    activeTabId: _activeTabId,
+                    tabs: _availableTabs,
+                    onTabSelected: _onTabSelected,
+                  ),
+                  const SizedBox(height: 10),
 
                   // 3. Compact Export Toolbar
                   ReportsExportToolbar(
@@ -885,6 +945,18 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
                         _isDetailedView = val;
                         if (_activeTabId == 'today') {
                           _todaySummaryTabMode = val ? 'Detailed' : 'Summary';
+                        } else if (_activeTabId == 'low') {
+                          if (val) {
+                            final cats = _filteredLowStock
+                                .map((e) => DataRepository.canonicalizeCategory(
+                                    e.category.isNotEmpty
+                                        ? e.category
+                                        : e.itemName))
+                                .toSet();
+                            _expandedLowStockCategories.addAll(cats);
+                          } else {
+                            _expandedLowStockCategories.clear();
+                          }
                         }
                       });
                     },
@@ -900,31 +972,28 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
                         setState(() => _todaySummaryFlowMode = val),
                     activeOnly: showActiveOnly,
                     activeTabId: _activeTabId,
+                    summaryMetricLabel: summaryLabel,
+                    summaryMetricValue: summaryValue,
+                    summaryMetricColor: summaryColor,
+                    summaryMetricBgColor: summaryBgColor,
+                    pdfTooltip: pdfTooltip,
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Main Sub-Report Body
+                  Expanded(
+                    child: _isLoading
+                        ? const Center(
+                            child: CircularProgressIndicator(
+                              color: Color(0xFFD32F2F),
+                            ),
+                          )
+                        : _buildActiveTabContent(),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 6),
-
-            // Main Sub-Report Body
-            Expanded(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  MediaQuery.of(context).size.width < 600 ? 6 : 16,
-                  0,
-                  MediaQuery.of(context).size.width < 600 ? 6 : 16,
-                  MediaQuery.of(context).size.width < 600 && _activeTabId == 'today' ? 0 : 12,
-                ),
-                child: _isLoading
-                    ? const Center(
-                        child: CircularProgressIndicator(
-                          color: Color(0xFFD32F2F),
-                        ),
-                      )
-                    : _buildActiveTabContent(),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -974,6 +1043,8 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
             });
           },
           onExportCategoryPdf: _exportCategoryPdf,
+          onExportPdf: _handleExportPdf,
+          isPdfLoading: _isPdfExporting,
           categoryDownloading: _categoryDownloading,
           locationFilter: _locationFilter,
           activeOnly: showActiveOnly,
@@ -986,7 +1057,7 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
       case 'ledger':
         return StockLedgerScreen(
           isLoading: _isLoading,
-          isDesktop: true,
+          isDesktop: MediaQuery.of(context).size.width >= 1024,
           searchQuery: _searchQuery,
           startDate: _startDate,
           endDate: _endDate,
@@ -1012,21 +1083,50 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      itemCount: _filteredLowStock.length,
-      itemBuilder: (context, index) {
-        final item = _filteredLowStock[index];
-        final itemMap = {
-          'category': item.category,
-          'item_name': item.itemName,
-          'size': item.size,
-          'qty': item.currentStockMT,
-          'currentStockMT': item.currentStockMT,
-          'location': item.location,
-        };
-        return LowStockItemCard(item: itemMap);
-      },
+    final double totalLowStock = _filteredLowStock.fold(
+      0.0,
+      (sum, item) => sum + item.currentStockMT,
+    );
+    final bool isMobile = MediaQuery.of(context).size.width < 900;
+
+    return Column(
+      children: [
+        Expanded(
+          child: EnterpriseLowStockTable(
+            items: _filteredLowStock,
+            isDetailed: _isDetailedView,
+            expandedCategories: _expandedLowStockCategories,
+            onCategoryToggle: (cat) {
+              setState(() {
+                if (_expandedLowStockCategories.contains(cat)) {
+                  _expandedLowStockCategories.remove(cat);
+                } else {
+                  _expandedLowStockCategories.add(cat);
+                }
+              });
+            },
+            onExportCategoryPdf: _exportCategoryLowStockPdf,
+            onExportPdf: _handleExportPdf,
+            isPdfLoading: _isPdfExporting,
+            categoryDownloading: _categoryDownloading,
+            locationFilter: _locationFilter,
+            emptyState: _buildEmptyState(
+              title: 'All items well stocked',
+              subtitle: 'No items currently below safety threshold levels',
+            ),
+          ),
+        ),
+        if (isMobile)
+          ReportBottomActionBar(
+            barKey: const Key('low_stock_total_qty_bottom_bar'),
+            label: 'Total Low Stock Qty',
+            totalQty: totalLowStock,
+            onExportPdf: _handleExportPdf,
+            isPdfLoading: _isPdfExporting,
+            badgeColor: const Color(0xFFFEE2E2),
+            badgeTextColor: const Color(0xFFDC2626),
+          ),
+      ],
     );
   }
 
@@ -1038,104 +1138,126 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
       );
     }
 
+    final double totalNonMoving = _filteredDeadStock.fold(
+      0.0,
+      (sum, item) => sum + item.currentQty,
+    );
+    final bool isMobile = MediaQuery.of(context).size.width < 900;
+
     final df = DateFormat('dd MMM yyyy');
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      itemCount: _filteredDeadStock.length,
-      itemBuilder: (context, index) {
-        final item = _filteredDeadStock[index];
-        return Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x04000000),
-                blurRadius: 6,
-                offset: Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            itemCount: _filteredDeadStock.length,
+            itemBuilder: (context, index) {
+              final item = _filteredDeadStock[index];
+              return Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.hourglass_empty_rounded,
-                  size: 20,
-                  color: Color(0xFF64748B),
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${item.itemName} - ${item.size}',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF0F172A),
-                      ),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x04000000),
+                      blurRadius: 6,
+                      offset: Offset(0, 2),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Category: ${item.category} • Inactive for ${item.daysSinceLastMovement} days',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.hourglass_empty_rounded,
+                        size: 20,
                         color: Color(0xFF64748B),
                       ),
                     ),
-                    if (item.lastMovementDate != null)
-                      Text(
-                        'Last moved: ${df.format(item.lastMovementDate!)}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF94A3B8),
-                        ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${item.itemName} - ${item.size}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Category: ${item.category} • Inactive for ${item.daysSinceLastMovement} days',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                          if (item.lastMovementDate != null)
+                            Text(
+                              'Last moved: ${df.format(item.lastMovementDate!)}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF94A3B8),
+                              ),
+                            ),
+                        ],
                       ),
+                    ),
+                    const SizedBox(width: 14),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '${item.currentQty.toStringAsFixed(3)} MT',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                            color: item.currentQty < 0
+                                ? const Color(0xFFDC2626)
+                                : const Color(0xFF0F172A),
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        const Text(
+                          'Balance',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF94A3B8),
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 14),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '${item.currentQty.toStringAsFixed(3)} MT',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w900,
-                      color: item.currentQty < 0
-                          ? const Color(0xFFDC2626)
-                          : const Color(0xFF0F172A),
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  const Text(
-                    'Balance',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF94A3B8),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+              );
+            },
           ),
-        );
-      },
+        ),
+        if (isMobile)
+          ReportBottomActionBar(
+            barKey: const Key('non_moving_total_qty_bottom_bar'),
+            label: 'Total Non-Moving Qty',
+            totalQty: totalNonMoving,
+            onExportPdf: _handleExportPdf,
+            isPdfLoading: _isPdfExporting,
+            badgeColor: const Color(0xFFFEF3C7),
+            badgeTextColor: const Color(0xFFD97706),
+          ),
+      ],
     );
   }
 
