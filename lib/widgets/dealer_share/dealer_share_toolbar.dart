@@ -15,7 +15,7 @@ class DealerShareToolbar extends StatelessWidget {
   final VoidCallback onToggleSelectAll;
   final VoidCallback? onCopyWhatsApp;
   final VoidCallback onExportPdf;
-  final VoidCallback onShare;
+  final VoidCallback? onShare;
   final bool isExporting;
 
   const DealerShareToolbar({
@@ -32,7 +32,7 @@ class DealerShareToolbar extends StatelessWidget {
     required this.onToggleSelectAll,
     this.onCopyWhatsApp,
     required this.onExportPdf,
-    required this.onShare,
+    this.onShare,
     this.isExporting = false,
   });
 
@@ -54,22 +54,22 @@ class DealerShareToolbar extends StatelessWidget {
     );
   }
 
-  // ── DESKTOP TOOLBAR (56px Unified Ribbon) ──
+  // ── DESKTOP TOOLBAR (50px Compact Ribbon) ──
   Widget _buildDesktopRibbon(BuildContext context) {
     final bool isAllSelected = totalCount > 0 && selectedCount == totalCount;
 
     return Container(
-      height: 56,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      height: 50,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
             color: const Color(0xFF0F172A).withValues(alpha: 0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+            blurRadius: 6,
+            offset: const Offset(0, 1),
           ),
         ],
       ),
@@ -77,27 +77,23 @@ class DealerShareToolbar extends StatelessWidget {
         children: [
           // 1. Location Segmented Control Pill
           _buildLocationPills(),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
 
           // Vertical Separator
-          Container(height: 24, width: 1, color: const Color(0xFFE2E8F0)),
-          const SizedBox(width: 12),
+          Container(height: 22, width: 1, color: const Color(0xFFE2E8F0)),
+          const SizedBox(width: 8),
 
-          // 2. Search Field
-          Expanded(
+          // 2. Search Field (maxWidth: 260)
+          SizedBox(
+            width: 260,
             child: _buildSearchField(),
           ),
-          const SizedBox(width: 12),
 
-          // 3. Selection Counter & Select All Toggle
+          const Spacer(),
+
+          // 3. Right Actions (Select All pill & Export PDF grouped with gap 8)
           _buildSelectAllButton(isAllSelected),
-          const SizedBox(width: 12),
-
-          // Vertical Separator
-          Container(height: 24, width: 1, color: const Color(0xFFE2E8F0)),
-          const SizedBox(width: 12),
-
-          // 4. Action Buttons
+          const SizedBox(width: 8),
           _buildActionButton(
             label: 'Export PDF',
             icon: Icons.picture_as_pdf_outlined,
@@ -107,17 +103,6 @@ class DealerShareToolbar extends StatelessWidget {
             onTap: isExporting ? null : onExportPdf,
             tooltip: 'Download Letterhead Vector PDF',
             isLoading: isExporting,
-          ),
-          const SizedBox(width: 8),
-
-          _buildActionButton(
-            label: 'Share',
-            icon: Icons.share_outlined,
-            color: const Color(0xFF475569),
-            bgColor: const Color(0xFFF1F5F9),
-            borderColor: const Color(0xFFE2E8F0),
-            onTap: onShare,
-            tooltip: 'Share stock sheet file',
           ),
         ],
       ),
@@ -165,15 +150,6 @@ class DealerShareToolbar extends StatelessWidget {
                 borderColor: const Color(0xFFFECACA),
                 onTap: isExporting ? null : onExportPdf,
                 isLoading: isExporting,
-              ),
-              const SizedBox(width: 6),
-              _buildActionButton(
-                label: 'Share',
-                icon: Icons.share_outlined,
-                color: const Color(0xFF475569),
-                bgColor: const Color(0xFFF1F5F9),
-                borderColor: const Color(0xFFE2E8F0),
-                onTap: onShare,
               ),
             ],
           ),

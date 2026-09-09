@@ -669,25 +669,6 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
     );
   }
 
-  void _handleShare() {
-    final selectedKeys = _selectedItemKeys.entries
-        .where((e) => e.value == true)
-        .map((e) => e.key)
-        .toSet();
-
-    final grouped = _getGroupedStockMap();
-    final text = WhatsappShareService.formatFullStockBroadcast(
-      location: _activeLocation,
-      groupedStock: grouped,
-      selectedItemKeys: selectedKeys.isNotEmpty ? selectedKeys : null,
-    );
-
-    Share.share(
-      text,
-      subject: 'MSM Stock Sheet - $_activeLocation (${_dateFormat.format(DateTime.now())})',
-    );
-  }
-
   // ---------------------------------------------------------------------------
   // EXPORT PIPELINE: VECTOR PDF WITH OFFICIAL LETTERHEAD TEMPLATE
   // ---------------------------------------------------------------------------
@@ -806,31 +787,18 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
             }
           },
         ),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFEF2F2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.share_rounded, size: 18, color: Color(0xFFDC2626)),
-            ),
-            const SizedBox(width: 10),
-            const Text(
-              'Stock Sheet',
-              style: TextStyle(
-                color: Color(0xFF0F172A),
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.2,
-              ),
-            ),
-          ],
+        title: const Text(
+          'Stock Sheet',
+          style: TextStyle(
+            color: Color(0xFF0F172A),
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.2,
+          ),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh_rounded, color: Color(0xFF64748B)),
+            icon: const Icon(Icons.refresh_rounded, color: Color(0xFF64748B), size: 20),
             tooltip: 'Refresh Stock Data',
             onPressed: _loadData,
           ),
@@ -858,80 +826,84 @@ class _DealerStockShareScreenState extends State<DealerStockShareScreen> {
               builder: (context, constraints) {
                 final bool isDesktop = constraints.maxWidth >= 900;
 
+                final stockSheetBody = Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 1. DEALER SHARE ACTION TOOLBAR
+                    DealerShareToolbar(
+                      activeLocation: _activeLocation,
+                      onLocationChanged: (loc) {
+                        if (_activeLocation != loc) {
+                          setState(() => _activeLocation = loc);
+                          _loadData();
+                        }
+                      },
+                      searchController: _searchCtrl,
+                      searchQuery: _searchQuery,
+                      onSearchChanged: (q) =>
+                          setState(() => _searchQuery = q.trim()),
+                      onClearSearch: () {
+                        _searchCtrl.clear();
+                        setState(() => _searchQuery = '');
+                      },
+                      selectedCount: selectedRows.length,
+                      totalCount: _rawStockList.length,
+                      totalSelectedStockMT: totalSelectedStockMT,
+                      onToggleSelectAll: () {
+                        final bool isAll = _rawStockList.isNotEmpty &&
+                            selectedRows.length == _rawStockList.length;
+                        _selectAllGlobal(!isAll);
+                      },
+                      onCopyWhatsApp: _copyAllWhatsApp,
+                      onExportPdf: _exportAndSharePDF,
+                      isExporting: _isExporting,
+                    ),
+                    const SizedBox(height: 12),
+
+                    // 2. EMPTY STATE OR CANONICAL ACCORDION LIST
+                    if (sortedCategories.isEmpty)
+                      _buildEmptyState()
+                    else
+                      ...sortedCategories.map((cat) {
+                        final categoryRows = groupedMap[cat]!;
+                        final bool? catSelection =
+                            _getCategorySelectionState(cat, categoryRows);
+                        final bool isExpanded =
+                            _expandedCategories[cat] ?? false;
+
+                        return CategoryStockAccordion(
+                          categoryName: cat,
+                          items: categoryRows,
+                          isExpanded: isExpanded,
+                          onToggleExpand: () {
+                            setState(() {
+                              _expandedCategories[cat] = !isExpanded;
+                            });
+                          },
+                          categorySelectionState: catSelection,
+                          onToggleCategorySelection: (val) =>
+                              _toggleCategorySelection(categoryRows, val),
+                          isItemSelected: _isItemSelected,
+                          onToggleItemSelection: _toggleItemSelection,
+                          onCopyCategoryWhatsApp: () =>
+                              _copyCategoryWhatsApp(cat, categoryRows),
+                        );
+                      }),
+                  ],
+                );
+
                 return Stack(
                   children: [
                     SingleChildScrollView(
-                      padding: EdgeInsets.fromLTRB(
-                        isDesktop ? 20 : 12,
-                        16,
-                        isDesktop ? 20 : 12,
-                        isDesktop ? 24 : 90,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // 1. DEALER SHARE ACTION TOOLBAR
-                          DealerShareToolbar(
-                            activeLocation: _activeLocation,
-                            onLocationChanged: (loc) {
-                              if (_activeLocation != loc) {
-                                setState(() => _activeLocation = loc);
-                                _loadData();
-                              }
-                            },
-                            searchController: _searchCtrl,
-                            searchQuery: _searchQuery,
-                            onSearchChanged: (q) =>
-                                setState(() => _searchQuery = q.trim()),
-                            onClearSearch: () {
-                              _searchCtrl.clear();
-                              setState(() => _searchQuery = '');
-                            },
-                            selectedCount: selectedRows.length,
-                            totalCount: _rawStockList.length,
-                            totalSelectedStockMT: totalSelectedStockMT,
-                            onToggleSelectAll: () {
-                              final bool isAll = _rawStockList.isNotEmpty &&
-                                  selectedRows.length == _rawStockList.length;
-                              _selectAllGlobal(!isAll);
-                            },
-                            onCopyWhatsApp: _copyAllWhatsApp,
-                            onExportPdf: _exportAndSharePDF,
-                            onShare: _handleShare,
-                            isExporting: _isExporting,
+                      padding: EdgeInsets.only(bottom: isDesktop ? 24 : 90),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 920),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: stockSheetBody,
                           ),
-                          const SizedBox(height: 16),
-
-                          // 2. EMPTY STATE OR CANONICAL ACCORDION LIST
-                          if (sortedCategories.isEmpty)
-                            _buildEmptyState()
-                          else
-                            ...sortedCategories.map((cat) {
-                              final categoryRows = groupedMap[cat]!;
-                              final bool? catSelection =
-                                  _getCategorySelectionState(cat, categoryRows);
-                              final bool isExpanded =
-                                  _expandedCategories[cat] ?? false;
-
-                              return CategoryStockAccordion(
-                                categoryName: cat,
-                                items: categoryRows,
-                                isExpanded: isExpanded,
-                                onToggleExpand: () {
-                                  setState(() {
-                                    _expandedCategories[cat] = !isExpanded;
-                                  });
-                                },
-                                categorySelectionState: catSelection,
-                                onToggleCategorySelection: (val) =>
-                                    _toggleCategorySelection(categoryRows, val),
-                                isItemSelected: _isItemSelected,
-                                onToggleItemSelection: _toggleItemSelection,
-                                onCopyCategoryWhatsApp: () =>
-                                    _copyCategoryWhatsApp(cat, categoryRows),
-                              );
-                            }),
-                        ],
+                        ),
                       ),
                     ),
 

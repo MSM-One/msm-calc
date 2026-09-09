@@ -81,7 +81,7 @@ void main() {
   });
 
   group('DealerShareToolbar Widget Tests', () {
-    testWidgets('renders location selector, search field, select all pill and action buttons',
+    testWidgets('renders location selector, search field, select all pill and export pdf button',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1400, 800);
       tester.view.devicePixelRatio = 1.0;
@@ -90,7 +90,6 @@ void main() {
       String selectedLocation = 'YARD';
       bool selectAllClicked = false;
       bool pdfClicked = false;
-      bool shareClicked = false;
 
       await tester.pumpWidget(
         MaterialApp(
@@ -107,7 +106,6 @@ void main() {
               totalSelectedStockMT: 150.500,
               onToggleSelectAll: () => selectAllClicked = true,
               onExportPdf: () => pdfClicked = true,
-              onShare: () => shareClicked = true,
             ),
           ),
         ),
@@ -116,14 +114,11 @@ void main() {
       expect(find.text('Yard Stock'), findsOneWidget);
       expect(find.text('Factory Stock'), findsOneWidget);
       expect(find.text('Export PDF'), findsOneWidget);
-      expect(find.text('Share'), findsOneWidget);
+      expect(find.text('Share'), findsNothing); // Redundant toolbar share removed
       expect(find.text('20 / 25'), findsOneWidget);
 
       await tester.tap(find.text('Export PDF'));
       expect(pdfClicked, isTrue);
-
-      await tester.tap(find.text('Share'));
-      expect(shareClicked, isTrue);
 
       await tester.tap(find.text('Select All'));
       expect(selectAllClicked, isTrue);

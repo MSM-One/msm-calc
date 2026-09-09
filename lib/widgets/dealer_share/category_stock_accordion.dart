@@ -48,7 +48,7 @@ class _CategoryStockAccordionState extends State<CategoryStockAccordion> {
     final bool isDeficitCategory = categoryTotalMT < 0;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -96,13 +96,13 @@ class _CategoryStockAccordionState extends State<CategoryStockAccordion> {
       onTap: widget.onToggleExpand,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [
-            // Checkbox for Category Selection
+            // Left Side: Checkbox + Category Name + Count Badge
             SizedBox(
-              width: 32,
-              height: 32,
+              width: 28,
+              height: 28,
               child: Checkbox(
                 value: widget.categorySelectionState,
                 tristate: true,
@@ -110,23 +110,24 @@ class _CategoryStockAccordionState extends State<CategoryStockAccordion> {
                 onChanged: widget.onToggleCategorySelection,
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
 
-            // Category Name & Selection Pill
             Expanded(
-              child: Wrap(
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 8,
+              child: Row(
                 children: [
-                  Text(
-                    widget.categoryName,
-                    style: const TextStyle(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF0F172A),
-                      letterSpacing: -0.2,
+                  Flexible(
+                    child: Text(
+                      widget.categoryName,
+                      style: const TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0F172A),
+                        letterSpacing: -0.2,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                     decoration: BoxDecoration(
@@ -153,9 +154,9 @@ class _CategoryStockAccordionState extends State<CategoryStockAccordion> {
               ),
             ),
 
-            const SizedBox(width: 8),
+            const SizedBox(width: 12),
 
-            // Category Total Tonnage Badge
+            // Right Side: Total Tonnage + Expand/Collapse chevron arrow
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
               decoration: BoxDecoration(
@@ -186,9 +187,9 @@ class _CategoryStockAccordionState extends State<CategoryStockAccordion> {
                 ],
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
 
-            // Expand Arrow Icon
+            // Expand/Collapse Chevron Arrow
             Icon(
               widget.isExpanded
                   ? Icons.keyboard_arrow_up_rounded
@@ -239,13 +240,13 @@ class _CategoryStockAccordionState extends State<CategoryStockAccordion> {
   Widget _buildGridHeaderRow() {
     return Container(
       height: 32,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: const BoxDecoration(
         color: Color(0xFFF1F5F9),
       ),
       child: const Row(
         children: [
-          SizedBox(width: 32), // Checkbox spacing
+          SizedBox(width: 28), // Checkbox spacing
           SizedBox(width: 8),
           Expanded(
             flex: 4,
@@ -332,7 +333,7 @@ class _CategoryStockAccordionState extends State<CategoryStockAccordion> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 100),
         height: 38,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: BoxDecoration(
           color: rowBgColor,
           border: Border(
@@ -346,8 +347,8 @@ class _CategoryStockAccordionState extends State<CategoryStockAccordion> {
           children: [
             // Checkbox
             SizedBox(
-              width: 32,
-              height: 32,
+              width: 28,
+              height: 28,
               child: Checkbox(
                 value: isSelected,
                 activeColor: const Color(0xFFDC2626),
@@ -609,7 +610,7 @@ class _CategoryStockAccordionState extends State<CategoryStockAccordion> {
   // ── SUBTOTAL FOOTER ──
   Widget _buildCategorySubtotalFooter(double categoryTotalMT) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: const BoxDecoration(
         color: Color(0xFFF1F5F9),
         borderRadius: BorderRadius.only(

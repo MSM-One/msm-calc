@@ -246,7 +246,7 @@ class EnterpriseLowStockTable extends StatelessWidget {
                               size: 18,
                               color: Color(0xFFDC2626),
                             ),
-                            tooltip: 'Export Category PDF',
+                            tooltip: 'Export $category Summary',
                             visualDensity: VisualDensity.compact,
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(

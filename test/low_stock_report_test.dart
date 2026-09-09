@@ -276,11 +276,11 @@ void main() {
         ),
       );
 
-      final categoryPdfButtons = find.byTooltip('Export Category PDF');
-      expect(categoryPdfButtons, findsNWidgets(3));
+      final msPipePdfButton = find.byTooltip('Export MS Pipe Summary');
+      expect(msPipePdfButton, findsOneWidget);
 
-      // Tap first category PDF export
-      await tester.tap(categoryPdfButtons.first);
+      // Tap MS Pipe category PDF export
+      await tester.tap(msPipePdfButton);
       await tester.pumpAndSettle();
       expect(exportedCategory, 'MS Pipe');
     });

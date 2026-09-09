@@ -537,7 +537,7 @@ class _EnterpriseStockMovementTableState
               )
             else
               Tooltip(
-                message: 'Export $category PDF',
+                message: 'Export $category Summary',
                 child: InkWell(
                   onTap: onExportPdf,
                   borderRadius: BorderRadius.circular(6),
@@ -549,15 +549,15 @@ class _EnterpriseStockMovementTableState
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(color: const Color(0xFFFECACA)),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.picture_as_pdf_outlined,
+                        const Icon(Icons.picture_as_pdf_outlined,
                             size: 14, color: Color(0xFFD32F2F)),
-                        SizedBox(width: 4),
+                        const SizedBox(width: 4),
                         Text(
-                          'PDF',
-                          style: TextStyle(
+                          '$category PDF',
+                          style: const TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                             color: Color(0xFFD32F2F),

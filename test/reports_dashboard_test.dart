@@ -240,8 +240,8 @@ void main() {
       expect(find.text('-5.000'), findsWidgets); // Size 2 outward & net = -5.000
 
       // Tap PDF button in detail pane
-      expect(find.text('PDF'), findsOneWidget);
-      await tester.tap(find.text('PDF'));
+      expect(find.text('MS Pipe PDF'), findsOneWidget);
+      await tester.tap(find.text('MS Pipe PDF'));
       await tester.pumpAndSettle();
       expect(exportedCategory, 'MS Pipe');
 
@@ -560,7 +560,7 @@ void main() {
       expect(find.text('Total Low Stock: '), findsOneWidget);
       expect(find.text('112.008 MT'), findsOneWidget);
       expect(find.byTooltip('Export Full Low Stock Report'), findsOneWidget);
-      expect(find.byTooltip('Export CSV'), findsOneWidget);
+      expect(find.byTooltip('Export CSV'), findsNothing);
 
       await tester.binding.setSurfaceSize(null);
     });

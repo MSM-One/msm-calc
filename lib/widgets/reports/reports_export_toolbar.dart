@@ -15,7 +15,7 @@ class ReportsExportToolbar extends StatelessWidget {
   final ValueChanged<String?> onLocationChanged;
   final VoidCallback onRefresh;
   final VoidCallback onExportPdf;
-  final VoidCallback onExportCsv;
+  final VoidCallback? onExportCsv;
   final bool isPdfLoading;
   final bool isCsvLoading;
   final bool showViewToggle;
@@ -46,7 +46,7 @@ class ReportsExportToolbar extends StatelessWidget {
     required this.onLocationChanged,
     required this.onRefresh,
     required this.onExportPdf,
-    required this.onExportCsv,
+    this.onExportCsv,
     this.isPdfLoading = false,
     this.isCsvLoading = false,
     this.showViewToggle = false,
@@ -172,29 +172,19 @@ class ReportsExportToolbar extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 10),
-                // Bottom Row: Action Buttons (PDF + CSV)
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildActionButton(
-                        label: 'Export PDF',
-                        icon: Icons.picture_as_pdf_rounded,
-                        color: const Color(0xFFD32F2F), // Brand Red
-                        isLoading: isPdfLoading,
-                        onTap: onExportPdf,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildActionButton(
-                        label: 'Export CSV',
-                        icon: Icons.table_chart_rounded,
-                        color: const Color(0xFF16A34A), // Emerald Green
-                        isLoading: isCsvLoading,
-                        onTap: onExportCsv,
-                      ),
-                    ),
-                  ],
+                // Bottom Row: Action Button (Export PDF)
+                _buildActionButton(
+                  label: 'Export PDF',
+                  icon: Icons.picture_as_pdf_rounded,
+                  backgroundColor: const Color(0xFFC62828),
+                  textColor: Colors.white,
+                  iconColor: Colors.white,
+                  isLoading: isPdfLoading,
+                  onTap: onExportPdf,
+                  tooltip: pdfTooltip ??
+                      (activeTabId == 'low'
+                          ? 'Export Full Low Stock Report'
+                          : 'Export PDF'),
                 ),
               ],
             ),
@@ -217,6 +207,7 @@ class ReportsExportToolbar extends StatelessWidget {
             ],
           ),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // 1. Search Field (Expanded)
               Expanded(
@@ -239,22 +230,14 @@ class ReportsExportToolbar extends StatelessWidget {
                 const SizedBox(width: 10),
               ],
 
-              // 5. Refresh Action
-              _buildIconButton(
-                icon: Icons.refresh_rounded,
-                tooltip: 'Refresh Data',
-                onTap: onRefresh,
-              ),
-              const SizedBox(width: 10),
-
-              // 6. Summary Metric Pill Badge (Desktop)
+              // 5. Summary Metric Pill Badge (Desktop)
               if (summaryMetricLabel != null && summaryMetricValue != null) ...[
                 Container(
-                  height: 40,
+                  height: 38,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   decoration: BoxDecoration(
                     color: summaryMetricBgColor ?? const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(9),
+                    borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: summaryMetricBgColor != null
                           ? (summaryMetricColor?.withValues(alpha: 0.3) ??
@@ -264,6 +247,7 @@ class ReportsExportToolbar extends StatelessWidget {
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Text(
                         '$summaryMetricLabel: ',
@@ -288,28 +272,19 @@ class ReportsExportToolbar extends StatelessWidget {
                 const SizedBox(width: 10),
               ],
 
-              // 7. Export PDF (Single source of truth)
+              // 6. Export PDF (Primary Action - Deep Crimson)
               _buildActionButton(
                 label: 'Export PDF',
                 icon: Icons.picture_as_pdf_rounded,
-                color: const Color(0xFFD32F2F),
+                backgroundColor: const Color(0xFFC62828),
+                textColor: Colors.white,
+                iconColor: Colors.white,
                 isLoading: isPdfLoading,
                 onTap: onExportPdf,
                 tooltip: pdfTooltip ??
                     (activeTabId == 'low'
                         ? 'Export Full Low Stock Report'
                         : 'Export PDF'),
-              ),
-              const SizedBox(width: 8),
-
-              // 8. Export CSV
-              _buildActionButton(
-                label: 'Export CSV',
-                icon: Icons.table_chart_rounded,
-                color: const Color(0xFF059669),
-                isLoading: isCsvLoading,
-                onTap: onExportCsv,
-                tooltip: 'Export CSV',
               ),
             ],
           ),
@@ -594,23 +569,24 @@ class ReportsExportToolbar extends StatelessWidget {
 
   Widget _buildSearchField() {
     return Container(
-      height: 40,
+      height: 38,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: const Color(0xFFCBD5E1)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const Icon(Icons.search_rounded, size: 18, color: Color(0xFF64748B)),
+          const Icon(Icons.search_rounded, size: 17, color: Color(0xFF64748B)),
           const SizedBox(width: 8),
           Expanded(
             child: TextField(
               controller: searchController,
               onChanged: onSearch,
               style: const TextStyle(
-                fontSize: 13,
+                fontSize: 12.5,
                 fontWeight: FontWeight.w600,
                 color: Color(0xFF0F172A),
               ),
@@ -648,20 +624,21 @@ class ReportsExportToolbar extends StatelessWidget {
   Widget _buildDateRangeButton() {
     return InkWell(
       onTap: onDateRangeTap,
-      borderRadius: BorderRadius.circular(9),
+      borderRadius: BorderRadius.circular(8),
       child: Container(
-        height: 40,
+        height: 38,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: const Color(0xFFF8FAFC),
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: BorderRadius.circular(8),
           border: Border.all(color: const Color(0xFFCBD5E1)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             const Icon(Icons.calendar_today_rounded,
-                size: 15, color: Color(0xFFD32F2F)),
+                size: 14, color: Color(0xFFC62828)),
             const SizedBox(width: 8),
             Text(
               _formatDateRange(),
@@ -682,11 +659,11 @@ class ReportsExportToolbar extends StatelessWidget {
 
   Widget _buildLocationDropdown() {
     return Container(
-      height: 40,
+      height: 38,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: const Color(0xFFCBD5E1)),
       ),
       child: DropdownButtonHideUnderline(
@@ -706,7 +683,7 @@ class ReportsExportToolbar extends StatelessWidget {
           ],
           onChanged: onLocationChanged,
           dropdownColor: Colors.white,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(8),
         ),
       ),
     );
@@ -714,15 +691,16 @@ class ReportsExportToolbar extends StatelessWidget {
 
   Widget _buildSummaryDetailedToggle() {
     return Container(
-      height: 40,
-      padding: const EdgeInsets.all(3),
+      height: 38,
+      padding: const EdgeInsets.all(2.5),
       decoration: BoxDecoration(
         color: const Color(0xFFF1F5F9),
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           _buildToggleOption(
             label: 'Summary',
@@ -746,12 +724,12 @@ class ReportsExportToolbar extends StatelessWidget {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(7),
+      borderRadius: BorderRadius.circular(6),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: isSelected ? Colors.white : Colors.transparent,
-          borderRadius: BorderRadius.circular(7),
+          borderRadius: BorderRadius.circular(6),
           boxShadow: isSelected
               ? const [
                   BoxShadow(
@@ -768,7 +746,7 @@ class ReportsExportToolbar extends StatelessWidget {
             fontSize: 11.5,
             fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
             color: isSelected
-                ? const Color(0xFFD32F2F)
+                ? const Color(0xFFC62828)
                 : const Color(0xFF475569),
           ),
         ),
@@ -786,15 +764,15 @@ class ReportsExportToolbar extends StatelessWidget {
       message: tooltip,
       child: Material(
         color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(8),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: BorderRadius.circular(8),
           child: Container(
-            width: 40,
-            height: 40,
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(9),
+              borderRadius: BorderRadius.circular(8),
               border: Border.all(color: const Color(0xFFCBD5E1)),
             ),
             child: Icon(icon, size: 18, color: const Color(0xFF475569)),
@@ -807,43 +785,51 @@ class ReportsExportToolbar extends StatelessWidget {
   Widget _buildActionButton({
     required String label,
     required IconData icon,
-    required Color color,
+    required Color backgroundColor,
+    required Color textColor,
+    required Color iconColor,
+    Color? borderColor,
     required bool isLoading,
     required VoidCallback onTap,
     String? tooltip,
+    double height = 38,
   }) {
     final button = Material(
-      color: color,
-      borderRadius: BorderRadius.circular(9),
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(8),
       child: InkWell(
         onTap: isLoading ? null : onTap,
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(8),
         child: Container(
-          height: 40,
+          height: height,
           padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: borderColor != null ? Border.all(color: borderColor) : null,
+          ),
           alignment: Alignment.center,
           child: isLoading
-              ? const SizedBox(
+              ? SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: Colors.white,
+                    color: textColor,
                   ),
                 )
               : Row(
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(icon, size: 16, color: Colors.white),
+                    Icon(icon, size: 16, color: iconColor),
                     const SizedBox(width: 7),
                     Text(
                       label,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12.5,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                        letterSpacing: 0.2,
+                        fontWeight: FontWeight.w700,
+                        color: textColor,
+                        letterSpacing: 0.1,
                       ),
                     ),
                   ],

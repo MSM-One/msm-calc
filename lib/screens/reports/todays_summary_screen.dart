@@ -417,6 +417,7 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Summary Table Header Banner
+        // Daily Category Summary Header (Single Net Movement Pill)
         Container(
           height: 48,
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -473,23 +474,47 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                 ),
               ),
               const Spacer(),
-              _buildPillSummaryItem(
-                  'In',
-                  '+${grandInward.toStringAsFixed(3)} MT',
-                  const Color(0xFF059669)),
-              const SizedBox(width: 10),
-              _buildPillSummaryItem(
-                  'Out',
-                  '-${grandOutward.toStringAsFixed(3)} MT',
-                  const Color(0xFFDC2626)),
-              const SizedBox(width: 10),
-              _buildPillSummaryItem(
-                  'Net',
-                  '${grandNet.abs() < 0.00001 ? "0.000" : grandNet.toStringAsFixed(3)} MT',
-                  grandNet < 0
-                      ? const Color(0xFFDC2626)
-                      : const Color(0xFF0F172A),
-                  isBold: true),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: grandNet < 0
+                      ? const Color(0xFFFEF2F2)
+                      : const Color(0xFFF0FDF4),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: grandNet < 0
+                        ? const Color(0xFFFECACA)
+                        : const Color(0xFFBBF7D0),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Net Movement: ',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: grandNet < 0
+                            ? const Color(0xFF991B1B)
+                            : const Color(0xFF166534),
+                      ),
+                    ),
+                    Text(
+                      '${grandNet >= 0 ? "+" : ""}${grandNet.toStringAsFixed(3)} MT',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: grandNet < 0
+                            ? const Color(0xFFDC2626)
+                            : const Color(0xFF16A34A),
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -500,6 +525,7 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
         // Dense Summary Table Rows
         Expanded(
           child: ListView.builder(
+            padding: const EdgeInsets.only(bottom: 32),
             physics: const BouncingScrollPhysics(),
             itemCount: categories.length,
             itemBuilder: (context, index) {
@@ -632,6 +658,8 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
   }) {
     final double netQty = cat.totalNet;
     final bool isNegative = netQty < 0;
+    final bool isExpanded = _expandedCategories.contains(cat.name);
+    final displaySizes = _filterSizesByFlow(cat.sizes);
 
     final String inwardText = cat.totalInward.abs() < 0.0001
         ? '-'
@@ -642,143 +670,295 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
     final String netText =
         netQty.abs() < 0.0001 ? '-' : netQty.toStringAsFixed(3);
 
-    return InkWell(
-      onTap: onTap,
-      hoverColor: const Color(0xFFF1F5F9),
-      child: Container(
-        height: 40,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: BoxDecoration(
-          color: isEven ? Colors.white : const Color(0xFFF8FAFC),
-          border: const Border(
-            bottom: BorderSide(color: Color(0xFFF1F5F9), width: 1.0),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        InkWell(
+          onTap: onTap,
+          hoverColor: const Color(0xFFF1F5F9),
+          child: Container(
+            height: 40,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: isExpanded
+                  ? const Color(0xFFF1F5F9)
+                  : (isEven ? Colors.white : const Color(0xFFF8FAFC)),
+              border: const Border(
+                bottom: BorderSide(color: Color(0xFFF1F5F9), width: 1.0),
+              ),
+            ),
+            child: Row(
+              children: [
+                // 1. Index #
+                SizedBox(
+                  width: 44,
+                  child: Text(
+                    '$index',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF94A3B8),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                // 2. Category / Material with Icon + Name + Size count pill + Expand/Collapse Chevron
+                Expanded(
+                  flex: 4,
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 26,
+                        height: 26,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEF2F2),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Icon(
+                          _getCategoryIcon(cat.name),
+                          size: 14,
+                          color: const Color(0xFFD32F2F),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        cat.name.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '${cat.sizes.length} sizes',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // Expand/collapse chevron
+                      InkWell(
+                        onTap: () {
+                          setState(() {
+                            if (_expandedCategories.contains(cat.name)) {
+                              _expandedCategories.remove(cat.name);
+                            } else {
+                              _expandedCategories.add(cat.name);
+                            }
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(4),
+                        child: Padding(
+                          padding: const EdgeInsets.all(3.0),
+                          child: AnimatedRotation(
+                            turns: isExpanded ? 0.5 : 0.0,
+                            duration: const Duration(milliseconds: 200),
+                            child: Icon(
+                              Icons.keyboard_arrow_down,
+                              size: 18,
+                              color: Colors.grey.shade500,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                // 3. Inward (width: 130, right-aligned)
+                SizedBox(
+                  width: 130,
+                  child: Text(
+                    inwardText,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: cat.totalInward == 0
+                          ? FontWeight.w500
+                          : FontWeight.w800,
+                      color: cat.totalInward == 0
+                          ? const Color(0xFF94A3B8)
+                          : const Color(0xFF059669),
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                // 4. Outward (width: 130, right-aligned)
+                SizedBox(
+                  width: 130,
+                  child: Text(
+                    outwardText,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: cat.totalOutward == 0
+                          ? FontWeight.w500
+                          : FontWeight.w800,
+                      color: cat.totalOutward == 0
+                          ? const Color(0xFF94A3B8)
+                          : const Color(0xFFDC2626),
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                // 5. Net Qty (width: 140, right-aligned)
+                SizedBox(
+                  width: 140,
+                  child: Text(
+                    netText,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: netQty.abs() < 0.00001
+                          ? const Color(0xFF94A3B8)
+                          : (isNegative
+                              ? const Color(0xFFDC2626)
+                              : const Color(0xFF0F172A)),
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        child: Row(
-          children: [
-            // 1. Index #
-            SizedBox(
-              width: 44,
-              child: Text(
-                '$index',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF94A3B8),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
 
-            // 2. Category / Material with Icon + Name + Size count pill
-            Expanded(
-              flex: 4,
-              child: Row(
-                children: [
-                  Container(
-                    width: 26,
-                    height: 26,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFEF2F2),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Icon(
-                      _getCategoryIcon(cat.name),
-                      size: 14,
-                      color: const Color(0xFFD32F2F),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    cat.name.toUpperCase(),
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF0F172A),
+        // Nested Size Breakdown Rows when expanded
+        if (isExpanded) ...[
+          for (final size in displaySizes) ...[
+            Builder(
+              builder: (context) {
+                final double sizeNet = size.inward - size.outward;
+                final bool isSizeNegative = sizeNet < -0.0001;
+                final String sizeInwardText = size.inward.abs() < 0.0001
+                    ? '-'
+                    : '+${size.inward.toStringAsFixed(3)}';
+                final String sizeOutwardText = size.outward.abs() < 0.0001
+                    ? '-'
+                    : '-${size.outward.toStringAsFixed(3)}';
+                final String sizeNetText =
+                    sizeNet.abs() < 0.0001 ? '-' : sizeNet.toStringAsFixed(3);
+
+                return Container(
+                  height: 34,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF8FAFC),
+                    border: Border(
+                      bottom: BorderSide(color: Color(0xFFF1F5F9), width: 1.0),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      '${cat.sizes.length} sizes',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF64748B),
+                  child: Row(
+                    children: [
+                      const SizedBox(
+                        width: 44,
+                        child: Text(
+                          '↳',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF94A3B8),
+                          ),
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 4,
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 20.0),
+                          child: Text(
+                            EnterpriseStockMovementTable.appendKgSuffix(
+                                cat.name, size.sizeLabel),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF334155),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 130,
+                        child: Text(
+                          sizeInwardText,
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: size.inward > 0.0001
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            color: size.inward > 0.0001
+                                ? const Color(0xFF059669)
+                                : const Color(0xFF94A3B8),
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 130,
+                        child: Text(
+                          sizeOutwardText,
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: size.outward > 0.0001
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            color: size.outward > 0.0001
+                                ? const Color(0xFFDC2626)
+                                : const Color(0xFF94A3B8),
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 140,
+                        child: Text(
+                          sizeNetText,
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: sizeNet.abs() < 0.0001
+                                ? const Color(0xFF94A3B8)
+                                : (isSizeNegative
+                                    ? const Color(0xFFDC2626)
+                                    : const Color(0xFF0F172A)),
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-
-            // 3. Inward (width: 130, right-aligned)
-            SizedBox(
-              width: 130,
-              child: Text(
-                inwardText,
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight:
-                      cat.totalInward == 0 ? FontWeight.w500 : FontWeight.w800,
-                  color: cat.totalInward == 0
-                      ? const Color(0xFF94A3B8)
-                      : const Color(0xFF059669),
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-
-            // 4. Outward (width: 130, right-aligned)
-            SizedBox(
-              width: 130,
-              child: Text(
-                outwardText,
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight:
-                      cat.totalOutward == 0 ? FontWeight.w500 : FontWeight.w800,
-                  color: cat.totalOutward == 0
-                      ? const Color(0xFF94A3B8)
-                      : const Color(0xFFDC2626),
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-
-            // 5. Net Qty (width: 140, right-aligned)
-            SizedBox(
-              width: 140,
-              child: Text(
-                netText,
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: netQty.abs() < 0.00001
-                    ? const Color(0xFF94A3B8)
-                    : (isNegative
-                        ? const Color(0xFFDC2626)
-                        : const Color(0xFF0F172A)),
-                  fontFamily: 'monospace',
-                ),
-              ),
+                );
+              },
             ),
           ],
-        ),
-      ),
+        ],
+      ],
     );
   }
 
@@ -799,12 +979,12 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
         : '${grandNet.toStringAsFixed(3)} MT';
 
     return Container(
-      height: 38,
+      height: 40,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: const BoxDecoration(
-        color: Color(0xFFF1F5F9),
+        color: Colors.white,
         border: Border(
-          top: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+          top: BorderSide(color: Color(0xFFE2E8F0), width: 1.0),
         ),
       ),
       child: Row(
@@ -862,7 +1042,7 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
               netText,
               textAlign: TextAlign.right,
               style: TextStyle(
-                fontSize: 12.5,
+                fontSize: 12,
                 fontWeight: FontWeight.w900,
                 color: isNegative
                     ? const Color(0xFFDC2626)
@@ -1278,7 +1458,7 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                       )
                     else
                       Tooltip(
-                        message: 'Export ${category.name} PDF',
+                        message: 'Export ${category.name} Summary',
                         child: InkWell(
                           onTap: onExportPdf,
                           borderRadius: BorderRadius.circular(6),
@@ -1291,15 +1471,15 @@ class _TodaySummaryTabState extends State<TodaySummaryTab> {
                               border:
                                   Border.all(color: const Color(0xFFFECACA)),
                             ),
-                            child: const Row(
+                            child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.picture_as_pdf_outlined,
+                                const Icon(Icons.picture_as_pdf_outlined,
                                     size: 14, color: Color(0xFFD32F2F)),
-                                SizedBox(width: 4),
+                                const SizedBox(width: 4),
                                 Text(
-                                  'PDF',
-                                  style: TextStyle(
+                                  '${category.name} PDF',
+                                  style: const TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
                                     color: Color(0xFFD32F2F),
