@@ -122,12 +122,14 @@ class SampleRateSize {
 }
 
 class SampleRateSpec {
+  final int? id;
   final String label;
   final num defaultWeight;
   final num defaultSd;
   final List<String> matchKeys;
 
   const SampleRateSpec({
+    this.id,
     required this.label,
     required this.defaultWeight,
     required this.defaultSd,

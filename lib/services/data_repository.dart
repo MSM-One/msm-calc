@@ -20,6 +20,7 @@ import '../utils/formatters.dart';
 import '../utils/steel_helper.dart';
 import '../utils/item_order_util.dart';
 import '../utils/sauda_rate_calculator.dart';
+import 'sample_rate_service.dart';
 
 class DataRepository {
   static const String _boxName = 'msm_cache_box';
@@ -1010,6 +1011,13 @@ class DataRepository {
       debugPrint('[DataRepository] Error fetching current stock: $e');
       return [];
     }
+  }
+
+  /// Fetches dynamic benchmark categories for the Sample Rate Calc screen directly from Supabase item_sizes
+  static Future<Map<String, List<SampleRateSize>>> fetchSampleRateBenchmarks({
+    bool force = false,
+  }) async {
+    return SampleRateService.fetchSampleRateCategories(force: force);
   }
 
   /// Fetches stock chart records for dealer sharing directly from 'v_current_stock'

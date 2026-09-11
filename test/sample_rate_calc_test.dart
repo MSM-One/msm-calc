@@ -7,6 +7,7 @@ import 'package:msm_calc/models/user_model.dart';
 import 'package:msm_calc/providers/inventory_provider.dart';
 import 'package:msm_calc/screens/quick_rate_calculator_screen.dart';
 import 'package:msm_calc/services/data_repository.dart';
+import 'package:msm_calc/services/sample_rate_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -526,6 +527,88 @@ void main() {
       expect(find.text('SIZE DIMENSION'), findsOneWidget);
       expect(find.text('SD VALUE'), findsOneWidget);
       expect(find.text('NET COMPUTED RATE'), findsOneWidget);
+    });
+  });
+
+  group('All 18 MS Pipe Benchmark Specifications & Item Sizes Verification', () {
+    test('contains exact verified weights and SD values for all 18 MS Pipe benchmarks', () {
+      final specs = SampleRateService.benchmarkSpecifications['MS Pipe']!;
+      expect(specs.length, equals(18));
+
+      final expectedBenchmarks = [
+        {'id': 2, 'label': '0.75" 19x19(1.6)', 'weight': 5.0, 'sd': 6500},
+        {'id': 5, 'label': '1" 25x25(1.6)', 'weight': 7.0, 'sd': 4500},
+        {'id': 9, 'label': '1.25" 32x32(1.6)', 'weight': 9.0, 'sd': 4000},
+        {'id': 15, 'label': '1.5" 38x38(2.0)', 'weight': 13.0, 'sd': 3500},
+        {'id': 20, 'label': '2" 50x50(1.6)', 'weight': 15.0, 'sd': 3500},
+        {'id': 21, 'label': '2" 50x50(2.0)', 'weight': 18.0, 'sd': 3500},
+        {'id': 25, 'label': '2.5" 60x60(2.0)', 'weight': 22.0, 'sd': 4000},
+        {'id': 28, 'label': '3" 72x72(2.0)', 'weight': 27.0, 'sd': 4500},
+        {'id': 32, 'label': '1.5"x 0.75" 40x20 (1.6)', 'weight': 9.0, 'sd': 5000},
+        {'id': 37, 'label': '2"x1" 50x25 (2.0)', 'weight': 13.0, 'sd': 3500},
+        {'id': 48, 'label': '3"x1" 75x25 (2.0)', 'weight': 17.0, 'sd': 4500},
+        {'id': 52, 'label': '3"x1.5" 80x40 (2.0)', 'weight': 22.0, 'sd': 4000},
+        {'id': 56, 'label': '4"x2" 96x48 (2.0)', 'weight': 27.0, 'sd': 4500},
+        {'id': 60, 'label': '0.75" 25OD (1.6)', 'weight': 5.0, 'sd': 6500},
+        {'id': 63, 'label': '1" 33.4OD (1.6)', 'weight': 7.0, 'sd': 4500},
+        {'id': 67, 'label': '1.25" 41OD (1.6)', 'weight': 9.0, 'sd': 4500},
+        {'id': 73, 'label': '1.5" 48.3OD (2.0)', 'weight': 13.0, 'sd': 3500},
+        {'id': 77, 'label': '2" 60.3OD (1.6)', 'weight': 14.0, 'sd': 3500},
+      ];
+
+      for (int i = 0; i < 18; i++) {
+        final spec = specs[i];
+        final expected = expectedBenchmarks[i];
+        expect(spec.id, equals(expected['id']), reason: "ID mismatch at index $i");
+        expect(spec.label, equals(expected['label']), reason: "Label mismatch at index $i");
+        expect(spec.defaultWeight, equals(expected['weight']), reason: "Weight mismatch at index $i for ${spec.label}");
+        expect(spec.defaultSd, equals(expected['sd']), reason: "SD mismatch at index $i for ${spec.label}");
+      }
+    });
+
+    test('dynamically matches item_sizes records with 100% precision and ignores mismatched gauge items', () async {
+      // Mock item_sizes containing both 1.2 and 1.6 items
+      DataRepository.itemSizesNotifier.value = [
+        {
+          'id': 1,
+          'material_id': 1,
+          'size_label': '0.75" 19x19(1.2)',
+          'unit_weight_kg': 4.0,
+          'size_difference': 7500,
+        },
+        {
+          'id': 2,
+          'material_id': 1,
+          'size_label': '0.75" 19x19(1.6)',
+          'unit_weight_kg': 5.0,
+          'size_difference': 6500,
+        },
+        {
+          'id': 4,
+          'material_id': 1,
+          'size_label': '1" 25x25(1.2)',
+          'unit_weight_kg': 6.0,
+          'size_difference': 5500,
+        },
+        {
+          'id': 5,
+          'material_id': 1,
+          'size_label': '1" 25x25(1.6)',
+          'unit_weight_kg': 7.0,
+          'size_difference': 4500,
+        },
+      ];
+
+      final categories = await SampleRateService.fetchSampleRateCategories(force: true);
+      final msPipes = categories['MS Pipe']!;
+
+      final pipe19x19 = msPipes.firstWhere((s) => s.label == '0.75" 19x19(1.6)');
+      expect(pipe19x19.weight, equals(5.0)); // Must be 5.0kg, NOT 4.0kg
+      expect(pipe19x19.sd, equals(6500)); // Must be +6500, NOT +7500
+
+      final pipe25x25 = msPipes.firstWhere((s) => s.label == '1" 25x25(1.6)');
+      expect(pipe25x25.weight, equals(7.0)); // Must be 7.0kg, NOT 6.0kg
+      expect(pipe25x25.sd, equals(4500)); // Must be +4500, NOT +5500
     });
   });
 }
