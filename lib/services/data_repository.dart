@@ -171,7 +171,7 @@ class DataRepository {
       final sizeRows = await SupabaseService.client
           .from('item_sizes')
           .select(
-              'id, material_id, size_label, unit_weight_kg, size_difference')
+              'id, material_id, size_label, unit_weight_kg, size_difference, is_sample_rate_active')
           .order('id')
           .limit(10000);
       final List<Map<String, dynamic>> allSizesList = [];
@@ -184,6 +184,7 @@ class DataRepository {
         updateGlobalSizeWeightCache(label, weight);
         final sd =
             double.tryParse(row['size_difference']?.toString() ?? '0') ?? 0.0;
+        final bool isSampleRateActive = row['is_sample_rate_active'] == true;
         final matName =
             matId != null ? (materialIdToNameMap[matId] ?? '') : '';
         if (id != null) {
@@ -202,6 +203,7 @@ class DataRepository {
           'weight': weight,
           'size_difference': sd,
           'sd': sd,
+          'is_sample_rate_active': isSampleRateActive,
         });
       }
       itemSizesNotifier.value = allSizesList;
@@ -693,7 +695,7 @@ class DataRepository {
       final sizeResponse = await SupabaseService.client
           .from('item_sizes')
           .select(
-              'id, material_id, size_label, unit_weight_kg, size_difference')
+              'id, material_id, size_label, unit_weight_kg, size_difference, is_sample_rate_active')
           .order('id')
           .limit(10000);
 
@@ -718,6 +720,7 @@ class DataRepository {
         updateGlobalSizeWeightCache(label, weight);
         final sd =
             double.tryParse(row['size_difference']?.toString() ?? '0') ?? 0.0;
+        final bool isSampleRateActive = row['is_sample_rate_active'] == true;
         final matName = materialIdToNameMap[matId] ?? '';
         if (id != null) sizeIdToLabelMap[id] = label;
 
@@ -734,6 +737,7 @@ class DataRepository {
           'weight': weight,
           'size_difference': sd,
           'sd': sd,
+          'is_sample_rate_active': isSampleRateActive,
         };
 
         allSizesList.add(sizeMap);

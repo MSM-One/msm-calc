@@ -103,57 +103,107 @@ class ItemVariant {
 }
 
 class SampleRateSize {
+  final int? id;
+  final int? materialId;
   final String label;
   final num sd;
   final num weight;
   final bool isMissing;
   final bool isCustom;
+  final bool isSampleRateActive;
 
   SampleRateSize(
     this.label,
     this.sd,
     this.weight, {
+    this.id,
+    this.materialId,
     this.isMissing = false,
     this.isCustom = false,
+    this.isSampleRateActive = true,
   });
 
   String get sizeLabel => label;
 
   Map<String, dynamic> toJson() => {
+        if (id != null) 'id': id,
+        if (materialId != null) 'material_id': materialId,
         'label': label,
         'sd': sd,
         'weight': weight,
         'isMissing': isMissing,
         'isCustom': isCustom,
+        'is_sample_rate_active': isSampleRateActive,
       };
 
   factory SampleRateSize.fromJson(Map<String, dynamic> json) {
+    final rawId = json['id'];
+    final rawMatId = json['material_id'] ?? json['materialId'];
     return SampleRateSize(
-      (json['label'] ?? '').toString(),
+      (json['label'] ?? json['size_label'] ?? '').toString(),
       (json['sd'] is num)
           ? json['sd']
-          : (num.tryParse(json['sd']?.toString() ?? '0') ?? 0),
+          : (num.tryParse(json['sd']?.toString() ??
+                  json['size_difference']?.toString() ??
+                  '0') ??
+              0),
       (json['weight'] is num)
           ? json['weight']
-          : (num.tryParse(json['weight']?.toString() ?? '0') ?? 0),
+          : (num.tryParse(json['weight']?.toString() ??
+                  json['unit_weight_kg']?.toString() ??
+                  '0') ??
+              0),
+      id: rawId is int ? rawId : int.tryParse(rawId?.toString() ?? ''),
+      materialId:
+          rawMatId is int ? rawMatId : int.tryParse(rawMatId?.toString() ?? ''),
       isMissing: json['isMissing'] == true,
       isCustom: json['isCustom'] == true,
+      isSampleRateActive: json['is_sample_rate_active'] == true ||
+          json['isSampleRateActive'] == true ||
+          json['is_sample_rate_active'] == null,
+    );
+  }
+
+  factory SampleRateSize.fromSupabaseMap(Map<String, dynamic> map,
+      {bool isCustom = false}) {
+    final rawId = map['id'];
+    final rawMatId = map['material_id'] ?? map['materialId'];
+    final rawSd = map['size_difference'] ?? map['sd'] ?? map['diffRate'];
+    final rawWeight = map['unit_weight_kg'] ?? map['weight'] ?? map['std_weight'];
+    return SampleRateSize(
+      (map['size_label'] ?? map['label'] ?? map['size'] ?? '').toString().trim(),
+      rawSd is num ? rawSd : (num.tryParse(rawSd?.toString() ?? '0') ?? 0),
+      rawWeight is num
+          ? rawWeight
+          : (num.tryParse(rawWeight?.toString() ?? '0') ?? 0),
+      id: rawId is int ? rawId : int.tryParse(rawId?.toString() ?? ''),
+      materialId:
+          rawMatId is int ? rawMatId : int.tryParse(rawMatId?.toString() ?? ''),
+      isCustom: isCustom,
+      isSampleRateActive: map['is_sample_rate_active'] == true ||
+          map['is_sample_rate_active'] == null,
     );
   }
 
   SampleRateSize copyWith({
+    int? id,
+    int? materialId,
     String? label,
     num? sd,
     num? weight,
     bool? isMissing,
     bool? isCustom,
+    bool? isSampleRateActive,
   }) {
     return SampleRateSize(
       label ?? this.label,
       sd ?? this.sd,
       weight ?? this.weight,
+      id: id ?? this.id,
+      materialId: materialId ?? this.materialId,
       isMissing: isMissing ?? this.isMissing,
       isCustom: isCustom ?? this.isCustom,
+      isSampleRateActive: isSampleRateActive ?? this.isSampleRateActive,
     );
   }
 
@@ -162,19 +212,25 @@ class SampleRateSize {
       identical(this, other) ||
       other is SampleRateSize &&
           runtimeType == other.runtimeType &&
+          id == other.id &&
+          materialId == other.materialId &&
           label == other.label &&
           sd == other.sd &&
           weight == other.weight &&
           isMissing == other.isMissing &&
-          isCustom == other.isCustom;
+          isCustom == other.isCustom &&
+          isSampleRateActive == other.isSampleRateActive;
 
   @override
   int get hashCode =>
+      id.hashCode ^
+      materialId.hashCode ^
       label.hashCode ^
       sd.hashCode ^
       weight.hashCode ^
       isMissing.hashCode ^
-      isCustom.hashCode;
+      isCustom.hashCode ^
+      isSampleRateActive.hashCode;
 }
 
 class SampleRateSpec {

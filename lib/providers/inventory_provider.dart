@@ -207,22 +207,58 @@ class InventoryProvider extends ChangeNotifier {
     return category;
   }
 
-  /// Adds a custom size to a category, persists to SharedPreferences, and notifies listeners.
+  int? _resolveSizeId(String category, String label) {
+    final clean = _cleanSizeForMatch(label);
+    final targetCat = _resolveCategoryKey(category);
+    final normCat = _normalizeCategory(targetCat);
+    final int? matId = SampleRateService.categoryToMaterialId[targetCat];
+
+    for (final s in DataRepository.itemSizesNotifier.value) {
+      final sMatId = s['material_id'] ?? s['materialId'];
+      final sMatName = (s['material_name'] ?? s['category'] ?? s['item_name'] ?? '').toString();
+      bool matchCat = (matId != null && sMatId == matId) ||
+          (sMatName.isNotEmpty && _normalizeCategory(sMatName) == normCat);
+      if (matchCat) {
+        final sLabel = (s['size_label'] ?? s['label'] ?? s['size'] ?? '').toString();
+        if (_cleanSizeForMatch(sLabel) == clean) {
+          final id = s['id'];
+          return (id is int) ? id : int.tryParse(id?.toString() ?? '');
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Adds a custom size to a category, updates Supabase (is_sample_rate_active: true), and notifies listeners.
   Future<void> addCustomSizeToCategory(
       String category, SampleRateSize size) async {
     final targetCat = _resolveCategoryKey(category);
     final list =
         List<SampleRateSize>.from(_sampleRateCategories[targetCat] ?? []);
     final cleanLabel = _cleanSizeForMatch(size.label);
+
+    final targetId = size.id ?? _resolveSizeId(targetCat, size.label);
+    final updatedSize = size.copyWith(
+      id: targetId,
+      isCustom: true,
+      isSampleRateActive: true,
+    );
+
     if (!list.any((s) => _cleanSizeForMatch(s.label) == cleanLabel)) {
-      list.add(size.copyWith(isCustom: true));
+      list.add(updatedSize);
       _sampleRateCategories[targetCat] = list;
-      await SampleRateService.saveActiveSizes(targetCat, list);
-      notifyListeners();
     }
+
+    if (targetId != null) {
+      await SampleRateService.setSizeSampleRateActive(
+        sizeId: targetId,
+        isActive: true,
+      );
+    }
+    notifyListeners();
   }
 
-  /// Creates a new item size, inserts into Supabase, appends to active category, persists to SharedPreferences, and notifies listeners.
+  /// Creates a new item size, inserts into Supabase with is_sample_rate_active = true, appends to active category, and notifies listeners.
   Future<SampleRateSize> addNewItemSize({
     required String category,
     required String sizeLabel,
@@ -255,12 +291,11 @@ class InventoryProvider extends ChangeNotifier {
       list.add(newSize);
     }
     _sampleRateCategories[targetCat] = list;
-    await SampleRateService.saveActiveSizes(targetCat, list);
     notifyListeners();
     return newSize;
   }
 
-  /// Adds multiple sizes to a category, persists to SharedPreferences, and notifies listeners.
+  /// Adds multiple sizes to a category, updates Supabase (is_sample_rate_active: true), and notifies listeners.
   Future<void> addMultipleSizesToCategory(
     String category,
     List<SampleRateSize> sizes, {
@@ -278,19 +313,30 @@ class InventoryProvider extends ChangeNotifier {
     final targetCat = _resolveCategoryKey(category);
     final list =
         List<SampleRateSize>.from(_sampleRateCategories[targetCat] ?? []);
+
     for (final s in sizes) {
       final cleanLabel = _cleanSizeForMatch(s.label);
+      final targetId = s.id ?? _resolveSizeId(targetCat, s.label);
       if (!list.any((existing) =>
           _cleanSizeForMatch(existing.label) == cleanLabel)) {
-        list.add(s.copyWith(isCustom: true));
+        list.add(s.copyWith(
+          id: targetId,
+          isCustom: true,
+          isSampleRateActive: true,
+        ));
+      }
+      if (targetId != null) {
+        await SampleRateService.setSizeSampleRateActive(
+          sizeId: targetId,
+          isActive: true,
+        );
       }
     }
     _sampleRateCategories[targetCat] = list;
-    await SampleRateService.saveActiveSizes(targetCat, list);
     notifyListeners();
   }
 
-  /// Removes a size from a category, persists to SharedPreferences, and notifies listeners.
+  /// Removes a size from a category, updates Supabase (is_sample_rate_active: false), and notifies listeners.
   Future<void> removeSizeFromCategory(
       String category, SampleRateSize size) async {
     final targetCat = _resolveCategoryKey(category);
@@ -299,7 +345,14 @@ class InventoryProvider extends ChangeNotifier {
     final cleanLabel = _cleanSizeForMatch(size.label);
     list.removeWhere((s) => _cleanSizeForMatch(s.label) == cleanLabel);
     _sampleRateCategories[targetCat] = list;
-    await SampleRateService.saveActiveSizes(targetCat, list);
+
+    final targetId = size.id ?? _resolveSizeId(targetCat, size.label);
+    if (targetId != null) {
+      await SampleRateService.setSizeSampleRateActive(
+        sizeId: targetId,
+        isActive: false,
+      );
+    }
     notifyListeners();
   }
 
@@ -319,12 +372,9 @@ class InventoryProvider extends ChangeNotifier {
     return true;
   }
 
-  /// Resets all categories and sizes back to default benchmark specifications.
+  /// Resets all categories and sizes back to default benchmark specifications in Supabase.
   Future<void> resetAllCategoriesToDefaults() async {
-    await SampleRateService.clearAllCustomCategories();
-    for (final cat in _sampleRateCategories.keys) {
-      await SampleRateService.clearActiveSizes(cat);
-    }
+    await SampleRateService.resetAllCategoriesToDefaults();
     _sampleRateCategories.clear();
     final baselineGrouped =
         await SampleRateService.fetchBaselineBenchmarkCategories(force: true);
@@ -332,17 +382,18 @@ class InventoryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Resets a category back to default benchmark sizes, clears SharedPreferences, and notifies listeners.
+  /// Resets a category back to default benchmark sizes in Supabase and notifies listeners.
   Future<void> resetCategoryToDefaults(String category) async {
-    await SampleRateService.clearActiveSizes(category);
+    await SampleRateService.resetCategoryToDefaults(category);
     final baselineGrouped =
         await SampleRateService.fetchBaselineBenchmarkCategories();
-    if (baselineGrouped.containsKey(category)) {
-      _sampleRateCategories[category] = baselineGrouped[category]!;
+    final targetCat = _resolveCategoryKey(category);
+    if (baselineGrouped.containsKey(targetCat)) {
+      _sampleRateCategories[targetCat] = baselineGrouped[targetCat]!;
     } else {
       for (final entry in baselineGrouped.entries) {
-        if (_normalizeCategory(entry.key) == _normalizeCategory(category)) {
-          _sampleRateCategories[category] = entry.value;
+        if (_normalizeCategory(entry.key) == _normalizeCategory(targetCat)) {
+          _sampleRateCategories[targetCat] = entry.value;
           break;
         }
       }
@@ -368,6 +419,7 @@ class InventoryProvider extends ChangeNotifier {
 
     final List<String> aliases = _sampleRateAliases[targetCatName] ?? [targetCatName];
     final String normCatName = _normalizeCategory(targetCatName);
+    final int? matId = SampleRateService.categoryToMaterialId[targetCatName];
 
     final List rawSizes = [];
 
@@ -409,10 +461,12 @@ class InventoryProvider extends ChangeNotifier {
         final String matName = (s['material_name'] ?? s['category'] ?? s['item_name'] ?? '').toString();
         final String upperMat = matName.toUpperCase().trim();
         final String normMat = _normalizeCategory(matName);
+        final sMatId = s['material_id'] ?? s['materialId'];
 
         bool matchesAlias = aliases.any((alias) => alias.toUpperCase().trim() == upperMat);
         bool matchesNorm = normMat == normCatName;
-        if (matchesAlias || matchesNorm) {
+        bool matchesMatId = matId != null && sMatId == matId;
+        if (matchesAlias || matchesNorm || matchesMatId) {
           rawSizes.add(s);
         }
       }
@@ -424,6 +478,11 @@ class InventoryProvider extends ChangeNotifier {
       final String rawLabel =
           (s['size_label'] ?? s['label'] ?? s['size'] ?? '').toString().trim();
       if (rawLabel.isEmpty) continue;
+
+      final rawId = s['id'];
+      final int? parsedId = rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
+      final rawMatId = s['material_id'] ?? s['materialId'];
+      final int? parsedMatId = rawMatId is int ? rawMatId : int.tryParse(rawMatId?.toString() ?? '');
 
       final rawSd = s['size_difference'] ?? s['sd'] ?? s['diffRate'] ?? s['diff_rate'];
       final rawWeight = s['unit_weight_kg'] ?? s['weight'] ?? s['std_weight'] ?? s['std_wt'];
@@ -438,13 +497,18 @@ class InventoryProvider extends ChangeNotifier {
         parsedWeight = (rawWeight is num) ? rawWeight : (num.tryParse(rawWeight.toString()) ?? 0);
       }
 
+      final bool isAct = s['is_sample_rate_active'] == true;
+
       final key = _cleanSizeForMatch(rawLabel);
       if (!uniqueMap.containsKey(key)) {
         uniqueMap[key] = SampleRateSize(
           rawLabel,
           parsedSd,
           parsedWeight,
+          id: parsedId,
+          materialId: parsedMatId ?? matId,
           isCustom: true,
+          isSampleRateActive: isAct,
         );
       }
     }

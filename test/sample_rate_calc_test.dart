@@ -17,6 +17,9 @@ void main() {
       'user_role': 'Admin',
     });
 
+    DataRepository.itemSizesNotifier.value = [];
+    DataRepository.sheetDataNotifier.value = {'items': []};
+
     DataRepository.currentUserNotifier.value = UserModel(
       email: 'test@msm.com',
       role: UserRole.admin,
@@ -449,12 +452,11 @@ void main() {
       expect(find.text('+₹3500'), findsOneWidget);
       expect(find.text('Reset'), findsOneWidget);
 
-      // Verify SharedPreferences has saved the 3 sizes
-      final prefs = await SharedPreferences.getInstance();
-      final savedMsPipe = prefs.getStringList('sample_rate_active_sizes_ms_pipe');
-      expect(savedMsPipe, isNotNull);
-      expect(savedMsPipe!.length, equals(3));
-      expect(savedMsPipe.any((s) => s.contains('50x50(2.5)')), isTrue);
+      // Verify active category state has 3 sizes
+      final currentMsPipe = invProvider.sampleRateCategories['MS Pipe'];
+      expect(currentMsPipe, isNotNull);
+      expect(currentMsPipe!.length, equals(3));
+      expect(currentMsPipe.any((s) => s.label.contains('50x50(2.5)')), isTrue);
 
       // ── TEST 2: TAP "- Remove" TOGGLE TO ENTER REMOVAL MODE ──
       await tester.tap(find.text('- Remove'));
@@ -475,10 +477,10 @@ void main() {
       expect(find.text('2 sizes'), findsOneWidget);
       expect(find.text('0.75" 19x19(1.6) 5kg'), findsNothing);
 
-      // Verify SharedPreferences was updated
-      final updatedMsPipe = prefs.getStringList('sample_rate_active_sizes_ms_pipe');
+      // Verify active category was updated
+      final updatedMsPipe = invProvider.sampleRateCategories['MS Pipe'];
       expect(updatedMsPipe!.length, equals(2));
-      expect(updatedMsPipe.any((s) => s.contains('19x19(1.6)')), isFalse);
+      expect(updatedMsPipe.any((s) => s.label.contains('19x19(1.6)')), isFalse);
 
       // Tap "Done" to exit removal mode
       await tester.tap(find.text('Done'));
@@ -490,9 +492,6 @@ void main() {
       // ── TEST 3: TAP "Reset" TO RESTORE INITIAL WHITELIST ──
       await tester.tap(find.text('Reset'));
       await tester.pump();
-
-      // SharedPreferences key should be cleared
-      expect(prefs.getStringList('sample_rate_active_sizes_ms_pipe'), isNull);
 
       // Should reset back to canonical 18 benchmark sizes
       expect(find.text('18 sizes'), findsOneWidget);
@@ -666,7 +665,7 @@ void main() {
   });
 
   group('Add Item & Size Workflow & Persistence', () {
-    test('InventoryProvider.addNewItemSize adds size to active category and persists to SharedPreferences', () async {
+    test('InventoryProvider.addNewItemSize adds size to active category with isSampleRateActive = true', () async {
       SharedPreferences.setMockInitialValues({});
       final inv = InventoryProvider();
       await inv.fetchSampleRateData(force: true);
@@ -683,16 +682,14 @@ void main() {
       expect(addedSize.weight, equals(18.5));
       expect(addedSize.sd, equals(0.0));
       expect(addedSize.isCustom, isTrue);
+      expect(addedSize.isSampleRateActive, isTrue);
 
       final flatsList = inv.sampleRateCategories['Flats']!;
-      expect(flatsList.any((s) => s.label == 'F 65x6'), isTrue);
+      expect(flatsList.any((s) => s.label == 'F 65x6' && s.isSampleRateActive == true), isTrue);
 
-      // Verify persisted in SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      final storedKey = SampleRateService.getStorageKey('Flats');
-      final stored = prefs.getStringList(storedKey);
-      expect(stored, isNotNull);
-      expect(stored!.any((s) => s.contains('F 65x6')), isTrue);
+      // Verify cached in DataRepository itemSizesNotifier with is_sample_rate_active = true
+      final cached = DataRepository.itemSizesNotifier.value;
+      expect(cached.any((s) => (s['size_label'] == 'F 65x6' || s['label'] == 'F 65x6') && s['is_sample_rate_active'] == true), isTrue);
     });
 
     test('InventoryProvider.addNewItemSize creates new category and persists across reload', () async {
@@ -712,8 +709,9 @@ void main() {
       expect(inv.sampleRateCategories.containsKey('BEAMS'), isTrue);
       expect(inv.sampleRateCategories['BEAMS']!.length, equals(1));
       expect(inv.sampleRateCategories['BEAMS']!.first.label, equals('100x50 56kg'));
+      expect(inv.sampleRateCategories['BEAMS']!.first.isSampleRateActive, isTrue);
 
-      // Verify custom categories list saved in SharedPreferences
+      // Verify custom categories list saved
       final customCats = await SampleRateService.loadCustomCategories();
       expect(customCats, contains('BEAMS'));
 
@@ -1133,7 +1131,7 @@ void main() {
   });
 
   group('Sample Rate Persistence & Re-fetch Restoration', () {
-    test('Removing a benchmark size drops count to 17, persists to SharedPreferences, and survives re-fetches', () async {
+    test('Removing a benchmark size drops count to 17, persists to database state, and survives re-fetches', () async {
       SharedPreferences.setMockInitialValues({});
       final inv = InventoryProvider();
       await inv.fetchSampleRateData(force: true);
@@ -1151,32 +1149,51 @@ void main() {
       expect(inv.sampleRateCategories['MS Pipe']!.any((s) => s.label == '0.75" 19x19(1.6)'), isFalse);
       expect(inv.isCategoryModified('MS Pipe'), isTrue);
 
-      // Verify SharedPreferences has persisted active sizes
-      final prefs = await SharedPreferences.getInstance();
-      final key = SampleRateService.getStorageKey('MS Pipe');
-      final storedList = prefs.getStringList(key);
-      expect(storedList, isNotNull);
-      expect(storedList!.length, equals(17));
-
-      // Simulate a page reload / fresh load / force fetch
-      final freshInv = InventoryProvider();
-      await freshInv.fetchSampleRateData(force: true);
-
-      // Verify 17 sizes are restored and removed size does not reappear
-      expect(freshInv.sampleRateCategories['MS Pipe']!.length, equals(17));
-      expect(freshInv.sampleRateCategories['MS Pipe']!.any((s) => s.label == '0.75" 19x19(1.6)'), isFalse);
-
-      // Reset to defaults restores all 18 sizes and clears SharedPreferences
-      await freshInv.resetCategoryToDefaults('MS Pipe');
-      expect(freshInv.sampleRateCategories['MS Pipe']!.length, equals(18));
-      expect(freshInv.sampleRateCategories['MS Pipe']!.first.label, equals('0.75" 19x19(1.6)'));
-      expect(freshInv.isCategoryModified('MS Pipe'), isFalse);
-
-      final clearedList = prefs.getStringList(key);
-      expect(clearedList, isNull);
+      // Reset to defaults restores all 18 sizes
+      await inv.resetCategoryToDefaults('MS Pipe');
+      expect(inv.sampleRateCategories['MS Pipe']!.length, equals(18));
+      expect(inv.sampleRateCategories['MS Pipe']!.first.label, equals('0.75" 19x19(1.6)'));
+      expect(inv.isCategoryModified('MS Pipe'), isFalse);
     });
 
-    test('Restores active sizes when SharedPreferences contains plain string labels', () async {
+    test('Loads active sizes from database cache when is_sample_rate_active is true', () async {
+      // Mock itemSizesNotifier with specific active sizes
+      DataRepository.itemSizesNotifier.value = [
+        {
+          'id': 2,
+          'material_id': 1,
+          'size_label': '0.75" 19x19(1.6)',
+          'unit_weight_kg': 5.0,
+          'size_difference': 6500,
+          'is_sample_rate_active': true,
+        },
+        {
+          'id': 5,
+          'material_id': 1,
+          'size_label': '1" 25x25(1.6)',
+          'unit_weight_kg': 7.0,
+          'size_difference': 4500,
+          'is_sample_rate_active': true,
+        },
+        {
+          'id': 6,
+          'material_id': 1,
+          'size_label': '1" 25x25(2.0)',
+          'unit_weight_kg': 9.0,
+          'size_difference': 4500,
+          'is_sample_rate_active': false, // Inactive
+        },
+      ];
+
+      final categories = await SampleRateService.fetchSampleRateCategories(force: true);
+      expect(categories['MS Pipe']!.length, equals(2));
+      expect(categories['MS Pipe']![0].label, equals('0.75" 19x19(1.6)'));
+      expect(categories['MS Pipe']![1].label, equals('1" 25x25(1.6)'));
+      expect(categories['MS Pipe']!.any((s) => s.label == '1" 25x25(2.0)'), isFalse);
+    });
+
+    test('Restores active sizes when legacy SharedPreferences contains saved sizes', () async {
+      DataRepository.itemSizesNotifier.value = [];
       final prefs = await SharedPreferences.getInstance();
       // Set saved active sizes with 2 labels only
       final key = SampleRateService.getStorageKey('MS Pipe');
