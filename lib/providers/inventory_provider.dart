@@ -21,6 +21,22 @@ class InventoryProvider extends ChangeNotifier {
   Map<String, List<SampleRateSize>> get sampleRateCategories =>
       _sampleRateCategories;
 
+  // Reactive base rate state mapping per category
+  final Map<String, double> _sampleRateBaseRates = {};
+  Map<String, double> get sampleRateBaseRates => _sampleRateBaseRates;
+
+  double getBaseRateForCategory(String category) {
+    return _sampleRateBaseRates[category] ??
+        _sampleRateBaseRates[_normalizeCategory(category)] ??
+        0.0;
+  }
+
+  void updateBaseRate(String category, double rate) {
+    _sampleRateBaseRates[category] = rate;
+    _sampleRateBaseRates[_normalizeCategory(category)] = rate;
+    notifyListeners();
+  }
+
   @visibleForTesting
   void setSampleRateCategoriesForTesting(
       Map<String, List<SampleRateSize>> categories) {
@@ -182,6 +198,164 @@ class InventoryProvider extends ChangeNotifier {
     }
   }
 
+  String _resolveCategoryKey(String category) {
+    if (_sampleRateCategories.containsKey(category)) return category;
+    final norm = _normalizeCategory(category);
+    for (final k in _sampleRateCategories.keys) {
+      if (_normalizeCategory(k) == norm) return k;
+    }
+    return category;
+  }
+
+  /// Adds a custom size to a category, persists to SharedPreferences, and notifies listeners.
+  Future<void> addCustomSizeToCategory(
+      String category, SampleRateSize size) async {
+    final targetCat = _resolveCategoryKey(category);
+    final list =
+        List<SampleRateSize>.from(_sampleRateCategories[targetCat] ?? []);
+    final cleanLabel = _cleanSizeForMatch(size.label);
+    if (!list.any((s) => _cleanSizeForMatch(s.label) == cleanLabel)) {
+      list.add(size.copyWith(isCustom: true));
+      _sampleRateCategories[targetCat] = list;
+      await SampleRateService.saveActiveSizes(targetCat, list);
+      notifyListeners();
+    }
+  }
+
+  /// Creates a new item size, inserts into Supabase, appends to active category, persists to SharedPreferences, and notifies listeners.
+  Future<SampleRateSize> addNewItemSize({
+    required String category,
+    required String sizeLabel,
+    required double weight,
+    required double sd,
+    bool isNewCategory = false,
+  }) async {
+    final newSize = await SampleRateService.insertNewItemSize(
+      category: category,
+      sizeLabel: sizeLabel,
+      weight: weight,
+      sd: sd,
+    );
+
+    // If new category, persist category name
+    if (isNewCategory) {
+      final customCats = await SampleRateService.loadCustomCategories();
+      if (!customCats
+          .any((c) => _normalizeCategory(c) == _normalizeCategory(category))) {
+        customCats.add(category);
+        await SampleRateService.saveCustomCategories(customCats);
+      }
+    }
+
+    final targetCat = _resolveCategoryKey(category);
+    final list =
+        List<SampleRateSize>.from(_sampleRateCategories[targetCat] ?? []);
+    final cleanLabel = _cleanSizeForMatch(newSize.label);
+    if (!list.any((s) => _cleanSizeForMatch(s.label) == cleanLabel)) {
+      list.add(newSize);
+    }
+    _sampleRateCategories[targetCat] = list;
+    await SampleRateService.saveActiveSizes(targetCat, list);
+    notifyListeners();
+    return newSize;
+  }
+
+  /// Adds multiple sizes to a category, persists to SharedPreferences, and notifies listeners.
+  Future<void> addMultipleSizesToCategory(
+    String category,
+    List<SampleRateSize> sizes, {
+    bool isNewCategory = false,
+  }) async {
+    if (isNewCategory) {
+      final customCats = await SampleRateService.loadCustomCategories();
+      if (!customCats
+          .any((c) => _normalizeCategory(c) == _normalizeCategory(category))) {
+        customCats.add(category);
+        await SampleRateService.saveCustomCategories(customCats);
+      }
+    }
+
+    final targetCat = _resolveCategoryKey(category);
+    final list =
+        List<SampleRateSize>.from(_sampleRateCategories[targetCat] ?? []);
+    for (final s in sizes) {
+      final cleanLabel = _cleanSizeForMatch(s.label);
+      if (!list.any((existing) =>
+          _cleanSizeForMatch(existing.label) == cleanLabel)) {
+        list.add(s.copyWith(isCustom: true));
+      }
+    }
+    _sampleRateCategories[targetCat] = list;
+    await SampleRateService.saveActiveSizes(targetCat, list);
+    notifyListeners();
+  }
+
+  /// Removes a size from a category, persists to SharedPreferences, and notifies listeners.
+  Future<void> removeSizeFromCategory(
+      String category, SampleRateSize size) async {
+    final targetCat = _resolveCategoryKey(category);
+    final list =
+        List<SampleRateSize>.from(_sampleRateCategories[targetCat] ?? []);
+    final cleanLabel = _cleanSizeForMatch(size.label);
+    list.removeWhere((s) => _cleanSizeForMatch(s.label) == cleanLabel);
+    _sampleRateCategories[targetCat] = list;
+    await SampleRateService.saveActiveSizes(targetCat, list);
+    notifyListeners();
+  }
+
+  /// Removes a custom category from state and persistence. Core benchmark categories cannot be removed.
+  Future<bool> removeCustomCategory(String category) async {
+    if (SampleRateService.isCoreCategory(category)) {
+      return false; // Protected core category
+    }
+
+    _sampleRateCategories.remove(category);
+    _sampleRateCategories.removeWhere(
+      (key, _) => _normalizeCategory(key) == _normalizeCategory(category),
+    );
+
+    await SampleRateService.removeCustomCategory(category);
+    notifyListeners();
+    return true;
+  }
+
+  /// Resets all categories and sizes back to default benchmark specifications.
+  Future<void> resetAllCategoriesToDefaults() async {
+    await SampleRateService.clearAllCustomCategories();
+    for (final cat in _sampleRateCategories.keys) {
+      await SampleRateService.clearActiveSizes(cat);
+    }
+    _sampleRateCategories.clear();
+    final baselineGrouped =
+        await SampleRateService.fetchBaselineBenchmarkCategories(force: true);
+    _sampleRateCategories.addAll(baselineGrouped);
+    notifyListeners();
+  }
+
+  /// Resets a category back to default benchmark sizes, clears SharedPreferences, and notifies listeners.
+  Future<void> resetCategoryToDefaults(String category) async {
+    await SampleRateService.clearActiveSizes(category);
+    final baselineGrouped =
+        await SampleRateService.fetchBaselineBenchmarkCategories();
+    if (baselineGrouped.containsKey(category)) {
+      _sampleRateCategories[category] = baselineGrouped[category]!;
+    } else {
+      for (final entry in baselineGrouped.entries) {
+        if (_normalizeCategory(entry.key) == _normalizeCategory(category)) {
+          _sampleRateCategories[category] = entry.value;
+          break;
+        }
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Checks if a category's current active sizes differ from the default benchmark specs.
+  bool isCategoryModified(String category) {
+    final current = _sampleRateCategories[category] ?? [];
+    return SampleRateService.isCategoryModified(category, current);
+  }
+
   /// Retrieves all master catalog sizes for a given category from Supabase / Google Sheets.
   List<SampleRateSize> getMasterSizesForCategory(String category) {
     String targetCatName = category;
@@ -287,7 +461,7 @@ class InventoryProvider extends ChangeNotifier {
         "https://script.google.com/macros/s/AKfycbzcSBboPXwuH-whwxXe8IdaaTqnTgIPBVo_z1aMJNZuzX2KQq12AL-RjH1znoq3MCex/exec";
 
     // Requested Logs
-    print('Attempting update: ${user.email}');
+    debugPrint('Attempting update: ${user.email}');
     debugPrint(
         'DEBUG: [InventoryProvider] Initiating updateUserRole for ${user.email}');
 
@@ -309,7 +483,7 @@ class InventoryProvider extends ChangeNotifier {
           .timeout(const Duration(seconds: 45));
 
       // Requested Logs
-      print('Server Response: ${response.body}');
+      debugPrint('Server Response: ${response.body}');
       debugPrint(
           'DEBUG: [InventoryProvider] Status Code: ${response.statusCode}');
 
@@ -329,7 +503,7 @@ class InventoryProvider extends ChangeNotifier {
         return false;
       }
     } catch (e, stack) {
-      print('Error updating user role: $e');
+      debugPrint('Error updating user role: $e');
       debugPrint('DEBUG: [InventoryProvider] Role update EXCEPTION: $e');
       debugPrint('DEBUG: [InventoryProvider] Stacktrace: $stack');
       return false;

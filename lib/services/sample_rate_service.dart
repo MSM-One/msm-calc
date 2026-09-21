@@ -1,5 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/stock_models.dart';
+import '../utils/sorting_utils.dart';
 import 'data_repository.dart';
 import 'supabase_service.dart';
 
@@ -412,12 +415,145 @@ class SampleRateService {
 
   static String cleanSizeForMatch(String s) {
     return s
+        .replaceAll('"', '')
+        .replaceAll("'", '')
+        .replaceAll('”', '')
+        .replaceAll('“', '')
+        .replaceAll('’', '')
+        .replaceAll('‘', '')
+        .replaceAll('×', 'X')
+        .replaceAll('x', 'X')
+        .replaceAll('*', 'X')
         .replaceAll(' (', '(')
         .replaceAll('( ', '(')
         .replaceAll(' )', ')')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim()
         .toUpperCase();
+  }
+
+  /// Storage key pattern: sample_rate_active_sizes_${category.toLowerCase()}
+  /// e.g. sample_rate_active_sizes_ms_pipe
+  static String getStorageKey(String category) {
+    final clean = category
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    return 'sample_rate_active_sizes_$clean';
+  }
+
+  /// Persists the active sizes for a given category in SharedPreferences.
+  static Future<void> saveActiveSizes(
+      String category, List<SampleRateSize> sizes) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = getStorageKey(category);
+      final directKey =
+          'sample_rate_active_sizes_${category.trim().toLowerCase()}';
+      final List<String> encoded =
+          sizes.map((s) => jsonEncode(s.toJson())).toList();
+      await prefs.setStringList(key, encoded);
+      if (directKey != key) {
+        await prefs.setStringList(directKey, encoded);
+      }
+    } catch (e) {
+      debugPrint(
+          "[SampleRateService] Error saving active sizes for $category: $e");
+    }
+  }
+
+  /// Loads the persisted active sizes for a given category from SharedPreferences.
+  /// Returns null if no customization was saved.
+  static Future<List<SampleRateSize>?> loadActiveSizes(String category) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = getStorageKey(category);
+      final directKey =
+          'sample_rate_active_sizes_${category.trim().toLowerCase()}';
+
+      var rawList = prefs.getStringList(key);
+      rawList ??= prefs.getStringList(directKey);
+
+      if (rawList == null) {
+        for (final catName in orderedCategories) {
+          if (normalizeCategory(catName) == normalizeCategory(category)) {
+            rawList = prefs.getStringList(getStorageKey(catName)) ??
+                prefs.getStringList(
+                    'sample_rate_active_sizes_${catName.trim().toLowerCase()}');
+            if (rawList != null) break;
+          }
+        }
+      }
+
+      if (rawList == null) return null;
+
+      final List<SampleRateSize> sizes = [];
+      for (final item in rawList) {
+        final trimmed = item.trim();
+        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+          try {
+            final map = jsonDecode(trimmed) as Map<String, dynamic>;
+            sizes.add(SampleRateSize.fromJson(map));
+            continue;
+          } catch (_) {}
+        }
+        // Fallback for plain string labels or IDs
+        sizes.add(SampleRateSize(trimmed, 0, 0, isCustom: false));
+      }
+      return sizes;
+    } catch (e) {
+      debugPrint(
+          "[SampleRateService] Error loading active sizes for $category: $e");
+      return null;
+    }
+  }
+
+  /// Clears the persisted active sizes entry in SharedPreferences for a category.
+  static Future<void> clearActiveSizes(String category) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = getStorageKey(category);
+      final directKey =
+          'sample_rate_active_sizes_${category.trim().toLowerCase()}';
+      await prefs.remove(key);
+      await prefs.remove(directKey);
+      for (final catName in orderedCategories) {
+        if (normalizeCategory(catName) == normalizeCategory(category)) {
+          await prefs.remove(getStorageKey(catName));
+          await prefs.remove(
+              'sample_rate_active_sizes_${catName.trim().toLowerCase()}');
+        }
+      }
+    } catch (e) {
+      debugPrint(
+          "[SampleRateService] Error clearing active sizes for $category: $e");
+    }
+  }
+
+  /// Checks if a category's active sizes differ from the default benchmark specs.
+  static bool isCategoryModified(
+      String category, List<SampleRateSize> currentSizes) {
+    String targetCatName = category;
+    for (final catName in orderedCategories) {
+      if (normalizeCategory(catName) == normalizeCategory(category)) {
+        targetCatName = catName;
+        break;
+      }
+    }
+    final specs = benchmarkSpecifications[targetCatName];
+    if (specs == null) return false;
+
+    if (currentSizes.length != specs.length) return true;
+    if (currentSizes.any((s) => s.isCustom)) return true;
+
+    final specCleanLabels = specs.map((s) => cleanSizeForMatch(s.label)).toSet();
+    for (final s in currentSizes) {
+      if (!specCleanLabels.contains(cleanSizeForMatch(s.label))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Direct Supabase query to fetch verified item sizes from the `item_sizes` table.
@@ -439,8 +575,8 @@ class SampleRateService {
     }
   }
 
-  /// Fetches and computes benchmark categories populated dynamically from `item_sizes`.
-  static Future<Map<String, List<SampleRateSize>>> fetchSampleRateCategories({
+  /// Computes baseline benchmark categories populated dynamically from `item_sizes`.
+  static Future<Map<String, List<SampleRateSize>>> fetchBaselineBenchmarkCategories({
     bool force = false,
   }) async {
     final Map<String, List<SampleRateSize>> grouped = {};
@@ -610,6 +746,391 @@ class SampleRateService {
       }
 
       grouped[catName] = categorySizes;
+    }
+
+    return grouped;
+  }
+
+  /// Storage key for custom user-created categories list
+  static const String customCategoriesStorageKey = 'sample_rate_custom_categories';
+
+  /// Saves the list of custom created category names to SharedPreferences.
+  static Future<void> saveCustomCategories(List<String> categories) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(customCategoriesStorageKey, categories);
+    } catch (e) {
+      debugPrint("[SampleRateService] Error saving custom categories: $e");
+    }
+  }
+
+  /// Loads custom created category names from SharedPreferences.
+  static Future<List<String>> loadCustomCategories() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getStringList(customCategoriesStorageKey) ?? [];
+    } catch (e) {
+      debugPrint("[SampleRateService] Error loading custom categories: $e");
+      return [];
+    }
+  }
+
+  /// Checks whether a category is one of the protected 6 core baseline categories.
+  static bool isCoreCategory(String category) {
+    final norm = normalizeCategory(category);
+    return orderedCategories.any((c) => normalizeCategory(c) == norm);
+  }
+
+  /// Removes a custom category from SharedPreferences and clears its saved sizes.
+  static Future<void> removeCustomCategory(String category) async {
+    try {
+      final customCats = await loadCustomCategories();
+      final norm = normalizeCategory(category);
+      customCats.removeWhere((c) => normalizeCategory(c) == norm);
+      await saveCustomCategories(customCats);
+      await clearActiveSizes(category);
+    } catch (e) {
+      debugPrint("[SampleRateService] Error removing custom category: $e");
+    }
+  }
+
+  /// Clears all custom categories.
+  static Future<void> clearAllCustomCategories() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(customCategoriesStorageKey);
+    } catch (e) {
+      debugPrint("[SampleRateService] Error clearing custom categories: $e");
+    }
+  }
+
+  /// Resolves an existing material ID for a category or creates a new entry in the `materials` table.
+  static Future<int> resolveOrCreateMaterialId(String categoryName) async {
+    final cleanCat = categoryName.trim();
+    if (categoryToMaterialId.containsKey(cleanCat)) {
+      return categoryToMaterialId[cleanCat]!;
+    }
+    for (final entry in categoryToMaterialId.entries) {
+      if (normalizeCategory(entry.key) == normalizeCategory(cleanCat)) {
+        return entry.value;
+      }
+    }
+
+    try {
+      // 1. Query materials table for matching item_name
+      final response = await SupabaseService.client
+          .from('materials')
+          .select('id, item_name')
+          .limit(100);
+
+      final List materialsList = response as List? ?? [];
+      for (final m in materialsList) {
+        final name = (m['item_name'] ?? '').toString().trim();
+        if (normalizeCategory(name) == normalizeCategory(cleanCat) ||
+            name.toUpperCase() == cleanCat.toUpperCase()) {
+          final id = m['id'];
+          if (id is int) return id;
+          if (id != null) return int.tryParse(id.toString()) ?? 1;
+        }
+      }
+
+      // 2. If not found, insert new material
+      final inserted = await SupabaseService.client
+          .from('materials')
+          .insert({'item_name': cleanCat})
+          .select('id')
+          .maybeSingle();
+
+      if (inserted != null && inserted['id'] != null) {
+        final id = inserted['id'];
+        return (id is int) ? id : (int.tryParse(id.toString()) ?? 1);
+      }
+    } catch (e) {
+      debugPrint("[SampleRateService] resolveOrCreateMaterialId error: $e");
+    }
+
+    return 1;
+  }
+
+  /// Inserts a new item size into Supabase `item_sizes` table and syncs the cache.
+  static Future<SampleRateSize> insertNewItemSize({
+    required String category,
+    required String sizeLabel,
+    required double weight,
+    required double sd,
+  }) async {
+    final String cleanLabel = sizeLabel.trim();
+    int materialId = 1;
+
+    try {
+      materialId = await resolveOrCreateMaterialId(category);
+    } catch (e) {
+      debugPrint("[SampleRateService] Material ID resolution failed: $e");
+    }
+
+    try {
+      final insertPayload = {
+        'material_id': materialId,
+        'size_label': cleanLabel,
+        'unit_weight_kg': weight,
+        'size_difference': sd,
+        'current_stock_in': 0.0,
+      };
+
+      final response = await SupabaseService.client
+          .from('item_sizes')
+          .insert(insertPayload)
+          .select('id, material_id, size_label, unit_weight_kg, size_difference')
+          .maybeSingle();
+
+      if (response != null) {
+        final List<Map<String, dynamic>> updatedCache =
+            List.from(DataRepository.itemSizesNotifier.value);
+        updatedCache.add(Map<String, dynamic>.from(response));
+        DataRepository.itemSizesNotifier.value = updatedCache;
+      }
+    } catch (e) {
+      debugPrint("[SampleRateService] Supabase insert error on item_sizes: $e");
+    }
+
+    return SampleRateSize(cleanLabel, sd, weight, isCustom: true);
+  }
+
+  /// Fetches all materials from Supabase `materials` and merges with cached catalogs.
+  static Future<List<Map<String, dynamic>>> fetchAllDatabaseMaterials() async {
+    final Map<String, Map<String, dynamic>> uniqueMaterials = {};
+
+    // 1. Core baseline categories
+    for (final cat in orderedCategories) {
+      final int? id = categoryToMaterialId[cat];
+      uniqueMaterials[normalizeCategory(cat)] = {
+        'id': id,
+        'name': cat,
+        'item_name': cat,
+      };
+    }
+
+    // 2. Fetch from Supabase materials table
+    try {
+      final response = await SupabaseService.client
+          .from('materials')
+          .select('id, item_name')
+          .order('item_name')
+          .limit(1000);
+
+      final List materialsList = response as List? ?? [];
+      for (final m in materialsList) {
+        final name = (m['item_name'] ?? m['name'] ?? '').toString().trim();
+        if (name.isEmpty) continue;
+        final id = m['id'];
+        final int? parsedId =
+            (id is int) ? id : (int.tryParse(id?.toString() ?? ''));
+        uniqueMaterials[normalizeCategory(name)] = {
+          'id': parsedId,
+          'name': name,
+          'item_name': name,
+        };
+      }
+    } catch (e) {
+      debugPrint(
+          "[SampleRateService] Error fetching materials from Supabase: $e");
+    }
+
+    // 3. Supplement from DataRepository itemSizesNotifier and sheetDataNotifier
+    for (final s in DataRepository.itemSizesNotifier.value) {
+      final name =
+          (s['material_name'] ?? s['category'] ?? s['item_name'] ?? s['name'] ?? '')
+              .toString()
+              .trim();
+      if (name.isNotEmpty &&
+          !uniqueMaterials.containsKey(normalizeCategory(name))) {
+        final id = s['material_id'] ?? s['materialId'];
+        final int? parsedId =
+            (id is int) ? id : (int.tryParse(id?.toString() ?? ''));
+        uniqueMaterials[normalizeCategory(name)] = {
+          'id': parsedId,
+          'name': name,
+          'item_name': name,
+        };
+      }
+    }
+
+    final sheetItems =
+        DataRepository.sheetDataNotifier.value['items'] as List? ?? [];
+    for (final catItem in sheetItems) {
+      final name = (catItem['name'] ?? catItem['item_name'] ?? '').toString().trim();
+      if (name.isNotEmpty &&
+          !uniqueMaterials.containsKey(normalizeCategory(name))) {
+        uniqueMaterials[normalizeCategory(name)] = {
+          'id': null,
+          'name': name,
+          'item_name': name,
+        };
+      }
+    }
+
+    final result = uniqueMaterials.values.toList();
+    result.sort((a, b) => (a['name'] ?? a['item_name'] ?? '')
+        .toString()
+        .compareTo((b['name'] ?? b['item_name'] ?? '').toString()));
+    return result;
+  }
+
+  /// Fetches all sizes for a given material from Supabase and in-memory caches.
+  static Future<List<SampleRateSize>> fetchSizesForMaterial({
+    int? materialId,
+    String? categoryName,
+  }) async {
+    final Map<String, SampleRateSize> uniqueSizes = {};
+    final String normCat =
+        categoryName != null ? normalizeCategory(categoryName) : '';
+
+    // 1. Direct Supabase query on item_sizes if materialId is available
+    if (materialId != null) {
+      try {
+        final response = await SupabaseService.client
+            .from('item_sizes')
+            .select(
+                'id, material_id, size_label, unit_weight_kg, size_difference')
+            .eq('material_id', materialId)
+            .order('size_label')
+            .limit(1000);
+
+        final List sizesList = response as List? ?? [];
+        for (final s in sizesList) {
+          final label = (s['size_label'] ?? '').toString().trim();
+          if (label.isEmpty) continue;
+          final sd = (s['size_difference'] is num)
+              ? s['size_difference']
+              : (num.tryParse(s['size_difference']?.toString() ?? '0') ?? 0);
+          final w = (s['unit_weight_kg'] is num)
+              ? s['unit_weight_kg']
+              : (num.tryParse(s['unit_weight_kg']?.toString() ?? '0') ?? 0);
+
+          final cleanKey = cleanSizeForMatch(label);
+          uniqueSizes[cleanKey] = SampleRateSize(label, sd, w, isCustom: true);
+        }
+      } catch (e) {
+        debugPrint(
+            "[SampleRateService] Error fetching sizes for material $materialId: $e");
+      }
+    }
+
+    // 2. Search DataRepository itemSizesNotifier cache
+    for (final s in DataRepository.itemSizesNotifier.value) {
+      final sMatId = s['material_id'] ?? s['materialId'];
+      final sMatName =
+          (s['material_name'] ?? s['category'] ?? s['item_name'] ?? '')
+              .toString()
+              .trim();
+
+      bool match = (materialId != null && sMatId == materialId) ||
+          (normCat.isNotEmpty && normalizeCategory(sMatName) == normCat);
+
+      if (match) {
+        final label =
+            (s['size_label'] ?? s['label'] ?? s['size'] ?? '').toString().trim();
+        if (label.isNotEmpty) {
+          final cleanKey = cleanSizeForMatch(label);
+          if (!uniqueSizes.containsKey(cleanKey)) {
+            final sd = (s['size_difference'] ?? s['sd'] ?? s['diffRate'] ?? 0);
+            final num parsedSd =
+                (sd is num) ? sd : (num.tryParse(sd.toString()) ?? 0);
+            final w =
+                (s['unit_weight_kg'] ?? s['weight'] ?? s['std_weight'] ?? 0);
+            final num parsedW =
+                (w is num) ? w : (num.tryParse(w.toString()) ?? 0);
+            uniqueSizes[cleanKey] =
+                SampleRateSize(label, parsedSd, parsedW, isCustom: true);
+          }
+        }
+      }
+    }
+
+    // 3. Search DataRepository sheetDataNotifier cache
+    if (categoryName != null) {
+      final sheetItems =
+          DataRepository.sheetDataNotifier.value['items'] as List? ?? [];
+      for (final catItem in sheetItems) {
+        final sheetName = (catItem['name'] ?? '').toString().trim();
+        if (normalizeCategory(sheetName) == normCat) {
+          final List sizesRaw = catItem['sizes'] ?? [];
+          for (final sr in sizesRaw) {
+            final label =
+                (sr['size_label'] ?? sr['label'] ?? sr['size'] ?? '')
+                    .toString()
+                    .trim();
+            if (label.isNotEmpty) {
+              final cleanKey = cleanSizeForMatch(label);
+              if (!uniqueSizes.containsKey(cleanKey)) {
+                final sd =
+                    sr['size_difference'] ?? sr['sd'] ?? sr['diffRate'] ?? 0;
+                final num parsedSd =
+                    (sd is num) ? sd : (num.tryParse(sd.toString()) ?? 0);
+                final w = sr['unit_weight_kg'] ??
+                    sr['weight'] ??
+                    sr['std_weight'] ??
+                    0;
+                final num parsedW =
+                    (w is num) ? w : (num.tryParse(w.toString()) ?? 0);
+                uniqueSizes[cleanKey] =
+                    SampleRateSize(label, parsedSd, parsedW, isCustom: true);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    final list = uniqueSizes.values.toList();
+    list.sort((a, b) => SortingUtils.compareSizes(a.label, b.label));
+    return list;
+  }
+
+  /// Fetches and computes active sample rate categories, loading user-persisted active sizes from SharedPreferences if available.
+  static Future<Map<String, List<SampleRateSize>>> fetchSampleRateCategories({
+    bool force = false,
+  }) async {
+    final baselineGrouped = await fetchBaselineBenchmarkCategories(force: force);
+    final customCats = await loadCustomCategories();
+    final Map<String, List<SampleRateSize>> grouped = {};
+
+    final allCategories = [...orderedCategories];
+    for (final c in customCats) {
+      if (!allCategories.any((cat) => normalizeCategory(cat) == normalizeCategory(c))) {
+        allCategories.add(c);
+      }
+    }
+
+    for (final catName in allCategories) {
+      final persisted = await loadActiveSizes(catName);
+      if (persisted != null) {
+        final baselineList = baselineGrouped[catName] ?? [];
+        final reconciledList = <SampleRateSize>[];
+
+        for (final pSize in persisted) {
+          // Check if it matches a baseline benchmark
+          final cleanP = cleanSizeForMatch(pSize.label);
+          final matchingBaseline = baselineList.where(
+              (b) => cleanSizeForMatch(b.label) == cleanP).firstOrNull;
+
+          if (matchingBaseline != null) {
+            // Keep dynamic SD and unit weight up to date with latest item_sizes
+            reconciledList.add(SampleRateSize(
+              matchingBaseline.label,
+              pSize.sd != 0 && pSize.isCustom ? pSize.sd : matchingBaseline.sd,
+              matchingBaseline.weight > 0 ? matchingBaseline.weight : pSize.weight,
+              isCustom: false,
+            ));
+          } else {
+            // It is a user-added custom size from the master catalog
+            reconciledList.add(pSize.copyWith(isCustom: true));
+          }
+        }
+        grouped[catName] = reconciledList;
+      } else {
+        grouped[catName] = baselineGrouped[catName] ?? [];
+      }
     }
 
     return grouped;

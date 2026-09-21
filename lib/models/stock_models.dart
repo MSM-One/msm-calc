@@ -41,7 +41,7 @@ class ItemVariant {
   final String category;
   final String size;
   double openingStockMT;
-  double _currentStockMT;
+  double currentStockMT;
   double reservedStockMT;
   double minStock;
   double price;
@@ -56,7 +56,7 @@ class ItemVariant {
     required String category,
     required this.size,
     this.openingStockMT = 0,
-    required double currentStockMT,
+    required this.currentStockMT,
     this.reservedStockMT = 0,
     this.minStock = 5.0,
     this.price = 0,
@@ -64,15 +64,11 @@ class ItemVariant {
     this.stockStatus = 'In Stock',
     this.yardTotal = 0.0,
     this.factoryTotal = 0.0,
-  })  : category = (category.trim().isNotEmpty
+  }) : category = (category.trim().isNotEmpty
             ? category.trim()
             : (itemName.trim().isNotEmpty
                 ? detectCategory(itemName)
-                : 'General')),
-        _currentStockMT = currentStockMT;
-
-  double get currentStockMT => _currentStockMT;
-  set currentStockMT(double val) => _currentStockMT = val;
+                : 'General'));
 
   double get availableStockMT {
     final diff = currentStockMT - reservedStockMT;
@@ -112,6 +108,7 @@ class SampleRateSize {
   final num weight;
   final bool isMissing;
   final bool isCustom;
+
   SampleRateSize(
     this.label,
     this.sd,
@@ -119,6 +116,65 @@ class SampleRateSize {
     this.isMissing = false,
     this.isCustom = false,
   });
+
+  String get sizeLabel => label;
+
+  Map<String, dynamic> toJson() => {
+        'label': label,
+        'sd': sd,
+        'weight': weight,
+        'isMissing': isMissing,
+        'isCustom': isCustom,
+      };
+
+  factory SampleRateSize.fromJson(Map<String, dynamic> json) {
+    return SampleRateSize(
+      (json['label'] ?? '').toString(),
+      (json['sd'] is num)
+          ? json['sd']
+          : (num.tryParse(json['sd']?.toString() ?? '0') ?? 0),
+      (json['weight'] is num)
+          ? json['weight']
+          : (num.tryParse(json['weight']?.toString() ?? '0') ?? 0),
+      isMissing: json['isMissing'] == true,
+      isCustom: json['isCustom'] == true,
+    );
+  }
+
+  SampleRateSize copyWith({
+    String? label,
+    num? sd,
+    num? weight,
+    bool? isMissing,
+    bool? isCustom,
+  }) {
+    return SampleRateSize(
+      label ?? this.label,
+      sd ?? this.sd,
+      weight ?? this.weight,
+      isMissing: isMissing ?? this.isMissing,
+      isCustom: isCustom ?? this.isCustom,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SampleRateSize &&
+          runtimeType == other.runtimeType &&
+          label == other.label &&
+          sd == other.sd &&
+          weight == other.weight &&
+          isMissing == other.isMissing &&
+          isCustom == other.isCustom;
+
+  @override
+  int get hashCode =>
+      label.hashCode ^
+      sd.hashCode ^
+      weight.hashCode ^
+      isMissing.hashCode ^
+      isCustom.hashCode;
 }
 
 class SampleRateSpec {

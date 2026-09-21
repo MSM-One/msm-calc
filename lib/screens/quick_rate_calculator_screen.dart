@@ -9,6 +9,7 @@ import '../models/stock_models.dart';
 import '../providers/inventory_provider.dart';
 import '../services/access_guard.dart';
 import '../services/data_repository.dart';
+import '../services/sample_rate_service.dart';
 import '../utils/formatters.dart';
 import '../utils/item_order_util.dart';
 import '../utils/sorting_utils.dart';
@@ -63,45 +64,219 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
 
   bool _isRemovalMode = false;
   Map<String, List<SampleRateSize>> _categories = {};
-  final Map<String, List<SampleRateSize>> _customAddedSizes = {};
-  final Map<String, Set<String>> _removedSizeLabels = {};
 
-  void _addCustomSize(String category, SampleRateSize size) {
-    setState(() {
-      _removedSizeLabels[category]?.remove(size.label);
-      final inv = context.read<InventoryProvider>();
-      final baseList = inv.sampleRateCategories[category] ?? [];
-      if (!baseList.any((s) => s.label == size.label)) {
-        final list = _customAddedSizes.putIfAbsent(category, () => []);
-        if (!list.any((s) => s.label == size.label)) {
-          list.add(size);
-        }
-      }
-    });
-    MotionToast.show(context, "Added ${size.label} to $category");
+  void _addCustomSize(String category, SampleRateSize size) async {
+    final inv = context.read<InventoryProvider>();
+    await inv.addCustomSizeToCategory(category, size);
+    if (mounted) {
+      MotionToast.show(context, "Added ${size.label} to $category");
+    }
   }
 
-  void _removeSizeFromCategory(String category, SampleRateSize size) {
-    setState(() {
-      _customAddedSizes[category]?.removeWhere((s) => s.label == size.label);
-      _removedSizeLabels.putIfAbsent(category, () => {}).add(size.label);
-    });
-    MotionToast.show(context, "Removed ${size.label} from $category");
+  void _removeSizeFromCategory(String category, SampleRateSize size) async {
+    final inv = context.read<InventoryProvider>();
+    await inv.removeSizeFromCategory(category, size);
+    if (mounted) {
+      MotionToast.show(context, "Removed ${size.label} from $category");
+    }
   }
 
-  void _resetCategoryToDefaults(String category) {
-    setState(() {
-      _customAddedSizes.remove(category);
-      _removedSizeLabels.remove(category);
-      _isRemovalMode = false;
-    });
-    MotionToast.show(context, "Reset $category to benchmark defaults");
+  void _resetCategoryToDefaults(String category) async {
+    final inv = context.read<InventoryProvider>();
+    await inv.resetCategoryToDefaults(category);
+    if (mounted) {
+      setState(() {
+        _isRemovalMode = false;
+      });
+      MotionToast.show(context, "Reset to default benchmark sizes");
+    }
   }
 
   bool _isCategoryModified(String category) {
-    final hasCustom = (_customAddedSizes[category] ?? []).isNotEmpty;
-    final hasRemoved = (_removedSizeLabels[category] ?? {}).isNotEmpty;
-    return hasCustom || hasRemoved;
+    final inv = context.read<InventoryProvider>();
+    return inv.isCategoryModified(category);
+  }
+
+  void _showAddNewItemModal(BuildContext context, String category, bool isDark) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => _AddNewItemDialog(
+        currentCategory: category,
+        isDark: isDark,
+        existingSizes: _categories[category] ?? [],
+        allCategories: _categories.keys.toList(),
+        onItemAdded: (cat, size, isNewCat, initialBaseRate) {
+          setState(() {
+            _selectedCategory = cat;
+            if (initialBaseRate > 0) {
+              final ctrl = _getControllerForCategory(cat);
+              ctrl.text = initialBaseRate % 1 == 0
+                  ? initialBaseRate.toInt().toString()
+                  : initialBaseRate.toString();
+              try {
+                context.read<InventoryProvider>().updateBaseRate(cat, initialBaseRate);
+              } catch (_) {}
+            }
+          });
+        },
+        onMultipleItemsAdded: (cat, sizes, isNewCat, initialBaseRate) {
+          setState(() {
+            _selectedCategory = cat;
+            if (initialBaseRate > 0) {
+              final ctrl = _getControllerForCategory(cat);
+              ctrl.text = initialBaseRate % 1 == 0
+                  ? initialBaseRate.toInt().toString()
+                  : initialBaseRate.toString();
+              try {
+                context.read<InventoryProvider>().updateBaseRate(cat, initialBaseRate);
+              } catch (_) {}
+            }
+          });
+        },
+      ),
+    );
+  }
+
+  void _showSetBaseRateDialog(
+      BuildContext context, String category, double currentRate, bool isDark) {
+    final textCtrl = TextEditingController(
+      text: currentRate > 0
+          ? (currentRate % 1 == 0 ? currentRate.toInt().toString() : currentRate.toString())
+          : '',
+    );
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFD32F2F).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.currency_rupee_rounded,
+                  color: Color(0xFFD32F2F), size: 20),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                "Set Base Rate: $category",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Enter the benchmark base rate (per MT / Kg) for $category. Net computed rates will recalculate instantly.",
+              style: TextStyle(
+                fontSize: 12.5,
+                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: textCtrl,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+              ],
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
+              ),
+              decoration: InputDecoration(
+                prefixText: "₹ ",
+                prefixStyle: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFFD32F2F),
+                ),
+                hintText: "e.g. 52000",
+                hintStyle: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                ),
+                filled: true,
+                fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(
+                    color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: Color(0xFFD32F2F), width: 1.5),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              ),
+              onSubmitted: (val) {
+                final rate = double.tryParse(val) ?? 0.0;
+                final ctrl = _getControllerForCategory(category);
+                ctrl.text = rate > 0
+                    ? (rate % 1 == 0 ? rate.toInt().toString() : rate.toString())
+                    : '';
+                try {
+                  context.read<InventoryProvider>().updateBaseRate(category, rate);
+                } catch (_) {}
+                Navigator.pop(ctx);
+                MotionToast.show(context,
+                    "Base rate for $category set to ₹${formatIndianCurrency(rate.round())}");
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              "Cancel",
+              style: TextStyle(
+                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final rate = double.tryParse(textCtrl.text) ?? 0.0;
+              final ctrl = _getControllerForCategory(category);
+              ctrl.text = rate > 0
+                  ? (rate % 1 == 0 ? rate.toInt().toString() : rate.toString())
+                  : '';
+              try {
+                context.read<InventoryProvider>().updateBaseRate(category, rate);
+              } catch (_) {}
+              Navigator.pop(ctx);
+              MotionToast.show(context,
+                  "Base rate for $category set to ₹${formatIndianCurrency(rate.round())}");
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFD32F2F),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
+            child: const Text("Apply Rate", style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showAddSizeModal(BuildContext context, String category, bool isDark) {
@@ -162,20 +337,29 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
 
   TextEditingController _getControllerForCategory(String category) {
     String cat = category.toUpperCase().trim();
-    if (cat == 'MS PIPE' || (cat.contains('PIPE') && !cat.contains('HR') && !cat.contains('CR') && !cat.contains('ERW'))) {
-      return _pipeBasicCtrl;
-    }
-    if (cat == 'MS ANGLE' || cat.contains('ANGLE')) return _angleBasicCtrl;
-    if (cat == 'MS CHANNEL' || cat.contains('CHANNEL')) return _channelBasicCtrl;
-    if (cat == 'SQR BAR' || (cat.contains('SQR') || cat.contains('SQUARE'))) {
-      return _sqrBarBasicCtrl;
-    }
-    if (cat == 'ROUND BAR' || cat == 'FLATS' || cat.contains('ROUND') || cat.contains('FLAT')) {
+    if (cat == 'MS PIPE' || cat == 'PIPE') return _pipeBasicCtrl;
+    if (cat == 'MS ANGLE' || cat == 'ANGLE') return _angleBasicCtrl;
+    if (cat == 'MS CHANNEL' || cat == 'CHANNEL') return _channelBasicCtrl;
+    if (cat == 'SQR BAR' || cat == 'SQUARE BAR') return _sqrBarBasicCtrl;
+    if (cat == 'ROUND BAR' || cat == 'FLATS' || cat == 'ROUND' || cat == 'FLAT') {
       return _roundFlatsBasicCtrl;
     }
     return _dynamicControllers.putIfAbsent(
-      cat,
-      () => TextEditingController()..addListener(_onRateChanged),
+      category.trim(),
+      () {
+        final ctrl = TextEditingController();
+        try {
+          final invRate =
+              context.read<InventoryProvider>().getBaseRateForCategory(category);
+          if (invRate > 0) {
+            ctrl.text = invRate % 1 == 0
+                ? invRate.toInt().toString()
+                : invRate.toString();
+          }
+        } catch (_) {}
+        ctrl.addListener(_onRateChanged);
+        return ctrl;
+      },
     );
   }
 
@@ -205,12 +389,19 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
       MotionToast.show(context, "Please enter a rate first", isError: true);
       return;
     }
+    final double parsedRate = double.tryParse(sourceRate) ?? 0.0;
     setState(() {
       _pipeBasicCtrl.text = sourceRate;
       _angleBasicCtrl.text = sourceRate;
       _channelBasicCtrl.text = sourceRate;
       _sqrBarBasicCtrl.text = sourceRate;
       _roundFlatsBasicCtrl.text = sourceRate;
+      for (final cat in _categories.keys) {
+        _getControllerForCategory(cat).text = sourceRate;
+        try {
+          context.read<InventoryProvider>().updateBaseRate(cat, parsedRate);
+        } catch (_) {}
+      }
       for (final ctrl in _dynamicControllers.values) {
         ctrl.text = sourceRate;
       }
@@ -227,8 +418,17 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     'FLATS',
   };
 
-  static bool _isAllowedCategory(String category) {
+  bool _isAllowedCategory(String category) {
     final cat = category.toUpperCase().trim();
+    if (cat.contains('BINDING') ||
+        cat.contains('NAIL') ||
+        cat.contains('BARBED') ||
+        cat.contains('WIRE') ||
+        cat.contains('HR PIPE') ||
+        cat.contains('CR PIPE') ||
+        cat.contains('ERW')) {
+      return false;
+    }
     if (_allowedCoreCategories.contains(cat)) return true;
     if (cat == 'PIPE' || cat == 'MS PIPES') return true;
     if (cat == 'ANGLE' || cat == 'MS ANGLES') return true;
@@ -236,6 +436,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     if (cat == 'SQUARE BAR' || cat == 'SQ BAR' || cat == 'MS SQR BAR') return true;
     if (cat == 'ROUND' || cat == 'MS ROUND' || cat == 'MS ROUND BAR') return true;
     if (cat == 'FLAT' || cat == 'MS FLAT' || cat == 'MS FLATS') return true;
+    if (_categories.containsKey(category)) return true;
     return false;
   }
 
@@ -739,35 +940,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
               return const Center(child: MLoader(size: 60));
             }
 
-            final Map<String, List<SampleRateSize>> combinedCategories = {};
-            for (final entry in inv.sampleRateCategories.entries) {
-              final cat = entry.key;
-              final baseList = entry.value;
-              final customList = _customAddedSizes[cat] ?? [];
-              final removed = _removedSizeLabels[cat] ?? {};
-
-              final mergedList = <SampleRateSize>[];
-              for (final s in [...baseList, ...customList]) {
-                if (!removed.contains(s.label)) {
-                  if (!mergedList.any((existing) => existing.label == s.label)) {
-                    mergedList.add(s);
-                  }
-                }
-              }
-              combinedCategories[cat] = mergedList;
-            }
-
-            for (final entry in _customAddedSizes.entries) {
-              final cat = entry.key;
-              if (!combinedCategories.containsKey(cat)) {
-                final removed = _removedSizeLabels[cat] ?? {};
-                combinedCategories[cat] = entry.value
-                    .where((s) => !removed.contains(s.label))
-                    .toList();
-              }
-            }
-
-            _categories = combinedCategories;
+            _categories = inv.sampleRateCategories;
 
             if (_categories.isEmpty) {
               return Center(
@@ -868,6 +1041,17 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                             controller: _roundFlatsBasicCtrl,
                             isDark: isDark,
                           ),
+                          // Dynamic custom category base rate inputs
+                          ...sortedCategories
+                              .where((cat) => !SampleRateService.isCoreCategory(cat))
+                              .map((cat) => Padding(
+                                    padding: const EdgeInsets.only(top: 10),
+                                    child: _PanelInput(
+                                      label: "$cat Basic",
+                                      controller: _getControllerForCategory(cat),
+                                      isDark: isDark,
+                                    ),
+                                  )),
                           const SizedBox(height: 16),
 
                           // Quick Broadcast Button
@@ -961,12 +1145,18 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
             }
 
             // ── MOBILE / NARROW LAYOUT ──
+            final pipeText = _pipeBasicCtrl.text.trim();
+            final double? parsedPipe = double.tryParse(pipeText);
+            final String pipeRateStr = (parsedPipe != null && parsedPipe > 0)
+                ? "₹${formatIndianCurrency(parsedPipe.round())}"
+                : "---";
+
             return SingleChildScrollView(
               padding: const EdgeInsets.all(12.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Collapsible Rate Config Card on Mobile
+                  // Collapsible Rate Config Card on Mobile (Collapsed by default on mobile)
                   Material(
                     color: isDark ? const Color(0xFF1E293B) : Colors.white,
                     borderRadius: BorderRadius.circular(12),
@@ -993,149 +1183,155 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                           dividerColor: Colors.transparent,
                         ),
                         child: ExpansionTile(
-                        initiallyExpanded: _pipeBasicCtrl.text.isEmpty &&
-                            _angleBasicCtrl.text.isEmpty &&
-                            _channelBasicCtrl.text.isEmpty &&
-                            _sqrBarBasicCtrl.text.isEmpty &&
-                            _roundFlatsBasicCtrl.text.isEmpty,
-                        tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
-                        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                        leading: Container(
-                          padding: const EdgeInsets.all(7),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFD32F2F).withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(8),
+                          initiallyExpanded: false, // Collapsed by default on mobile (<600px)
+                          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                          leading: Container(
+                            padding: const EdgeInsets.all(7),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFD32F2F).withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.tune_rounded,
+                              color: Color(0xFFD32F2F),
+                              size: 18,
+                            ),
                           ),
-                          child: const Icon(
-                            Icons.tune_rounded,
-                            color: Color(0xFFD32F2F),
-                            size: 18,
+                          title: Text(
+                            "Rate Settings & Inputs",
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            ),
                           ),
-                        ),
-                        title: Text(
-                          "Rate Settings & Inputs",
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
-                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          subtitle: Text(
+                            "Active Base: $pipeRateStr | GST: ${_gstEnabled ? '18%' : 'Off'}",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            ),
                           ),
-                        ),
-                        subtitle: Text(
-                          _pipeBasicCtrl.text.isNotEmpty
-                              ? "Pipe: ₹${formatIndianCurrency((double.tryParse(_pipeBasicCtrl.text) ?? 0).round())} • GST ${_gstEnabled ? '18%' : 'Off'}"
-                              : "Tap to set Pipe, Angle, Channel basic rates",
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                          ),
-                        ),
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _PanelInput(
-                                  label: "Pipe",
-                                  controller: _pipeBasicCtrl,
-                                  isDark: isDark,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _PanelInput(
+                                    label: "Pipe",
+                                    controller: _pipeBasicCtrl,
+                                    isDark: isDark,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: _PanelInput(
-                                  label: "Angle",
-                                  controller: _angleBasicCtrl,
-                                  isDark: isDark,
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _PanelInput(
+                                    label: "Angle",
+                                    controller: _angleBasicCtrl,
+                                    isDark: isDark,
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _PanelInput(
-                                  label: "Channel",
-                                  controller: _channelBasicCtrl,
-                                  isDark: isDark,
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _PanelInput(
+                                    label: "Channel",
+                                    controller: _channelBasicCtrl,
+                                    isDark: isDark,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: _PanelInput(
-                                  label: "SQR Bar",
-                                  controller: _sqrBarBasicCtrl,
-                                  isDark: isDark,
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _PanelInput(
+                                    label: "SQR Bar",
+                                    controller: _sqrBarBasicCtrl,
+                                    isDark: isDark,
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          _PanelInput(
-                            label: "Round/Flats",
-                            controller: _roundFlatsBasicCtrl,
-                            isDark: isDark,
-                          ),
-                          const SizedBox(height: 10),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: () => _applyToAll('MS Pipe'),
-                              icon: const Icon(Icons.copy_all_rounded, size: 14),
-                              label: const Text(
-                                "Apply Pipe Rate to All",
-                                style: TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w600),
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 8),
-                                side: BorderSide(
-                                  color: isDark
-                                      ? const Color(0xFF334155)
-                                      : const Color(0xFFCBD5E1),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            _PanelInput(
+                              label: "Round/Flats",
+                              controller: _roundFlatsBasicCtrl,
+                              isDark: isDark,
+                            ),
+                            // Dynamic custom category base rate inputs for mobile
+                            ...sortedCategories
+                                .where((cat) => !SampleRateService.isCoreCategory(cat))
+                                .map((cat) => Padding(
+                                      padding: const EdgeInsets.only(top: 10),
+                                      child: _PanelInput(
+                                        label: "$cat Basic",
+                                        controller: _getControllerForCategory(cat),
+                                        isDark: isDark,
+                                      ),
+                                    )),
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () => _applyToAll('MS Pipe'),
+                                icon: const Icon(Icons.copy_all_rounded, size: 14),
+                                label: const Text(
+                                  "Apply Pipe Rate to All",
+                                  style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w600),
                                 ),
-                                foregroundColor: isDark
-                                    ? Colors.white70
-                                    : const Color(0xFF475569),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
+                                style: OutlinedButton.styleFrom(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 8),
+                                  side: BorderSide(
+                                    color: isDark
+                                        ? const Color(0xFF334155)
+                                        : const Color(0xFFCBD5E1),
+                                  ),
+                                  foregroundColor: isDark
+                                      ? Colors.white70
+                                      : const Color(0xFF475569),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _buildModernToggleTile(
-                                  title: "GST (18%)",
-                                  value: _gstEnabled,
-                                  onChanged: (v) =>
-                                      setState(() => _gstEnabled = v),
-                                  isDark: isDark,
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _buildModernToggleTile(
+                                    title: "GST (18%)",
+                                    value: _gstEnabled,
+                                    onChanged: (v) =>
+                                        setState(() => _gstEnabled = v),
+                                    isDark: isDark,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _buildModernToggleTile(
-                                  title: "NC Discount",
-                                  value: _ncDiscountEnabled,
-                                  onChanged: (v) =>
-                                      setState(() => _ncDiscountEnabled = v),
-                                  isDark: isDark,
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: _buildModernToggleTile(
+                                    title: "NC Discount",
+                                    value: _ncDiscountEnabled,
+                                    onChanged: (v) =>
+                                        setState(() => _ncDiscountEnabled = v),
+                                    isDark: isDark,
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ],
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 14),
+                  const SizedBox(height: 14),
 
-                  // Canonical Category Chips (Horizontal Scroll)
+                  // Canonical Category Chips (Horizontal Scroll with Fade Affordance)
                   _buildCategoryChips(sortedCategories, isDark),
                   const SizedBox(height: 12),
 
@@ -1160,68 +1356,193 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
   Widget _buildCategoryChips(List<String> sortedCategories, bool isDark) {
     return SizedBox(
       height: 44,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        child: Row(
-          children: sortedCategories.map((cat) {
-            final isSelected = _selectedCategory == cat;
-            return Padding(
-              padding: const EdgeInsets.only(right: 8.0),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: () {
-                  setState(() => _selectedCategory = cat);
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14.0, vertical: 8.0),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? const Color(0xFFD32F2F)
-                        : (isDark
-                            ? const Color(0xFF1E293B)
-                            : const Color(0xFFF1F5F9)),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
+      child: ShaderMask(
+        shaderCallback: (Rect rect) {
+          return const LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [
+              Colors.black,
+              Colors.black,
+              Colors.transparent,
+            ],
+            stops: [0.0, 0.88, 1.0],
+          ).createShader(rect);
+        },
+        blendMode: BlendMode.dstIn,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          child: Row(
+            children: sortedCategories.map((cat) {
+              final isSelected = _selectedCategory == cat;
+              final isCore = SampleRateService.isCoreCategory(cat);
+
+              return Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: () {
+                    setState(() => _selectedCategory = cat);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 14.0,
+                      vertical: (_isRemovalMode && !isCore) ? 5.0 : 8.0,
+                    ),
+                    decoration: BoxDecoration(
                       color: isSelected
                           ? const Color(0xFFD32F2F)
                           : (isDark
-                              ? const Color(0xFF334155)
-                              : const Color(0xFFE2E8F0)),
-                      width: 1,
+                              ? const Color(0xFF1E293B)
+                              : const Color(0xFFF1F5F9)),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: isSelected
+                            ? const Color(0xFFD32F2F)
+                            : (isDark
+                                ? const Color(0xFF334155)
+                                : const Color(0xFFE2E8F0)),
+                        width: 1,
+                      ),
+                      boxShadow: isSelected
+                          ? [
+                              BoxShadow(
+                                color: const Color(0xFFD32F2F).withValues(alpha: 0.25),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ]
+                          : null,
                     ),
-                    boxShadow: isSelected
-                        ? [
-                            BoxShadow(
-                              color: const Color(0xFFD32F2F).withValues(alpha: 0.25),
-                              blurRadius: 6,
-                              offset: const Offset(0, 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          cat.toUpperCase(),
+                          style: TextStyle(
+                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                            fontSize: 11.5,
+                            color: isSelected
+                                ? Colors.white
+                                : (isDark
+                                    ? const Color(0xFFCBD5E1)
+                                    : const Color(0xFF475569)),
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                        if (_isRemovalMode && !isCore) ...[
+                          const SizedBox(width: 6),
+                          InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () => _confirmRemoveCategory(cat, isDark),
+                            child: Container(
+                              padding: const EdgeInsets.all(2),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFDC2626),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.close_rounded,
+                                size: 11,
+                                color: Colors.white,
+                              ),
                             ),
-                          ]
-                        : null,
-                  ),
-                  child: Text(
-                    cat.toUpperCase(),
-                    style: TextStyle(
-                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-                      fontSize: 11.5,
-                      color: isSelected
-                          ? Colors.white
-                          : (isDark
-                              ? const Color(0xFFCBD5E1)
-                              : const Color(0xFF475569)),
-                      letterSpacing: 0.3,
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
-              ),
-            );
-          }).toList(),
+              );
+            }).toList(),
+          ),
         ),
       ),
     );
+  }
+
+  Future<void> _confirmRemoveCategory(String category, bool isDark) async {
+    final shouldRemove = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFDC2626).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.delete_outline_rounded,
+                  color: Color(0xFFDC2626), size: 20),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                "Remove Category?",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          "Are you sure you want to remove '$category' from the quick calculator? You can re-add it anytime from '+ New Item'.",
+          style: TextStyle(
+            fontSize: 13,
+            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(
+              "Cancel",
+              style: TextStyle(
+                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              "Remove Tab",
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldRemove == true && mounted) {
+      final inv = context.read<InventoryProvider>();
+      await inv.removeCustomCategory(category);
+      if (mounted) {
+        setState(() {
+          if (_selectedCategory == category) {
+            final remaining = inv.sampleRateCategories.keys
+                .where(_isAllowedCategory)
+                .toList();
+            _selectedCategory = remaining.isNotEmpty ? remaining.first : 'MS Pipe';
+          }
+        });
+        MotionToast.show(context, "Removed $category tab");
+      }
+    }
   }
 
   // ── CATEGORY SECTION & HIGH-DENSITY PRICING TABLE ──
@@ -1234,6 +1555,20 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
     final bool hasBasic = basic > 0;
 
     final isModified = _isCategoryModified(title);
+    final double screenWidth = MediaQuery.of(context).size.width;
+    final bool isMobile = screenWidth < 600;
+
+    final columnWidths = isMobile
+        ? const {
+            0: FlexColumnWidth(5),
+            1: FlexColumnWidth(3),
+            2: FlexColumnWidth(4),
+          }
+        : const {
+            0: FlexColumnWidth(4),
+            1: FlexColumnWidth(2),
+            2: FlexColumnWidth(3),
+          };
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1250,7 +1585,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
           ),
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final isCompact = constraints.maxWidth < 450;
+              final isCompact = constraints.maxWidth < 450 || isMobile;
               final isUltraCompact = constraints.maxWidth < 360;
 
               return Row(
@@ -1296,7 +1631,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                   ),
                   const SizedBox(width: 6),
 
-                  // Right: Action button group
+                  // Right: Action button group (Mobile: Touch-friendly IconButtons, Desktop: Text buttons)
                   Flexible(
                     flex: 6,
                     child: FittedBox(
@@ -1305,157 +1640,340 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Base Rate Status Chip
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: hasBasic
-                                  ? const Color(0xFFECFDF5)
-                                  : (isDark
-                                      ? const Color(0xFF334155)
-                                      : const Color(0xFFF1F5F9)),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(
-                                color: hasBasic
-                                    ? const Color(0xFFA7F3D0)
-                                    : (isDark
-                                        ? const Color(0xFF475569)
-                                        : const Color(0xFFE2E8F0)),
-                              ),
-                            ),
-                            child: Text(
-                              hasBasic
-                                  ? "Base: ₹${formatIndianCurrency(basic.round())}"
-                                  : (isCompact ? "Base: —" : "Base Rate Not Set"),
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                color: hasBasic
-                                    ? const Color(0xFF059669)
-                                    : const Color(0xFF94A3B8),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-
-                          // "+ Add" Action Button
+                          // Interactive Base Rate Status Chip / Button
                           Tooltip(
-                            message: "+ Add Size",
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(6),
-                              onTap: () => _showAddSizeModal(context, title, isDark),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 3.5),
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: isDark
-                                        ? const Color(0xFF475569)
-                                        : const Color(0xFFCBD5E1),
+                            message: hasBasic
+                                ? "Base rate: ₹${formatIndianCurrency(basic.round())}. Click to edit."
+                                : "No base rate configured. Click to set base rate for $title.",
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(6),
+                                onTap: () => _showSetBaseRateDialog(context, title, basic, isDark),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+                                  decoration: BoxDecoration(
+                                    color: hasBasic
+                                        ? const Color(0xFFECFDF5)
+                                        : (isDark
+                                            ? const Color(0xFF78350F).withValues(alpha: 0.25)
+                                            : const Color(0xFFFEF3C7)),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: hasBasic
+                                          ? const Color(0xFFA7F3D0)
+                                          : (isDark
+                                              ? const Color(0xFFF59E0B).withValues(alpha: 0.5)
+                                              : const Color(0xFFF59E0B)),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        hasBasic ? Icons.edit_rounded : Icons.add_circle_outline_rounded,
+                                        size: 11,
+                                        color: hasBasic
+                                            ? const Color(0xFF059669)
+                                            : const Color(0xFFD97706),
+                                      ),
+                                      const SizedBox(width: 3.5),
+                                      Text(
+                                        hasBasic
+                                            ? "Base: ₹${formatIndianCurrency(basic.round())}"
+                                            : (isCompact ? "+ Set Base" : "+ Set Base Rate"),
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: hasBasic
+                                              ? const Color(0xFF059669)
+                                              : const Color(0xFFD97706),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: const [
-                                    Icon(Icons.add_circle_outline,
-                                        size: 13, color: Color(0xFFD32F2F)),
-                                    SizedBox(width: 3),
-                                    Text(
-                                      "+ Add",
-                                      style: TextStyle(
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFFD32F2F),
-                                      ),
-                                    ),
-                                  ],
-                                ),
                               ),
                             ),
                           ),
                           const SizedBox(width: 4),
 
-                          // "- Remove" Toggle Button
-                          Tooltip(
-                            message: "- Remove Size",
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(6),
-                              onTap: () {
+                          if (isCompact) ...[
+                            // Mobile Compact IconButtons (min 40x40dp touch target)
+                            IconButton(
+                              icon: const Icon(Icons.library_add_outlined, size: 19, color: Color(0xFFD32F2F)),
+                              tooltip: 'New Item / Category',
+                              style: IconButton.styleFrom(
+                                backgroundColor: const Color(0xFFD32F2F).withValues(alpha: 0.08),
+                                padding: const EdgeInsets.all(8),
+                                minimumSize: const Size(40, 40),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  side: const BorderSide(color: Color(0xFFD32F2F), width: 1),
+                                ),
+                              ),
+                              onPressed: () => _showAddNewItemModal(context, title, isDark),
+                            ),
+                            const SizedBox(width: 4),
+                            IconButton(
+                              icon: const Icon(Icons.add_circle_outline, size: 19, color: Color(0xFFD32F2F)),
+                              tooltip: 'Add Size',
+                              style: IconButton.styleFrom(
+                                backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                                padding: const EdgeInsets.all(8),
+                                minimumSize: const Size(40, 40),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  side: BorderSide(
+                                    color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
+                                    width: 1,
+                                  ),
+                                ),
+                              ),
+                              onPressed: () => _showAddSizeModal(context, title, isDark),
+                            ),
+                            const SizedBox(width: 4),
+                            IconButton(
+                              icon: Icon(
+                                _isRemovalMode ? Icons.check_circle_rounded : Icons.remove_circle_outline,
+                                size: 19,
+                                color: _isRemovalMode ? const Color(0xFF10B981) : const Color(0xFFDC2626),
+                              ),
+                              tooltip: _isRemovalMode ? 'Done (Exit Remove Mode)' : 'Remove Mode',
+                              style: IconButton.styleFrom(
+                                backgroundColor: _isRemovalMode
+                                    ? const Color(0xFF10B981).withValues(alpha: 0.1)
+                                    : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                                padding: const EdgeInsets.all(8),
+                                minimumSize: const Size(40, 40),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  side: BorderSide(
+                                    color: _isRemovalMode ? const Color(0xFF10B981) : const Color(0xFFDC2626),
+                                    width: 1,
+                                  ),
+                                ),
+                              ),
+                              onPressed: () {
                                 setState(() {
                                   _isRemovalMode = !_isRemovalMode;
                                 });
                               },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 3.5),
-                                decoration: BoxDecoration(
-                                  color: _isRemovalMode
-                                      ? (isDark
-                                          ? const Color(0xFF7F1D1D)
-                                              .withValues(alpha: 0.3)
-                                          : const Color(0xFFFEE2E2))
-                                      : null,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: _isRemovalMode
-                                        ? const Color(0xFFDC2626)
-                                        : (isDark
-                                            ? const Color(0xFF475569)
-                                            : const Color(0xFFCBD5E1)),
+                            ),
+                            if (isModified) ...[
+                              const SizedBox(width: 4),
+                              IconButton(
+                                icon: Icon(
+                                  Icons.restart_alt_rounded,
+                                  size: 19,
+                                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                ),
+                                tooltip: 'Reset Defaults',
+                                style: IconButton.styleFrom(
+                                  backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                                  padding: const EdgeInsets.all(8),
+                                  minimumSize: const Size(40, 40),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    side: BorderSide(
+                                      color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
+                                      width: 1,
+                                    ),
                                   ),
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      _isRemovalMode
-                                          ? Icons.check_circle_outline
-                                          : Icons.remove_circle_outline,
-                                      size: 13,
+                                onPressed: () => _resetCategoryToDefaults(title),
+                              ),
+                            ],
+                          ] else ...[
+                            // Desktop Text Buttons
+                            // "+ New Item" Primary Action Button
+                            Tooltip(
+                              message: "Add New Category or Item from Catalog",
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(6),
+                                onTap: () =>
+                                    _showAddNewItemModal(context, title, isDark),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 7, vertical: 3.5),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFD32F2F)
+                                        .withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: const Color(0xFFD32F2F),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.library_add_outlined,
+                                          size: 13.5, color: Color(0xFFD32F2F)),
+                                      SizedBox(width: 3.5),
+                                      Text(
+                                        "+ New Item",
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFFD32F2F),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+
+                            // "+ Add Size" Action Button
+                            Tooltip(
+                              message: "Add Size to $title",
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(6),
+                                onTap: () => _showAddSizeModal(context, title, isDark),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 3.5),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: isDark
+                                          ? const Color(0xFF475569)
+                                          : const Color(0xFFCBD5E1),
+                                    ),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.add_circle_outline,
+                                          size: 13, color: Color(0xFFD32F2F)),
+                                      SizedBox(width: 3),
+                                      Text(
+                                        "+ Add Size",
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFFD32F2F),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+
+                            // "- Remove" / "Done" Toggle Button
+                            Tooltip(
+                              message: _isRemovalMode ? "Exit Delete Mode" : "Remove Sizes / Custom Tabs",
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(6),
+                                onTap: () {
+                                  setState(() {
+                                    _isRemovalMode = !_isRemovalMode;
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 3.5),
+                                  decoration: BoxDecoration(
+                                    color: _isRemovalMode
+                                        ? (isDark
+                                            ? const Color(0xFF7F1D1D)
+                                                .withValues(alpha: 0.3)
+                                            : const Color(0xFFFEE2E2))
+                                        : null,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
                                       color: _isRemovalMode
                                           ? const Color(0xFFDC2626)
                                           : (isDark
-                                              ? const Color(0xFFE2E8F0)
-                                              : const Color(0xFF475569)),
+                                              ? const Color(0xFF475569)
+                                              : const Color(0xFFCBD5E1)),
                                     ),
-                                    const SizedBox(width: 3),
-                                    Text(
-                                      _isRemovalMode ? "Done" : "- Remove",
-                                      style: TextStyle(
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w700,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        _isRemovalMode
+                                            ? Icons.check_circle_outline
+                                            : Icons.remove_circle_outline,
+                                        size: 13,
                                         color: _isRemovalMode
                                             ? const Color(0xFFDC2626)
                                             : (isDark
                                                 ? const Color(0xFFE2E8F0)
                                                 : const Color(0xFF475569)),
                                       ),
-                                    ),
-                                  ],
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        _isRemovalMode ? "Done" : "- Remove",
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: _isRemovalMode
+                                              ? const Color(0xFFDC2626)
+                                              : (isDark
+                                                  ? const Color(0xFFE2E8F0)
+                                                  : const Color(0xFF475569)),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
 
-                          // Optional Reset Defaults button if modified
-                          if (isModified) ...[
-                            const SizedBox(width: 2),
-                            IconButton(
-                              tooltip: "Reset Defaults",
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.all(3),
-                              constraints: const BoxConstraints(
-                                  minWidth: 24, minHeight: 24),
-                              onPressed: () => _resetCategoryToDefaults(title),
-                              icon: Icon(
-                                Icons.restore_rounded,
-                                size: 15,
-                                color: isDark
-                                    ? const Color(0xFF94A3B8)
-                                    : const Color(0xFF64748B),
+                            // Reset Defaults button if modified
+                            if (isModified) ...[
+                              const SizedBox(width: 4),
+                              Tooltip(
+                                message: "Reset to default benchmark sizes",
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(6),
+                                  onTap: () => _resetCategoryToDefaults(title),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 3.5),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                        color: isDark
+                                            ? const Color(0xFF475569)
+                                            : const Color(0xFFCBD5E1),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.restart_alt_rounded,
+                                          size: 13,
+                                          color: isDark
+                                              ? const Color(0xFF94A3B8)
+                                              : const Color(0xFF64748B),
+                                        ),
+                                        const SizedBox(width: 3),
+                                        Text(
+                                          "Reset",
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: isDark
+                                                ? const Color(0xFFCBD5E1)
+                                                : const Color(0xFF475569),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
+                            ],
                           ],
                         ],
                       ),
@@ -1489,11 +2007,7 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
             borderRadius:
                 const BorderRadius.vertical(bottom: Radius.circular(12)),
             child: Table(
-              columnWidths: const {
-                0: FlexColumnWidth(4),
-                1: FlexColumnWidth(2),
-                2: FlexColumnWidth(3),
-              },
+              columnWidths: columnWidths,
               border: TableBorder(
                 horizontalInside: BorderSide(
                   color: isDark
@@ -1510,17 +2024,17 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                         ? const Color(0xFF0F172A)
                         : const Color(0xFFF1F5F9),
                   ),
-                  children: const [
-                    _TableHeaderCell(
+                  children: [
+                    const _TableHeaderCell(
                       "SIZE DIMENSION",
                       alignment: Alignment.centerLeft,
                     ),
-                    _TableHeaderCell(
+                    const _TableHeaderCell(
                       "SD VALUE",
                       alignment: Alignment.center,
                     ),
                     _TableHeaderCell(
-                      "NET COMPUTED RATE",
+                      _isRemovalMode ? "ACTION" : "NET COMPUTED RATE",
                       alignment: Alignment.centerRight,
                     ),
                   ],
@@ -1587,11 +2101,50 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                               style: TextStyle(
                                   fontSize: 12, color: Color(0xFF94A3B8))),
                         ),
-                        const _TableCell(
+                        _TableCell(
                           alignment: Alignment.centerRight,
-                          child: Text("—",
-                              style: TextStyle(
-                                  fontSize: 12, color: Color(0xFF94A3B8))),
+                          child: _isRemovalMode
+                              ? InkWell(
+                                  borderRadius: BorderRadius.circular(6),
+                                  onTap: () => _removeSizeFromCategory(title, size),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: isDark
+                                          ? const Color(0xFF7F1D1D)
+                                              .withValues(alpha: 0.3)
+                                          : const Color(0xFFFEE2E2),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                        color: const Color(0xFFDC2626),
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.delete_outline_rounded,
+                                          size: 13,
+                                          color: Color(0xFFDC2626),
+                                        ),
+                                        SizedBox(width: 3),
+                                        Text(
+                                          "Remove",
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFFDC2626),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                              : const Text("—",
+                                  style: TextStyle(
+                                      fontSize: 12, color: Color(0xFF94A3B8))),
                         ),
                       ],
                     );
@@ -1603,25 +2156,11 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                   return TableRow(
                     decoration: BoxDecoration(color: rowBg),
                     children: [
-                      // Col 1: Size & Weight + Custom Tag + Delete Action (flex: 4)
+                      // Col 1: Size & Weight + Custom Tag (flex: 5 on mobile, 4 on desktop)
                       _TableCell(
                         alignment: Alignment.centerLeft,
                         child: Row(
                           children: [
-                            if (_isRemovalMode) ...[
-                              InkWell(
-                                borderRadius: BorderRadius.circular(12),
-                                onTap: () => _removeSizeFromCategory(title, size),
-                                child: const Padding(
-                                  padding: EdgeInsets.only(right: 6.0),
-                                  child: Icon(
-                                    Icons.remove_circle,
-                                    size: 16,
-                                    color: Color(0xFFDC2626),
-                                  ),
-                                ),
-                              ),
-                            ],
                             Expanded(
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -1690,13 +2229,13 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                         ),
                       ),
 
-                      // Col 2: SD Value Badge (flex: 2, Center Aligned)
+                      // Col 2: SD Value Badge (flex: 3 on mobile, 2 on desktop, Center Aligned)
                       _TableCell(
                         alignment: Alignment.center,
                         child: size.sd != 0
                             ? Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
+                                    horizontal: 4, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: size.sd > 0
                                       ? const Color(0xFFECFDF5)
@@ -1732,26 +2271,65 @@ class _SampleRateCalcScreenState extends State<SampleRateCalcScreen> {
                               ),
                       ),
 
-                      // Col 3: Net Computed Rate (flex: 3, Right Aligned)
+                      // Col 3: Net Computed Rate OR Trash Delete Button in Removal Mode (flex: 4 on mobile, 3 on desktop, Right Aligned)
                       _TableCell(
                         alignment: Alignment.centerRight,
-                        child: hasCalculated
-                            ? Text(
-                                "₹${formatIndianCurrency(finalRate.round())}",
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFF059669),
+                        child: _isRemovalMode
+                            ? InkWell(
+                                borderRadius: BorderRadius.circular(6),
+                                onTap: () => _removeSizeFromCategory(title, size),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: isDark
+                                        ? const Color(0xFF7F1D1D)
+                                            .withValues(alpha: 0.3)
+                                        : const Color(0xFFFEE2E2),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: const Color(0xFFDC2626),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.delete_outline_rounded,
+                                        size: 13,
+                                        color: Color(0xFFDC2626),
+                                      ),
+                                      SizedBox(width: 3),
+                                      Text(
+                                        "Remove",
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFFDC2626),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               )
-                            : const Text(
-                                "—",
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: Color(0xFF94A3B8),
-                                ),
-                              ),
+                            : (hasCalculated
+                                ? Text(
+                                    "₹${formatIndianCurrency(finalRate.round())}",
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF059669),
+                                    ),
+                                  )
+                                : const Text(
+                                    "—",
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: Color(0xFF94A3B8),
+                                    ),
+                                  )),
                       ),
                     ],
                   );
@@ -1941,19 +2519,24 @@ class _TableHeaderCell extends StatelessWidget {
   final String title;
   final Alignment alignment;
 
-  const _TableHeaderCell(this.title, {this.alignment = Alignment.centerLeft});
+  const _TableHeaderCell(
+    this.title, {
+    this.alignment = Alignment.centerLeft,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       constraints: const BoxConstraints(minHeight: 38),
       alignment: alignment,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      padding: alignment == Alignment.centerRight
+          ? const EdgeInsets.fromLTRB(4, 8, 12, 8)
+          : const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Text(
         title,
         style: const TextStyle(
           fontWeight: FontWeight.w700,
-          fontSize: 10,
+          fontSize: 10.5,
           color: Color(0xFF64748B),
           letterSpacing: 0.3,
         ),
@@ -1967,14 +2550,19 @@ class _TableCell extends StatelessWidget {
   final Widget child;
   final Alignment alignment;
 
-  const _TableCell({required this.child, this.alignment = Alignment.centerLeft});
+  const _TableCell({
+    required this.child,
+    this.alignment = Alignment.centerLeft,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       constraints: const BoxConstraints(minHeight: 44),
       alignment: alignment,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      padding: alignment == Alignment.centerRight
+          ? const EdgeInsets.fromLTRB(4, 6, 12, 6)
+          : const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: child,
     );
   }
@@ -2245,7 +2833,7 @@ class _AddSizeBottomSheetState extends State<_AddSizeBottomSheet> {
                               final w = size.weight.toDouble();
                               if (w > 0) {
                                 final fw = w % 1 == 0 ? w.toInt().toString() : w.toStringAsFixed(1);
-                                weightSuffix = " (${fw} kg)";
+                                weightSuffix = " ($fw kg)";
                               }
 
                               return InkWell(
@@ -2350,9 +2938,9 @@ class _AddSizeBottomSheetState extends State<_AddSizeBottomSheet> {
                                               width: 0.5,
                                             ),
                                           ),
-                                          child: Row(
+                                          child: const Row(
                                             mainAxisSize: MainAxisSize.min,
-                                            children: const [
+                                            children: [
                                               Icon(Icons.add, size: 12, color: Color(0xFFD32F2F)),
                                               SizedBox(width: 2),
                                               Text(
@@ -2376,6 +2964,1122 @@ class _AddSizeBottomSheetState extends State<_AddSizeBottomSheet> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── ADD NEW ITEM / SIZE DIALOG ──
+class _AddNewItemDialog extends StatefulWidget {
+  final String currentCategory;
+  final bool isDark;
+  final List<SampleRateSize> existingSizes;
+  final List<String> allCategories;
+  final void Function(String category, SampleRateSize size, bool isNewCategory, double initialBaseRate)
+      onItemAdded;
+  final void Function(String category, List<SampleRateSize> sizes, bool isNewCategory, double initialBaseRate)?
+      onMultipleItemsAdded;
+
+  const _AddNewItemDialog({
+    required this.currentCategory,
+    required this.isDark,
+    required this.existingSizes,
+    required this.allCategories,
+    required this.onItemAdded,
+    this.onMultipleItemsAdded,
+  });
+
+  @override
+  State<_AddNewItemDialog> createState() => _AddNewItemDialogState();
+}
+
+class _AddNewItemDialogState extends State<_AddNewItemDialog> {
+  int _selectedOption = 0; // 0 = Add to current, 1 = New category
+  final _formKey = GlobalKey<FormState>();
+
+  final TextEditingController _categoryCtrl = TextEditingController();
+  final TextEditingController _sizeLabelCtrl = TextEditingController();
+  final TextEditingController _weightCtrl = TextEditingController();
+  final TextEditingController _sdCtrl = TextEditingController();
+  final TextEditingController _initialBaseRateCtrl = TextEditingController();
+
+  // Materials & sizes loading states
+  List<Map<String, dynamic>> _availableMaterials = [];
+  bool _isLoadingMaterials = true;
+
+  // Tab 2 (New Category) state
+  Map<String, dynamic>? _selectedDbMaterial;
+  bool _isCustomCategory = false;
+  List<SampleRateSize> _materialSizes = [];
+  bool _isLoadingSizes = false;
+  Set<int> _selectedSizeIndices = {};
+
+  // Tab 1 (Current Category) catalog suggestions
+  List<SampleRateSize> _activeCategoryCatalogSizes = [];
+  SampleRateSize? _selectedCatalogSizeForActive;
+
+  bool _isSubmitting = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _categoryCtrl.text = widget.currentCategory;
+    _sdCtrl.text = '0';
+    _loadInitialData();
+  }
+
+  Future<void> _loadInitialData() async {
+    try {
+      // 1. Fetch all database materials
+      final materials = await SampleRateService.fetchAllDatabaseMaterials();
+
+      // 2. Fetch catalog sizes for the active category
+      final activeSizes = await SampleRateService.fetchSizesForMaterial(
+        categoryName: widget.currentCategory,
+      );
+
+      final existingLabels = widget.existingSizes
+          .map((s) => _cleanForCompare(s.label))
+          .toSet();
+
+      final unusedActiveSizes = activeSizes
+          .where((s) => !existingLabels.contains(_cleanForCompare(s.label)))
+          .toList();
+
+      if (mounted) {
+        setState(() {
+          _availableMaterials = materials;
+          _activeCategoryCatalogSizes = unusedActiveSizes;
+          _isLoadingMaterials = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading materials/sizes: $e");
+      if (mounted) {
+        setState(() {
+          _isLoadingMaterials = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _onDbMaterialSelected(Map<String, dynamic>? material) async {
+    if (material == null) {
+      setState(() {
+        _isCustomCategory = true;
+        _selectedDbMaterial = null;
+        _categoryCtrl.clear();
+        _materialSizes = [];
+        _selectedSizeIndices.clear();
+      });
+      return;
+    }
+
+    setState(() {
+      _isCustomCategory = false;
+      _selectedDbMaterial = material;
+      final String matName = material['name']?.toString() ?? '';
+      _categoryCtrl.text = matName;
+      _isLoadingSizes = true;
+      _materialSizes = [];
+      _selectedSizeIndices.clear();
+      _errorMessage = null;
+    });
+
+    try {
+      final sizes = await SampleRateService.fetchSizesForMaterial(
+        materialId: material['id'] is int ? material['id'] as int : null,
+        categoryName: material['name']?.toString(),
+      );
+
+      if (mounted) {
+        setState(() {
+          _materialSizes = sizes;
+          _isLoadingSizes = false;
+          // Pre-select all by default for easy one-click bulk adding
+          _selectedSizeIndices = Set.from(Iterable.generate(sizes.length));
+          if (sizes.isNotEmpty) {
+            _sizeLabelCtrl.text = sizes.first.label;
+            _weightCtrl.text = sizes.first.weight > 0
+                ? (sizes.first.weight % 1 == 0
+                    ? sizes.first.weight.toInt().toString()
+                    : sizes.first.weight.toString())
+                : '';
+            _sdCtrl.text = sizes.first.sd.toString();
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching sizes for material: $e");
+      if (mounted) {
+        setState(() {
+          _isLoadingSizes = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _categoryCtrl.dispose();
+    _sizeLabelCtrl.dispose();
+    _weightCtrl.dispose();
+    _sdCtrl.dispose();
+    _initialBaseRateCtrl.dispose();
+    super.dispose();
+  }
+
+  String _cleanForCompare(String s) {
+    return s
+        .replaceAll('"', '')
+        .replaceAll("'", '')
+        .replaceAll('”', '')
+        .replaceAll('“', '')
+        .replaceAll('’', '')
+        .replaceAll('‘', '')
+        .replaceAll('×', 'X')
+        .replaceAll('x', 'X')
+        .replaceAll('*', 'X')
+        .replaceAll(RegExp(r'\s+'), '')
+        .toUpperCase();
+  }
+
+  Future<void> _handleSingleSubmit() async {
+    setState(() => _errorMessage = null);
+
+    if (!_formKey.currentState!.validate()) return;
+
+    final isOptionA = _selectedOption == 0;
+    final String targetCategory = isOptionA
+        ? widget.currentCategory.trim()
+        : _categoryCtrl.text.trim();
+    final String label = _sizeLabelCtrl.text.trim();
+    final double weight = double.tryParse(_weightCtrl.text.trim()) ?? 0.0;
+    final double sd = double.tryParse(_sdCtrl.text.trim()) ?? 0.0;
+    final double initialBase =
+        double.tryParse(_initialBaseRateCtrl.text.trim()) ?? 0.0;
+
+    if (targetCategory.isEmpty) {
+      setState(() => _errorMessage = "Please specify a category name");
+      return;
+    }
+
+    if (label.isEmpty) {
+      setState(() => _errorMessage = "Please specify a size label");
+      return;
+    }
+
+    // Duplicate check for current category if option A
+    if (isOptionA) {
+      final cleanNewLabel = _cleanForCompare(label);
+      final hasDuplicate = widget.existingSizes.any((s) {
+        return _cleanForCompare(s.label) == cleanNewLabel ||
+            s.label.trim().toUpperCase() == label.toUpperCase();
+      });
+
+      if (hasDuplicate) {
+        setState(() => _errorMessage =
+            "Size '$label' already exists in $targetCategory");
+        return;
+      }
+    }
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      final inv = context.read<InventoryProvider>();
+      final newSize = await inv.addNewItemSize(
+        category: targetCategory,
+        sizeLabel: label,
+        weight: weight,
+        sd: sd,
+        isNewCategory: !isOptionA,
+      );
+
+      if (initialBase > 0) {
+        inv.updateBaseRate(targetCategory, initialBase);
+      }
+
+      if (mounted) {
+        widget.onItemAdded(targetCategory, newSize, !isOptionA, initialBase);
+        Navigator.of(context).pop();
+        MotionToast.show(context, "Size '$label' added successfully");
+      }
+    } catch (e) {
+      debugPrint("Error saving size: $e");
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+          _errorMessage = "Failed to save: $e";
+        });
+      }
+    }
+  }
+
+  Future<void> _handleBulkSubmit() async {
+    setState(() => _errorMessage = null);
+
+    final String targetCategory = _categoryCtrl.text.trim();
+    final double initialBase =
+        double.tryParse(_initialBaseRateCtrl.text.trim()) ?? 0.0;
+
+    if (targetCategory.isEmpty) {
+      setState(() => _errorMessage = "Please select or enter a category name");
+      return;
+    }
+
+    if (_selectedSizeIndices.isEmpty) {
+      setState(() => _errorMessage = "Please select at least one size to add");
+      return;
+    }
+
+    final List<SampleRateSize> selectedSizes = _selectedSizeIndices
+        .map((idx) => _materialSizes[idx])
+        .toList();
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      final inv = context.read<InventoryProvider>();
+      await inv.addMultipleSizesToCategory(
+        targetCategory,
+        selectedSizes,
+        isNewCategory: true,
+      );
+
+      if (initialBase > 0) {
+        inv.updateBaseRate(targetCategory, initialBase);
+      }
+
+      if (mounted) {
+        widget.onMultipleItemsAdded
+            ?.call(targetCategory, selectedSizes, true, initialBase);
+        widget.onItemAdded(targetCategory, selectedSizes.first, true, initialBase);
+        Navigator.of(context).pop();
+        MotionToast.show(
+          context,
+          "Added ${selectedSizes.length} sizes to $targetCategory",
+        );
+      }
+    } catch (e) {
+      debugPrint("Error bulk adding sizes: $e");
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+          _errorMessage = "Failed to add sizes: $e";
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = widget.isDark;
+    final isOptionA = _selectedOption == 0;
+
+    return Dialog(
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(22),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Dialog Title Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFD32F2F).withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(
+                              Icons.post_add_rounded,
+                              color: Color(0xFFD32F2F),
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Add Item / Size",
+                                  style: TextStyle(
+                                    fontSize: 16.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                  ),
+                                ),
+                                Text(
+                                  "Add dynamic benchmark & rates from database",
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: isDark
+                                        ? const Color(0xFF94A3B8)
+                                        : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: isDark ? Colors.white70 : const Color(0xFF64748B),
+                      ),
+                      onPressed: () => Navigator.of(context).pop(),
+                      tooltip: "Close",
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // Option Segmented Selector
+                Container(
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                    ),
+                  ),
+                  padding: const EdgeInsets.all(3.5),
+                  child: Row(
+                    children: [
+                      // Option A
+                      Expanded(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () {
+                            setState(() {
+                              _selectedOption = 0;
+                              _errorMessage = null;
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                            decoration: BoxDecoration(
+                              color: isOptionA
+                                  ? (isDark ? const Color(0xFF334155) : Colors.white)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: isOptionA
+                                  ? [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(alpha: 0.05),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 1),
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                            child: Center(
+                              child: Text(
+                                "Add to ${widget.currentCategory}",
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: isOptionA ? FontWeight.w700 : FontWeight.w500,
+                                  color: isOptionA
+                                      ? const Color(0xFFD32F2F)
+                                      : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Option B
+                      Expanded(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () {
+                            setState(() {
+                              _selectedOption = 1;
+                              _errorMessage = null;
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                            decoration: BoxDecoration(
+                              color: !isOptionA
+                                  ? (isDark ? const Color(0xFF334155) : Colors.white)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: !isOptionA
+                                  ? [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(alpha: 0.05),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 1),
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                            child: Center(
+                              child: Text(
+                                "New Category",
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: !isOptionA ? FontWeight.w700 : FontWeight.w500,
+                                  color: !isOptionA
+                                      ? const Color(0xFFD32F2F)
+                                      : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Error alert if present
+                if (_errorMessage != null) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEE2E2),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFFCA5A5)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline_rounded,
+                            size: 16, color: Color(0xFFDC2626)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _errorMessage!,
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFDC2626),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                // TAB 1: QUICK PICK FROM CATALOG (Option A)
+                if (isOptionA && _activeCategoryCatalogSizes.isNotEmpty) ...[
+                  _buildLabel(
+                    "Quick-Fill from Catalog Sizes (${_activeCategoryCatalogSizes.length} available)",
+                    isDark,
+                  ),
+                  const SizedBox(height: 4),
+                  DropdownButtonFormField<SampleRateSize>(
+                    initialValue: _selectedCatalogSizeForActive,
+                    isExpanded: true,
+                    dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    ),
+                    decoration: _inputDecoration(
+                      hint: "Choose a size to auto-fill details...",
+                      isDark: isDark,
+                      prefixIcon: Icons.auto_awesome_rounded,
+                    ),
+                    items: _activeCategoryCatalogSizes.map((size) {
+                      final String weightStr = size.weight > 0
+                          ? " • ${size.weight % 1 == 0 ? size.weight.toInt() : size.weight}kg"
+                          : "";
+                      final String sdStr = size.sd != 0 ? " • SD: ₹${size.sd}" : "";
+                      return DropdownMenuItem<SampleRateSize>(
+                        value: size,
+                        child: Text(
+                          "${size.label}$weightStr$sdStr",
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w500,
+                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (size) {
+                      if (size != null) {
+                        setState(() {
+                          _selectedCatalogSizeForActive = size;
+                          _sizeLabelCtrl.text = size.label;
+                          _weightCtrl.text = size.weight > 0
+                              ? (size.weight % 1 == 0
+                                  ? size.weight.toInt().toString()
+                                  : size.weight.toString())
+                              : '';
+                          _sdCtrl.text = size.sd.toString();
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                // TAB 2: CATEGORY SELECTION (Option B)
+                if (!isOptionA) ...[
+                  _buildLabel("Category / Material Source", isDark),
+                  const SizedBox(height: 4),
+                  if (_isLoadingMaterials)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Row(
+                        children: [
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            "Loading materials from database...",
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    DropdownButtonFormField<String>(
+                      initialValue: _isCustomCategory
+                          ? '__custom__'
+                          : (_selectedDbMaterial?['name']?.toString()),
+                      isExpanded: true,
+                      dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      ),
+                      decoration: _inputDecoration(
+                        hint: "Select existing material or custom...",
+                        isDark: isDark,
+                        prefixIcon: Icons.category_outlined,
+                      ),
+                      items: [
+                        // Option for custom category
+                        const DropdownMenuItem<String>(
+                          value: '__custom__',
+                          child: Row(
+                            children: [
+                              Icon(Icons.edit_note_rounded, size: 16, color: Color(0xFFD32F2F)),
+                              SizedBox(width: 6),
+                              Text(
+                                "[ + Type Custom Category Name ]",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFD32F2F),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Existing DB materials
+                        ..._availableMaterials.map((mat) {
+                          final name = mat['name']?.toString() ?? '';
+                          return DropdownMenuItem<String>(
+                            value: name,
+                            child: Text(
+                              name,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }),
+                      ],
+                      onChanged: (val) {
+                        if (val == '__custom__') {
+                          _onDbMaterialSelected(null);
+                        } else if (val != null) {
+                          final mat = _availableMaterials.firstWhere(
+                            (m) => m['name']?.toString().toUpperCase() == val.toUpperCase(),
+                            orElse: () => {'name': val},
+                          );
+                          _onDbMaterialSelected(mat);
+                        }
+                      },
+                    ),
+                  const SizedBox(height: 12),
+
+                  // Custom category name textfield
+                  if (_isCustomCategory) ...[
+                    _buildLabel("Custom Category Name", isDark),
+                    const SizedBox(height: 4),
+                    TextFormField(
+                      controller: _categoryCtrl,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      ),
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty) ? "Category name is required" : null,
+                      decoration: _inputDecoration(
+                        hint: "e.g. BEAMS, CR COIL, TMT 550D",
+                        isDark: isDark,
+                        prefixIcon: Icons.edit_outlined,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  // DB Material Size Previews & Selection Chips
+                  if (!_isCustomCategory && _selectedDbMaterial != null) ...[
+                    if (_isLoadingSizes)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          children: [
+                            const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              "Fetching sizes for ${_selectedDbMaterial!['name']}...",
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else if (_materialSizes.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  "Sizes Found in Database (${_materialSizes.length}):",
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
+                                  ),
+                                ),
+                                Row(
+                                  children: [
+                                    InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          _selectedSizeIndices =
+                                              Set.from(Iterable.generate(_materialSizes.length));
+                                        });
+                                      },
+                                      child: const Text(
+                                        "Select All",
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFFD32F2F),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          _selectedSizeIndices.clear();
+                                        });
+                                      },
+                                      child: Text(
+                                        "Clear",
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 140),
+                              child: SingleChildScrollView(
+                                child: Wrap(
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children: _materialSizes.asMap().entries.map((entry) {
+                                    final int idx = entry.key;
+                                    final SampleRateSize s = entry.value;
+                                    final bool isSelected = _selectedSizeIndices.contains(idx);
+
+                                    return FilterChip(
+                                      selected: isSelected,
+                                      showCheckmark: true,
+                                      checkmarkColor: Colors.white,
+                                      selectedColor: const Color(0xFFD32F2F),
+                                      backgroundColor: isDark
+                                          ? const Color(0xFF1E293B)
+                                          : const Color(0xFFF1F5F9),
+                                      label: Text(
+                                        s.label + (s.weight > 0 ? " (${s.weight % 1 == 0 ? s.weight.toInt() : s.weight}kg)" : ""),
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                                          color: isSelected
+                                              ? Colors.white
+                                              : (isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155)),
+                                        ),
+                                      ),
+                                      onSelected: (selected) {
+                                        setState(() {
+                                          if (selected) {
+                                            _selectedSizeIndices.add(idx);
+                                          } else {
+                                            _selectedSizeIndices.remove(idx);
+                                          }
+
+                                          // If 1 item selected, auto-populate single inputs
+                                          if (_selectedSizeIndices.length == 1) {
+                                            final singleSize = _materialSizes[_selectedSizeIndices.first];
+                                            _sizeLabelCtrl.text = singleSize.label;
+                                            _weightCtrl.text = singleSize.weight > 0
+                                                ? (singleSize.weight % 1 == 0
+                                                    ? singleSize.weight.toInt().toString()
+                                                    : singleSize.weight.toString())
+                                                : '';
+                                            _sdCtrl.text = singleSize.sd.toString();
+                                          }
+                                        });
+                                      },
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ] else ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.info_outline_rounded,
+                              size: 15,
+                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                "No preset sizes found in database for this material. Enter size details manually below.",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                  ],
+
+                  // Initial Base Rate Field (Optional for New Category)
+                  _buildLabel("Initial Base Rate (₹) [Optional]", isDark),
+                  const SizedBox(height: 4),
+                  TextFormField(
+                    controller: _initialBaseRateCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+                    ],
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    ),
+                    decoration: _inputDecoration(
+                      hint: "e.g. 52000 (auto-calculates live rates immediately)",
+                      isDark: isDark,
+                      prefixText: "₹ ",
+                      prefixIcon: Icons.currency_rupee_rounded,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                // SINGLE SIZE INPUT SECTION (or fallback)
+                if (isOptionA || _isCustomCategory || _materialSizes.isEmpty || _selectedSizeIndices.length <= 1) ...[
+                  // Size Label Input
+                  _buildLabel(isOptionA ? "Size Label" : "Size Label", isDark),
+                  const SizedBox(height: 4),
+                  TextFormField(
+                    controller: _sizeLabelCtrl,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    ),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? "Size label is required" : null,
+                    decoration: _inputDecoration(
+                      hint: "e.g. F 65x6, 2.5\" 60x60(3.2), 12MM",
+                      isDark: isDark,
+                      prefixIcon: Icons.straighten_rounded,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Weight and SD in a 2-column row
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Unit Weight (kg)
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildLabel("Unit Weight (kg)", isDark),
+                            const SizedBox(height: 4),
+                            TextFormField(
+                              controller: _weightCtrl,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              ),
+                              decoration: _inputDecoration(
+                                hint: "e.g. 18.5",
+                                isDark: isDark,
+                                suffixText: "kg",
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+
+                      // Size Difference (₹)
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildLabel("SD Value (₹)", isDark),
+                            const SizedBox(height: 4),
+                            TextFormField(
+                              controller: _sdCtrl,
+                              keyboardType: const TextInputType.numberWithOptions(
+                                  decimal: true, signed: true),
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              ),
+                              decoration: _inputDecoration(
+                                hint: "0 for Base",
+                                isDark: isDark,
+                                prefixText: "₹ ",
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 20),
+
+                // Action Buttons
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Wrap(
+                    alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      TextButton(
+                        onPressed: _isSubmitting ? null : () => Navigator.of(context).pop(),
+                        style: TextButton.styleFrom(
+                          foregroundColor:
+                              isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                        ),
+                        child: const Text("Cancel"),
+                      ),
+
+                      // If multiple sizes selected in Option B -> Bulk Add button
+                      if (!isOptionA && !_isCustomCategory && _selectedSizeIndices.length > 1) ...[
+                        ElevatedButton.icon(
+                          onPressed: _isSubmitting ? null : _handleBulkSubmit,
+                          icon: _isSubmitting
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.playlist_add_check_rounded, size: 18),
+                          label: Text(_isSubmitting
+                              ? "Adding..."
+                              : "Add (${_selectedSizeIndices.length}) Selected Sizes"),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFD32F2F),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ] else ...[
+                        ElevatedButton.icon(
+                          onPressed: _isSubmitting ? null : _handleSingleSubmit,
+                          icon: _isSubmitting
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.check_rounded, size: 16),
+                          label: Text(_isSubmitting
+                              ? "Saving..."
+                              : (isOptionA ? "Save Size" : "Create Category & Size")),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFD32F2F),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLabel(String text, bool isDark) {
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 11.5,
+        fontWeight: FontWeight.w600,
+        color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration({
+    required String hint,
+    required bool isDark,
+    IconData? prefixIcon,
+    String? prefixText,
+    String? suffixText,
+  }) {
+    return InputDecoration(
+      isDense: true,
+      hintText: hint,
+      hintStyle: TextStyle(
+        fontSize: 12.5,
+        color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+      ),
+      prefixIcon: prefixIcon != null
+          ? Icon(prefixIcon, size: 16, color: const Color(0xFF94A3B8))
+          : null,
+      prefixText: prefixText,
+      prefixStyle: TextStyle(
+        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+        fontWeight: FontWeight.w600,
+        fontSize: 13,
+      ),
+      suffixText: suffixText,
+      suffixStyle: TextStyle(
+        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+        fontSize: 12,
+      ),
+      filled: true,
+      fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+        ),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Color(0xFFD32F2F), width: 1.5),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Color(0xFFDC2626)),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Color(0xFFDC2626), width: 1.5),
       ),
     );
   }
