@@ -7,6 +7,7 @@ import '../models/stock_models.dart';
 import '../models/user_model.dart';
 import '../services/report_calculators.dart';
 import '../services/sample_rate_service.dart';
+import '../services/supabase_service.dart';
 import '../utils/sorting_utils.dart';
 
 class InventoryProvider extends ChangeNotifier {
@@ -339,21 +340,78 @@ class InventoryProvider extends ChangeNotifier {
   /// Removes a size from a category, updates Supabase (is_sample_rate_active: false), and notifies listeners.
   Future<void> removeSizeFromCategory(
       String category, SampleRateSize size) async {
+    // 1. Remove from local in-memory state
+    _sampleRateCategories[category]?.removeWhere(
+      (s) =>
+          (size.id != null && size.id! > 0 && s.id == size.id) ||
+          s.sizeLabel.trim() == size.sizeLabel.trim() ||
+          _cleanSizeForMatch(s.label) == _cleanSizeForMatch(size.label),
+    );
     final targetCat = _resolveCategoryKey(category);
-    final list =
-        List<SampleRateSize>.from(_sampleRateCategories[targetCat] ?? []);
-    final cleanLabel = _cleanSizeForMatch(size.label);
-    list.removeWhere((s) => _cleanSizeForMatch(s.label) == cleanLabel);
-    _sampleRateCategories[targetCat] = list;
-
-    final targetId = size.id ?? _resolveSizeId(targetCat, size.label);
-    if (targetId != null) {
-      await SampleRateService.setSizeSampleRateActive(
-        sizeId: targetId,
-        isActive: false,
+    if (targetCat != category) {
+      _sampleRateCategories[targetCat]?.removeWhere(
+        (s) =>
+            (size.id != null && size.id! > 0 && s.id == size.id) ||
+            s.sizeLabel.trim() == size.sizeLabel.trim() ||
+            _cleanSizeForMatch(s.label) == _cleanSizeForMatch(size.label),
       );
     }
     notifyListeners();
+
+    // 2. Persist to Supabase
+    final targetId = size.id ?? _resolveSizeId(targetCat, size.label);
+    try {
+      if (targetId != null && targetId > 0) {
+        final res = await SupabaseService.client
+            .from('item_sizes')
+            .update({'is_sample_rate_active': false})
+            .eq('id', targetId)
+            .select();
+        debugPrint('SUPABASE REMOVE SUCCESS (by id $targetId): $res');
+      } else {
+        final res = await SupabaseService.client
+            .from('item_sizes')
+            .update({'is_sample_rate_active': false})
+            .eq('size_label', size.sizeLabel.trim())
+            .select();
+        debugPrint('SUPABASE REMOVE SUCCESS (by label ${size.sizeLabel}): $res');
+      }
+
+      // Sync DataRepository in-memory cache
+      final List<Map<String, dynamic>> updatedCache =
+          List.from(DataRepository.itemSizesNotifier.value);
+      final idx = updatedCache.indexWhere((s) {
+        if (targetId != null && targetId > 0 && s['id'] == targetId) return true;
+        final sLabel = (s['size_label'] ?? s['label'] ?? '').toString().trim();
+        return sLabel == size.sizeLabel.trim() ||
+            _cleanSizeForMatch(sLabel) == _cleanSizeForMatch(size.label);
+      });
+      if (idx >= 0) {
+        updatedCache[idx] = {
+          ...updatedCache[idx],
+          'is_sample_rate_active': false,
+        };
+        DataRepository.itemSizesNotifier.value = updatedCache;
+      }
+    } catch (e, st) {
+      debugPrint('SUPABASE REMOVE ERROR: $e\n$st');
+      // Offline fallback: sync DataRepository cache even if Supabase is offline/uninitialized
+      final List<Map<String, dynamic>> updatedCache =
+          List.from(DataRepository.itemSizesNotifier.value);
+      final idx = updatedCache.indexWhere((s) {
+        if (targetId != null && targetId > 0 && s['id'] == targetId) return true;
+        final sLabel = (s['size_label'] ?? s['label'] ?? '').toString().trim();
+        return sLabel == size.sizeLabel.trim() ||
+            _cleanSizeForMatch(sLabel) == _cleanSizeForMatch(size.label);
+      });
+      if (idx >= 0) {
+        updatedCache[idx] = {
+          ...updatedCache[idx],
+          'is_sample_rate_active': false,
+        };
+        DataRepository.itemSizesNotifier.value = updatedCache;
+      }
+    }
   }
 
   /// Removes a custom category from state and persistence. Core benchmark categories cannot be removed.

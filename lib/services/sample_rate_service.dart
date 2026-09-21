@@ -443,21 +443,47 @@ class SampleRateService {
     return 'sample_rate_active_sizes_$clean';
   }
 
-  /// Direct Supabase update to set a size's is_sample_rate_active flag
+  /// Direct Supabase update to set a size's is_sample_rate_active flag by sizeId or sizeLabel
   static Future<bool> setSizeSampleRateActive({
-    required int sizeId,
+    int? sizeId,
+    String? sizeLabel,
+    int? materialId,
     required bool isActive,
   }) async {
     try {
-      await SupabaseService.client
-          .from('item_sizes')
-          .update({'is_sample_rate_active': isActive})
-          .eq('id', sizeId);
+      if (sizeId != null && sizeId > 0) {
+        final res = await SupabaseService.client
+            .from('item_sizes')
+            .update({'is_sample_rate_active': isActive})
+            .eq('id', sizeId)
+            .select();
+        debugPrint('[SampleRateService] SUPABASE UPDATE SUCCESS (by id $sizeId): $res');
+      } else if (sizeLabel != null && sizeLabel.trim().isNotEmpty) {
+        var query = SupabaseService.client
+            .from('item_sizes')
+            .update({'is_sample_rate_active': isActive});
+        if (materialId != null) {
+          query = query.eq('material_id', materialId);
+        }
+        final res = await query.eq('size_label', sizeLabel.trim()).select();
+        debugPrint('[SampleRateService] SUPABASE UPDATE SUCCESS (by label $sizeLabel): $res');
+      }
 
       // Sync local in-memory cache in DataRepository
       final List<Map<String, dynamic>> updatedCache =
           List.from(DataRepository.itemSizesNotifier.value);
-      final idx = updatedCache.indexWhere((s) => s['id'] == sizeId);
+      final idx = updatedCache.indexWhere((s) {
+        if (sizeId != null && sizeId > 0 && s['id'] == sizeId) return true;
+        if (sizeLabel != null && sizeLabel.trim().isNotEmpty) {
+          final sLabel = (s['size_label'] ?? s['label'] ?? '').toString().trim();
+          final sMatId = s['material_id'] ?? s['materialId'];
+          bool matchMat = materialId == null || sMatId == materialId;
+          return matchMat &&
+              (sLabel == sizeLabel.trim() ||
+                  cleanSizeForMatch(sLabel) == cleanSizeForMatch(sizeLabel));
+        }
+        return false;
+      });
       if (idx >= 0) {
         updatedCache[idx] = {
           ...updatedCache[idx],
@@ -466,8 +492,28 @@ class SampleRateService {
         DataRepository.itemSizesNotifier.value = updatedCache;
       }
       return true;
-    } catch (e) {
-      debugPrint("[SampleRateService] Error setting is_sample_rate_active for $sizeId: $e");
+    } catch (e, st) {
+      debugPrint(
+          "[SampleRateService] SUPABASE UPDATE ERROR for sizeId $sizeId / label $sizeLabel: $e\n$st");
+      // Fallback cache update
+      final List<Map<String, dynamic>> updatedCache =
+          List.from(DataRepository.itemSizesNotifier.value);
+      final idx = updatedCache.indexWhere((s) {
+        if (sizeId != null && sizeId > 0 && s['id'] == sizeId) return true;
+        if (sizeLabel != null && sizeLabel.trim().isNotEmpty) {
+          final sLabel = (s['size_label'] ?? s['label'] ?? '').toString().trim();
+          return sLabel == sizeLabel.trim() ||
+              cleanSizeForMatch(sLabel) == cleanSizeForMatch(sizeLabel);
+        }
+        return false;
+      });
+      if (idx >= 0) {
+        updatedCache[idx] = {
+          ...updatedCache[idx],
+          'is_sample_rate_active': isActive,
+        };
+        DataRepository.itemSizesNotifier.value = updatedCache;
+      }
       return false;
     }
   }
