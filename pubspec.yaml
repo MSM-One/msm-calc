@@ -1,0 +1,97 @@
+name: msm_calc
+description: "MSM One - Business Operating System"
+publish_to: 'none'
+version: 1.0.2+3
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  supabase_flutter: ^2.6.0
+
+  # ✅ Networking (Google Sheets)
+  http: ^1.2.0
+
+  # ✅ State Management
+  provider: ^6.1.1
+
+  # ✅ Authentication
+  google_sign_in: ^6.2.1
+
+  # ✅ Local Storage (Saving Login & Drafts)
+  shared_preferences: ^2.2.2
+
+  # ✅ Utilities (WhatsApp & Calls)
+  url_launcher: ^6.2.5
+  package_info_plus: ^10.0.0
+  ota_update: ^6.0.0
+
+  # ✅ System Share (SMS, WhatsApp, Text, etc.)
+  share_plus: ^13.2.0
+  path_provider: ^2.1.2
+
+  # ✅ PDF Generation & Printing
+  pdf: ^3.10.8
+  printing: ^5.12.0
+
+  # ✅ Splash Screen
+  flutter_native_splash: ^2.4.0
+
+  # ✅ Animation
+  flutter_animate: ^4.5.0
+
+  # Default Icons
+  cupertino_icons: ^1.0.6
+  fl_chart: ^1.1.1
+  flutter_speed_dial: ^7.0.0
+  flutter_staggered_grid_view: ^0.7.0
+  intl: ^0.19.0
+  excel: ^4.0.0
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  font_awesome_flutter: ^11.0.0
+  window_manager: ^0.5.1
+  tutorial_coach_mark: ^1.3.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  # ✅ ADDED FOR ICON GENERATION
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+
+  # ✅ ASSETS CONFIGURATION
+  assets:
+    - assets/
+    - assets/images/
+
+flutter_native_splash:
+  color: "#FFFFFF"
+  image: "assets/splash_background.png"
+  
+  # Enforce custom native scaling overrides for Android systems
+  android_gravity: fill
+  ios_content_mode: scaleAspectFill
+  
+  # Clean layout properties for modern Android 12+ splash screens
+  android_12:
+    image: "assets/splash_background.png"
+    color: "#FFFFFF"
+    icon_background_color: "#FFFFFF"
+
+# ==========================================
+# ✅ 2. APP ICON CONFIGURATION (UPDATED COLOR)
+# ==========================================
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/app_icon.png"
+  adaptive_icon_background: "#DD0B1B"
+  adaptive_icon_foreground: "assets/app_icon_foreground.png"
+  min_sdk_android: 21

@@ -1,0 +1,2322 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'sheet_service.dart';
+import 'supabase_service.dart';
+import 'supabase_realtime_service.dart';
+import 'app_config_service.dart';
+import '../repositories/reports_repository.dart';
+import '../utils/error_handler.dart';
+import '../models/permission_model.dart';
+import '../models/stock_role.dart';
+import '../models/stock_models.dart';
+import '../models/user_model.dart';
+import '../models/user_session_notifier.dart';
+import '../models/report_models.dart';
+import '../utils/sorting_utils.dart';
+import '../utils/formatters.dart';
+import '../utils/steel_helper.dart';
+import '../utils/item_order_util.dart';
+import '../utils/sauda_rate_calculator.dart';
+import 'sample_rate_service.dart';
+
+class DataRepository {
+  static const String _boxName = 'msm_cache_box';
+  static late Box _box;
+
+  static final DataRepository instance = DataRepository._internal();
+  DataRepository._internal();
+  factory DataRepository() => instance;
+
+  // Cached Global Charges
+  static GlobalCharges _cachedCharges = const GlobalCharges();
+  GlobalCharges get globalCharges => _cachedCharges;
+  static GlobalCharges get currentCharges => _cachedCharges;
+
+  // Global Sync Indicator
+  static final ValueNotifier<bool> isSyncing = ValueNotifier<bool>(false);
+
+  // Global Notifier for ERP Stock Data (powers the UI)
+  static final ValueNotifier<Map<String, dynamic>> erpStockNotifier =
+      ValueNotifier<Map<String, dynamic>>({
+    "summary": {"yardStock": 0, "factoryStock": 0, "grandTotal": 0},
+    "locations": []
+  });
+
+  // Global Notifier for Settings/Sheet Data (powers calculator & forms)
+  static final ValueNotifier<Map<String, dynamic>> sheetDataNotifier =
+      ValueNotifier<Map<String, dynamic>>({
+    'meta': {'gst_rate': '0.18', 'loading_charge': '255'},
+    'items': []
+  });
+
+  // Live Master Item Sizes Notifier (Single source of truth for all sizes across the app)
+  static final ValueNotifier<List<Map<String, dynamic>>> itemSizesNotifier =
+      ValueNotifier<List<Map<String, dynamic>>>([]);
+
+  List<Map<String, dynamic>> get itemSizes => itemSizesNotifier.value;
+
+  // Global Notifier for Transactions (powers the UI)
+  static final ValueNotifier<List<StockTransaction>> transactionsNotifier =
+      ValueNotifier<List<StockTransaction>>([]);
+
+  // Unified Transactions Notifier (Single Source of Truth)
+  static final ValueNotifier<List<StockTransaction>> allTransactionsNotifier =
+      ValueNotifier<List<StockTransaction>>([]);
+
+  // Dashboard Specific Notifiers for Manual Wipe/Reset
+  static final ValueNotifier<double> totalStockNotifier =
+      ValueNotifier<double>(0.0);
+  static final ValueNotifier<double> yardStockNotifier =
+      ValueNotifier<double>(0.0);
+  static final ValueNotifier<double> factoryStockNotifier =
+      ValueNotifier<double>(0.0);
+  static final ValueNotifier<double> todayInNotifier =
+      ValueNotifier<double>(0.0);
+  static final ValueNotifier<double> todayOutNotifier =
+      ValueNotifier<double>(0.0);
+  static final ValueNotifier<List<ItemVariant>> inventoryListNotifier =
+      ValueNotifier<List<ItemVariant>>([]);
+
+  // Non-Moving Stock (Insight for Dashboard)
+  static final ValueNotifier<List<DeadStockEntry>> nonMovingStockNotifier =
+      ValueNotifier<List<DeadStockEntry>>([]);
+
+  // Vendor Purchase Report Notifiers
+  static final ValueNotifier<double> vendorTotalQtyNotifier =
+      ValueNotifier<double>(0.0);
+  static final ValueNotifier<double> vendorAvgRateNotifier =
+      ValueNotifier<double>(0.0);
+  static final ValueNotifier<List<dynamic>> vendorSaudaListNotifier =
+      ValueNotifier<List<dynamic>>([]);
+
+  // Global Notifier for the Currently Logged-in User
+  static final ValueNotifier<UserModel?> currentUserNotifier =
+      ValueNotifier<UserModel?>(null);
+
+  // ── Restricted Sales Mode (Super Admin Master Toggle) ───────────────────────
+  /// When `true`, non-Super-Admin users are locked to only 4 sales screens.
+  /// Synced via Supabase Realtime on the `app_config` table.
+  static ValueNotifier<bool> get salesOnlyModeNotifier =>
+      AppConfigService.salesOnlyModeNotifier;
+
+  /// Dynamic Super Admin Email Notifier (synced from app_config.super_admin_email).
+  static ValueNotifier<String> get superAdminEmailNotifier =>
+      AppConfigService.superAdminEmailNotifier;
+
+  /// Global static accessor for sales only mode status.
+  static bool get isSalesOnlyModeActive => AppConfigService.isSalesOnlyMode;
+
+  /// Global static accessor for current Super Admin email.
+  static String get superAdminEmail => AppConfigService.superAdminEmail;
+
+  /// Instance getter for Super Admin email.
+  String get instanceSuperAdminEmail => AppConfigService.superAdminEmail;
+
+  /// Ensures every known permission slug exists in the user's permissions map.
+  /// Missing slugs are filled from staffDefaults so AccessGuard never silently
+  /// denies access due to an absent key for a legacy user.
+  static UserModel backfillPermissions(UserModel user) {
+    if (user.isAdmin) return user; // Admins bypass all permission checks anyway
+    final defaults = PermissionRegistry.staffDefaults;
+    final filled = Map<String, bool>.from(user.permissions);
+    for (final entry in defaults.entries) {
+      filled.putIfAbsent(entry.key, () => entry.value.isAllowed);
+    }
+    if (filled.length == user.permissions.length) {
+      return user; // Nothing changed
+    }
+    return user.copyWith(permissions: filled);
+  }
+
+  // In-memory master lookup caches
+  static final Map<int, String> materialIdToNameMap = {};
+  static final Map<int, String> sizeIdToLabelMap = {};
+
+  static int? getMaterialIdByName(String? name) {
+    if (name == null || name.trim().isEmpty) return null;
+    final cleanName = name.trim().toLowerCase();
+    for (final entry in materialIdToNameMap.entries) {
+      if (entry.value.trim().toLowerCase() == cleanName) {
+        return entry.key;
+      }
+    }
+    return null;
+  }
+
+  static String? getMaterialNameById(int? id) {
+    if (id == null) return null;
+    return materialIdToNameMap[id];
+  }
+
+  /// Ensures master lookup data (materials & item_sizes) is cached in memory.
+  static Future<void> ensureMasterLookupData() async {
+    if (materialIdToNameMap.isNotEmpty && sizeIdToLabelMap.isNotEmpty) return;
+    try {
+      final matRows = await SupabaseService.client
+          .from('materials')
+          .select('id, item_name')
+          .order('id');
+      for (final row in matRows) {
+        final id = row['id'] as int?;
+        if (id != null) {
+          materialIdToNameMap[id] = row['item_name']?.toString() ?? '';
+        }
+      }
+      SortingUtils.dynamicMasterOrderProvider = () =>
+          materialIdToNameMap.values.where((v) => v.trim().isNotEmpty).toList();
+
+      final sizeRows = await SupabaseService.client
+          .from('item_sizes')
+          .select(
+              'id, material_id, size_label, unit_weight_kg, size_difference, is_sample_rate_active')
+          .order('id')
+          .limit(10000);
+      final List<Map<String, dynamic>> allSizesList = [];
+      for (final row in sizeRows) {
+        final id = row['id'] as int?;
+        final matId = row['material_id'] as int?;
+        final label = row['size_label']?.toString() ?? '';
+        final weight =
+            double.tryParse(row['unit_weight_kg']?.toString() ?? '') ?? 0.0;
+        updateGlobalSizeWeightCache(label, weight);
+        final sd =
+            double.tryParse(row['size_difference']?.toString() ?? '0') ?? 0.0;
+        final bool isSampleRateActive = row['is_sample_rate_active'] == true;
+        final matName =
+            matId != null ? (materialIdToNameMap[matId] ?? '') : '';
+        if (id != null) {
+          sizeIdToLabelMap[id] = label;
+        }
+        allSizesList.add({
+          'id': id,
+          'material_id': matId,
+          'materialId': matId,
+          'material_name': matName,
+          'materialName': matName,
+          'size_label': label,
+          'sizeLabel': label,
+          'label': label,
+          'unit_weight_kg': weight,
+          'weight': weight,
+          'size_difference': sd,
+          'sd': sd,
+          'is_sample_rate_active': isSampleRateActive,
+        });
+      }
+      itemSizesNotifier.value = allSizesList;
+      // Also ensure user attribution profiles are cached
+      unawaited(ensureUserLookupData());
+      // Fetch initial Restricted Sales Mode state
+      unawaited(fetchSalesOnlyMode());
+    } catch (e) {
+      debugPrint('[DataRepository] Error loading master lookup maps: $e');
+    }
+  }
+
+  // In-memory user profile lookup cache for user attribution (id/email/username -> display name)
+  static final Map<String, String> userProfileLookupMap = {};
+
+  /// Ensures user lookup profiles are cached in memory for transaction attribution.
+  static Future<void> ensureUserLookupData() async {
+    if (userProfileLookupMap.isNotEmpty) return;
+    try {
+      final List<dynamic> users = await SupabaseService.client
+          .from('users')
+          .select('id, email, user_name, role');
+      for (final u in users) {
+        if (u is! Map) continue;
+        final id = u['id']?.toString();
+        final email = u['email']?.toString().trim();
+        final rawName = u['user_name']?.toString().trim() ?? '';
+        final role = u['role']?.toString().trim().toLowerCase();
+
+        String displayName = rawName.isNotEmpty
+            ? rawName
+            : (email != null && email.contains('@')
+                ? email.split('@').first
+                : (id ?? 'Staff'));
+
+        if (role == 'admin' && !displayName.toLowerCase().contains('admin')) {
+          displayName = 'Admin ($displayName)';
+        }
+
+        if (id != null && id.isNotEmpty) {
+          userProfileLookupMap[id] = displayName;
+          userProfileLookupMap[id.toLowerCase()] = displayName;
+        }
+        if (email != null && email.isNotEmpty) {
+          userProfileLookupMap[email] = displayName;
+          userProfileLookupMap[email.toLowerCase()] = displayName;
+          final prefix = email.split('@').first;
+          if (prefix.isNotEmpty) {
+            userProfileLookupMap[prefix] = displayName;
+            userProfileLookupMap[prefix.toLowerCase()] = displayName;
+          }
+        }
+        if (rawName.isNotEmpty) {
+          userProfileLookupMap[rawName] = displayName;
+          userProfileLookupMap[rawName.toLowerCase()] = displayName;
+        }
+      }
+    } catch (e) {
+      debugPrint('[DataRepository] Error loading user profile lookup data: $e');
+    }
+  }
+
+  // ── Restricted Sales Mode & Super Admin Config (fetch / set / transfer) ──────
+
+  /// Fetches the current `sales_only_mode` and `super_admin_email` via AppConfigService.
+  static Future<void> fetchSalesOnlyMode() async {
+    await AppConfigService.fetchAppConfig();
+  }
+
+  /// Updates the `sales_only_mode` flag in the `app_config` table via AppConfigService.
+  /// Should only be called by the active Super Admin.
+  static Future<void> setSalesOnlyMode(bool enabled) async {
+    await AppConfigService.setSalesOnlyMode(enabled);
+  }
+
+  /// Transfers Super Admin ownership to [newEmail] via AppConfigService.
+  /// Only the currently authenticated Super Admin should invoke this.
+  static Future<bool> transferSuperAdmin(String newEmail) async {
+    await AppConfigService.transferSuperAdmin(newEmail);
+    await syncCurrentUser();
+    return true;
+  }
+
+  /// Resolves any raw user identifier (UUID, email, username) into a clean, human-readable display name.
+  static String resolveUserDisplayName(String? userRaw) {
+    if (userRaw == null || userRaw.trim().isEmpty) {
+      return 'Staff';
+    }
+    final trimmed = userRaw.trim();
+
+    // 1. Direct or case-insensitive cache hit
+    if (userProfileLookupMap.containsKey(trimmed)) {
+      return userProfileLookupMap[trimmed]!;
+    }
+    if (userProfileLookupMap.containsKey(trimmed.toLowerCase())) {
+      return userProfileLookupMap[trimmed.toLowerCase()]!;
+    }
+
+    // 2. Email parsing & fallback
+    if (trimmed.contains('@')) {
+      final emailLower = trimmed.toLowerCase();
+      if (emailLower == superAdminEmail.toLowerCase().trim()) {
+        return userProfileLookupMap[emailLower] ?? 'Super Admin';
+      }
+      final prefix = trimmed.split('@').first;
+      if (userProfileLookupMap.containsKey(prefix.toLowerCase())) {
+        return userProfileLookupMap[prefix.toLowerCase()]!;
+      }
+      return prefix;
+    }
+
+    // 3. UUID formatting
+    final isUuid = RegExp(
+            r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+        .hasMatch(trimmed);
+    if (isUuid) {
+      return trimmed.substring(0, 8);
+    }
+
+    // 4. Default return trimmed as-is
+    return trimmed;
+  }
+
+  /// Returns the canonical category/material name, case-insensitively matched against materials.
+  static String canonicalizeCategory(String? rawCategory) {
+    if (rawCategory == null ||
+        rawCategory.trim().isEmpty ||
+        rawCategory.trim().toUpperCase() == 'UNKNOWN') {
+      return 'General';
+    }
+    final trimmed = rawCategory.trim();
+    for (final matName in materialIdToNameMap.values) {
+      if (matName.trim().toUpperCase() == trimmed.toUpperCase()) {
+        return matName.trim();
+      }
+    }
+    return trimmed;
+  }
+
+  /// Returns all dynamic categories currently available in Master Materials, Sheet Data, and Transactions.
+  static List<String> getDynamicCategories() {
+    final Set<String> categories = {};
+    for (final matName in materialIdToNameMap.values) {
+      if (matName.trim().isNotEmpty) {
+        categories.add(matName.trim());
+      }
+    }
+    final items = sheetDataNotifier.value['items'] as List? ?? [];
+    for (final item in items) {
+      if (item is Map) {
+        final n = item['name']?.toString().trim();
+        if (n != null && n.isNotEmpty) {
+          categories.add(canonicalizeCategory(n));
+        }
+      }
+    }
+    for (final v in inventoryListNotifier.value) {
+      if (v.category.trim().isNotEmpty && v.category != 'General') {
+        categories.add(canonicalizeCategory(v.category));
+      }
+    }
+    for (final tx in allTransactionsNotifier.value) {
+      if (tx.itemName.trim().isNotEmpty && tx.itemName != 'Unknown') {
+        categories.add(canonicalizeCategory(tx.itemName));
+      }
+    }
+    final List<String> result = categories.toList();
+    result.sort(SortingUtils.compareCategories);
+    return result;
+  }
+
+  static String resolveItemName(dynamic row) {
+    if (row == null) return 'Unknown';
+    if (row is Map) {
+      final direct = row['item_name']?.toString();
+      if (direct != null &&
+          direct.isNotEmpty &&
+          direct != 'null' &&
+          direct != 'Unknown') {
+        return direct;
+      }
+      if (row['materials'] is Map && row['materials']['item_name'] != null) {
+        final mName = row['materials']['item_name'].toString();
+        if (mName.isNotEmpty && mName != 'null') return mName;
+      }
+      final matId = int.tryParse(row['material_id']?.toString() ?? '');
+      if (matId != null && materialIdToNameMap.containsKey(matId)) {
+        return materialIdToNameMap[matId]!;
+      }
+    }
+    return 'Unknown';
+  }
+
+  static String resolveSizeLabel(dynamic row) {
+    if (row == null) return 'General';
+    if (row is Map) {
+      final direct = row['size']?.toString() ?? row['size_label']?.toString();
+      if (direct != null &&
+          direct.isNotEmpty &&
+          direct != 'null' &&
+          direct != 'Unknown') {
+        return direct;
+      }
+      if (row['item_sizes'] is Map && row['item_sizes']['size_label'] != null) {
+        final sLabel = row['item_sizes']['size_label'].toString();
+        if (sLabel.isNotEmpty && sLabel != 'null') return sLabel;
+      }
+      final sizeId = int.tryParse(row['size_id']?.toString() ?? '');
+      if (sizeId != null && sizeIdToLabelMap.containsKey(sizeId)) {
+        return sizeIdToLabelMap[sizeId]!;
+      }
+    }
+    return 'General';
+  }
+
+  /// Must be called after Hive.initFlutter();
+  static Future<void> init() async {
+    _box = await Hive.openBox(_boxName);
+    await ensureMasterLookupData();
+
+    // Load initial cached data securely into memory
+    final cachedERP = _box.get('erp_stock', defaultValue: null);
+    if (cachedERP != null) {
+      try {
+        erpStockNotifier.value = jsonDecode(cachedERP);
+      } catch (e) {
+        debugPrint('Cache parsing error: $e');
+      }
+    }
+
+    final cachedSheet = _box.get('sheet_data', defaultValue: null);
+    if (cachedSheet != null) {
+      try {
+        sheetDataNotifier.value = jsonDecode(cachedSheet);
+      } catch (e) {
+        debugPrint('Cache parsing error: $e');
+      }
+    }
+
+    // ── Load cached global charges ─────────────────────────────────────────
+    final cachedCharges = _box.get('global_charges', defaultValue: null);
+    if (cachedCharges != null) {
+      try {
+        _cachedCharges = GlobalCharges.fromMap(jsonDecode(cachedCharges));
+      } catch (e) {
+        debugPrint('Charges cache parsing error: $e');
+      }
+    }
+
+    // ── Fetch live global charges from Supabase ───────────────────────────
+    fetchGlobalCharges();
+
+    // ── Fetch live restricted sales mode status ───────────────────────────
+    fetchSalesOnlyMode();
+
+    // ── Load user session from SharedPreferences ──────────────────────────
+    final prefs = await SharedPreferences.getInstance();
+    final savedUserJson = prefs.getString('currentUser');
+    if (savedUserJson != null) {
+      try {
+        final Map<String, dynamic> userMap = jsonDecode(savedUserJson);
+
+        // ── DIAGNOSTIC: Log saved user values ──────────────────────────
+        debugPrint(
+            '[AUTH DIAG] Saved user from prefs → '
+            'role=${userMap['role']}, '
+            'email=${userMap['email']}');
+
+        final rawUser = UserModel.fromJson(userMap);
+        final newUser = backfillPermissions(rawUser);
+        currentUserNotifier.value = newUser;
+
+        debugPrint(
+            '[AUTH DIAG] Saved user parsed → '
+            'role=${newUser.role.name}, '
+            'isAdmin=${newUser.isAdmin}, '
+            'isSuperAdmin=${newUser.isSuperAdmin}');
+
+        // ── Populate legacy UserSession for backward compatibility
+        UserSession.userEmail = newUser.email;
+        UserSession.currentAppRole = newUser.role;
+        UserSession.currentRole = newUser.isAdmin
+            ? StockRole.ADMIN
+            : (newUser.role.isManager ? StockRole.MANAGER : StockRole.VIEWER);
+        UserSession.roleId = newUser.role.value;
+        UserSession.applyPermissions(newUser.permissions
+            .map((k, v) => MapEntry(k, Permission(slug: k, isAllowed: v))));
+
+        final subId = (newUser.id != null && newUser.id!.isNotEmpty)
+            ? newUser.id!
+            : newUser.email;
+        UserSessionNotifier.subscribeToUserUpdates(subId);
+      } catch (e) {
+        debugPrint("[DataRepository] Error loading saved user: $e");
+      }
+    }
+
+    // Load cached Total Stock for instant startup feedback
+    final cachedTotal = prefs.getDouble('cached_total_stock');
+    if (cachedTotal != null) {
+      totalStockNotifier.value = cachedTotal;
+      debugPrint("[DataRepository] Loaded cached total stock: $cachedTotal MT");
+    }
+
+    // Load customer addresses cache for Sauda / Delivery Order auto-fill
+    loadCustomerAddresses();
+
+    // Trigger authoritative refresh from v_current_stock on startup
+    refreshAllStockData(forceRefresh: true);
+
+    // Set up debounced real-time sync stream listener from SupabaseRealtimeService
+    SupabaseRealtimeService.instance.syncStream.listen((event) {
+      debugPrint(
+          '[DataRepository] Realtime sync event received: ${event.target.name} (${event.eventType}). Refreshing stock data...');
+      refreshAllStockData(forceRefresh: true);
+    }, onError: (e) {
+      debugPrint("[DataRepository] Error in realtime syncStream: $e");
+    });
+
+    // Realtime category and size listener for master size configs
+    SupabaseService.client.from('item_sizes').stream(primaryKey: ['id']).listen(
+        (_) => syncSheetData(null, force: true), onError: (e) {
+      debugPrint("[DataRepository] Realtime item_sizes stream error: $e");
+    });
+
+    SupabaseService.client.from('materials').stream(primaryKey: ['id']).listen(
+        (_) => syncSheetData(null, force: true), onError: (e) {
+      debugPrint("[DataRepository] Realtime materials stream error: $e");
+    });
+
+    // Realtime listener for app_config (Restricted Sales Mode & Super Admin Email)
+    SupabaseService.client
+        .from('app_config')
+        .stream(primaryKey: ['id']).listen((rows) {
+      if (rows.isNotEmpty) {
+        final row = rows.first;
+        final bool newValue = row['sales_only_mode'] == true;
+        if (salesOnlyModeNotifier.value != newValue) {
+          salesOnlyModeNotifier.value = newValue;
+          debugPrint(
+              '[DataRepository] Realtime sales_only_mode updated: $newValue');
+        }
+        final dynamic superEmailRaw = row['super_admin_email'];
+        if (superEmailRaw != null &&
+            superEmailRaw.toString().trim().isNotEmpty) {
+          final String sEmail = superEmailRaw.toString().trim();
+          if (superAdminEmailNotifier.value.toLowerCase().trim() !=
+              sEmail.toLowerCase().trim()) {
+            superAdminEmailNotifier.value = sEmail;
+            UserSession.superAdminEmail = sEmail;
+            debugPrint(
+                '[DataRepository] Realtime super_admin_email updated: $sEmail');
+            refreshCurrentUser();
+          }
+        }
+      }
+    }, onError: (e) {
+      debugPrint('[DataRepository] Realtime app_config stream error: $e');
+    });
+  }
+
+  static Future<void> refreshCurrentUser([String? emailOverride]) async {
+    await syncCurrentUser(emailOverride);
+  }
+
+  static Future<void> syncCurrentUser([String? emailOverride]) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final rawEmail = emailOverride ?? prefs.getString('user_email');
+      if (rawEmail == null) return;
+
+      // Requirement 4: Normalize email for lookup
+      final email = rawEmail.toLowerCase().trim();
+      UserSession.userEmail = email;
+
+      UserModel? newUser;
+
+      if (email == superAdminEmail.toLowerCase().trim() ||
+          UserSession.isSuperAdmin) {
+        newUser = UserModel(
+          email: email,
+          role: UserRole.admin,
+          status: 'approved',
+          permissions: {},
+        );
+      } else {
+        final userMap = await SupabaseService.client
+            .from('users')
+            .select()
+            .eq('email', email)
+            .maybeSingle();
+
+        if (userMap != null) {
+          // ── DIAGNOSTIC: Log raw DB values before parsing ──────────────
+          final rawDbRole = userMap['role'];
+          final rawDbPerms = userMap['permissions'];
+          final rawDbStatus = userMap['status'];
+          debugPrint(
+              '[AUTH DIAG] Raw DB row for $email → '
+              'role=$rawDbRole (${rawDbRole.runtimeType}), '
+              'status=$rawDbStatus, '
+              'permissions=${rawDbPerms.runtimeType}');
+
+          // Requirement 5: Normalize role and permissions
+          final rawUser = UserModel.fromJson(userMap);
+
+          debugPrint(
+              '[AUTH DIAG] After fromJson → '
+              'role=${rawUser.role.name}, '
+              'isAdmin=${rawUser.isAdmin}, '
+              'isSuperAdmin=${rawUser.isSuperAdmin}, '
+              'permsCount=${rawUser.permissions.length}');
+
+          newUser = backfillPermissions(rawUser);
+        } else {
+          debugPrint('[AUTH DIAG] No row found in users table for $email');
+        }
+      }
+
+      if (newUser != null) {
+        // Update legacy session state
+        UserSession.currentAppRole = newUser.role;
+        UserSession.currentRole = newUser.isAdmin
+            ? StockRole.ADMIN
+            : (newUser.role.isManager ? StockRole.MANAGER : StockRole.VIEWER);
+        UserSession.roleId = newUser.role.value;
+        UserSession.applyPermissions(newUser.permissions
+            .map((k, v) => MapEntry(k, Permission(slug: k, isAllowed: v))));
+
+        // Update global notifier
+        currentUserNotifier.value = newUser;
+
+        // Requirement 6: Update LocalStorage ONLY after successful backend fetch
+        await prefs.setString('currentUser', jsonEncode(newUser.toJson()));
+        await prefs.setString('user_email', email);
+
+        final subId = (newUser.id != null && newUser.id!.isNotEmpty)
+            ? newUser.id!
+            : newUser.email;
+        UserSessionNotifier.subscribeToUserUpdates(subId);
+
+        // Notify UI components
+        UserSessionNotifier.refreshFromSession();
+
+        // Requirement 8: Exact requested debug log format
+        // [AUTH SYNC] platform userEmail role permissionsCount
+        const platform = kIsWeb ? "DESKTOP" : "MOBILE";
+        debugPrint(
+            "[AUTH SYNC] $platform $email ${newUser.role.name} perms=${newUser.permissions.length}");
+      } else {
+        debugPrint("[AUTH SYNC] User not found on server: $email");
+      }
+    } catch (e) {
+      debugPrint("Sync Current User Error: $e");
+    }
+  }
+
+  static Future<void> syncERPStock(BuildContext? context,
+      {bool force = false}) async {
+    await refreshAllStockData(forceRefresh: force);
+  }
+
+  /// Drop-in replacement for legacy SheetService.fetchERPStock()
+  static Future<Map<String, dynamic>> getERPStockAsync(BuildContext? context,
+      {bool forceRefresh = false}) async {
+    await refreshAllStockData(forceRefresh: forceRefresh);
+    return erpStockNotifier.value;
+  }
+
+  static Future<void> syncSheetData(BuildContext? context,
+      {bool force = false}) async {
+    isSyncing.value = true;
+    try {
+      // ── 1. Fetch materials & sizes ─────────────────────────────────────
+      final matResponse = await SupabaseService.client
+          .from('materials')
+          .select('id, item_name')
+          .order('id');
+
+      final sizeResponse = await SupabaseService.client
+          .from('item_sizes')
+          .select(
+              'id, material_id, size_label, unit_weight_kg, size_difference, is_sample_rate_active')
+          .order('id')
+          .limit(10000);
+
+      final List<Map<String, dynamic>> itemsList = [];
+      final List<Map<String, dynamic>> allSizesList = [];
+
+      for (final row in matResponse) {
+        final id = row['id'] as int?;
+        if (id == null) continue;
+        final name = row['item_name']?.toString() ?? '';
+        materialIdToNameMap[id] = name;
+      }
+
+      final Map<int, List<Map<String, dynamic>>> sizesByMatId = {};
+      for (final row in sizeResponse) {
+        final matId = row['material_id'] as int?;
+        if (matId == null) continue;
+        final id = row['id'] as int?;
+        final label = row['size_label']?.toString() ?? '';
+        final weight =
+            double.tryParse(row['unit_weight_kg']?.toString() ?? '') ?? 0.0;
+        updateGlobalSizeWeightCache(label, weight);
+        final sd =
+            double.tryParse(row['size_difference']?.toString() ?? '0') ?? 0.0;
+        final bool isSampleRateActive = row['is_sample_rate_active'] == true;
+        final matName = materialIdToNameMap[matId] ?? '';
+        if (id != null) sizeIdToLabelMap[id] = label;
+
+        final sizeMap = {
+          'id': id,
+          'material_id': matId,
+          'materialId': matId,
+          'material_name': matName,
+          'materialName': matName,
+          'size_label': label,
+          'sizeLabel': label,
+          'label': label,
+          'unit_weight_kg': weight,
+          'weight': weight,
+          'size_difference': sd,
+          'sd': sd,
+          'is_sample_rate_active': isSampleRateActive,
+        };
+
+        allSizesList.add(sizeMap);
+        sizesByMatId.putIfAbsent(matId, () => []);
+        sizesByMatId[matId]!.add(sizeMap);
+      }
+
+      itemSizesNotifier.value = allSizesList;
+
+      for (final row in matResponse) {
+        final id = row['id'] as int?;
+        if (id == null) continue;
+        final name = row['item_name']?.toString() ?? '';
+        final sizes = sizesByMatId[id] ?? [];
+        sizes.sort((a, b) => SortingUtils.compareSizes(
+            a['label']?.toString() ?? '', b['label']?.toString() ?? ''));
+        itemsList.add({
+          'name': name,
+          'sizes': sizes,
+        });
+      }
+      itemsList.sort((a, b) =>
+          ItemOrderUtil.compare(a['name']?.toString(), b['name']?.toString()));
+
+      // ── 2. Fetch live pricing config from global_charges ────────────────
+      Map<String, dynamic> meta = {
+        'gst_rate': '0.18',
+        'loading_charge': '255',
+      };
+      try {
+        final chargesRow = await SupabaseService.client
+            .from('global_charges')
+            .select('gst_rate, lc_rate, nc_discount')
+            .eq('id', 'singleton')
+            .maybeSingle();
+        if (chargesRow != null) {
+          _cachedCharges = GlobalCharges.fromMap(chargesRow);
+          if (_box.isOpen) {
+            await _box.put('global_charges', jsonEncode(_cachedCharges.toMap()));
+          }
+
+          // DB stores percentage (e.g. 18.00); convert to fraction (0.18) for the calculator
+          final double gstPct =
+              (chargesRow['gst_rate'] as num?)?.toDouble() ?? 18.0;
+          final double lcRate =
+              (chargesRow['lc_rate'] as num?)?.toDouble() ?? 255.0;
+          final double ncDiscount =
+              (chargesRow['nc_discount'] as num?)?.toDouble() ?? 3000.0;
+          meta = {
+            'gst_rate': (gstPct / 100).toStringAsFixed(4), // '0.1800'
+            'loading_charge': lcRate.toStringAsFixed(2), // '255.00'
+            'gst_pct': gstPct.toStringAsFixed(2), // '18.00' (for display)
+            'nc_discount': ncDiscount.toStringAsFixed(2), // '3000.00'
+          };
+          debugPrint(
+              '[DataRepository] global_charges: GST=$gstPct% LC=₹$lcRate NC=₹$ncDiscount');
+        } else {
+          debugPrint(
+              '[DataRepository] global_charges: singleton row missing — using defaults');
+        }
+      } catch (chargesErr) {
+        // Table may not exist yet; silently fall back to hardcoded defaults
+        debugPrint(
+            '[DataRepository] global_charges fetch skipped: $chargesErr');
+      }
+
+      // ── 3. Assemble and persist ──────────────────────────────────────────
+      final Map<String, dynamic> freshData = {
+        'meta': meta,
+        'items': itemsList,
+      };
+
+      if (itemsList.isNotEmpty) {
+        await _box.put('sheet_data', jsonEncode(freshData));
+        sheetDataNotifier.value = freshData;
+        debugPrint(
+            '[DataRepository] syncSheetData: loaded ${itemsList.length} product categories from Supabase');
+      } else {
+        debugPrint(
+            '[DataRepository] syncSheetData: empty response from Supabase — using previous cache');
+        final cachedSheet = _box.get('sheet_data', defaultValue: null);
+        if (cachedSheet != null) {
+          try {
+            final cached = jsonDecode(cachedSheet) as Map<String, dynamic>;
+            // Always overwrite meta with fresh live values, even when items come from cache
+            cached['meta'] = meta;
+            sheetDataNotifier.value = cached;
+          } catch (_) {}
+        }
+      }
+    } catch (e) {
+      if (context != null && context.mounted) ErrorHandler.showError(context, e);
+      debugPrint('[DataRepository] syncSheetData error: $e');
+    } finally {
+      isSyncing.value = false;
+    }
+  }
+
+  /// Drop-in replacement for legacy SheetService.fetchData()
+  static Future<Map<String, dynamic>> getSheetDataAsync(BuildContext? context,
+      {bool forceRefresh = false}) async {
+    await syncSheetData(context, force: forceRefresh);
+    return sheetDataNotifier.value;
+  }
+
+  /// Fetches the latest global pricing charges from Supabase
+  static Future<GlobalCharges> fetchGlobalCharges() async {
+    try {
+      final res = await SupabaseService.client
+          .from('global_charges')
+          .select('gst_rate, lc_rate, nc_discount')
+          .eq('id', 'singleton')
+          .maybeSingle();
+      if (res != null) {
+        _cachedCharges = GlobalCharges.fromMap(res);
+        if (_box.isOpen) {
+          await _box.put('global_charges', jsonEncode(_cachedCharges.toMap()));
+        }
+        debugPrint(
+            '[DataRepository] fetchGlobalCharges: live charges loaded: GST=${_cachedCharges.gstRate}% LC=₹${_cachedCharges.lcRate} NC=₹${_cachedCharges.ncDiscount}');
+      }
+    } catch (e) {
+      debugPrint('[DataRepository] fetchGlobalCharges error: $e');
+    }
+    return _cachedCharges;
+  }
+
+  /// Look up Size Difference (SD) for a specific item category and size label
+  static double getSizeSD(String? item, String? sizeLabel) {
+    if (item == null || sizeLabel == null || sizeLabel.isEmpty) return 0.0;
+    final cleanItem = item.trim().toLowerCase();
+    final normSearch = SteelHelper.normalizeSizeText(sizeLabel);
+    final sizes = itemSizesNotifier.value;
+
+    // 1. Exact match with normalized size label
+    for (final s in sizes) {
+      final sLabel = (s['size_label'] ?? s['label'] ?? '').toString();
+      final cat = (s['material_name'] ?? s['category'] ?? s['item_name'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (cat.isEmpty || cat == cleanItem) {
+        if (SteelHelper.normalizeSizeText(sLabel) == normSearch) {
+          final sdVal = s['size_difference'] ?? s['sd'];
+          if (sdVal != null) {
+            return (sdVal as num).toDouble();
+          }
+        }
+      }
+    }
+
+    // 2. Prefix / substring match if unit weight was appended to label
+    for (final s in sizes) {
+      final sLabel = (s['size_label'] ?? s['label'] ?? '').toString();
+      final cat = (s['material_name'] ?? s['category'] ?? s['item_name'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (cat.isEmpty || cat == cleanItem) {
+        final normS = SteelHelper.normalizeSizeText(sLabel);
+        if (normS.isNotEmpty &&
+            (normSearch.startsWith(normS) || normS.startsWith(normSearch))) {
+          final sdVal = s['size_difference'] ?? s['sd'];
+          if (sdVal != null) {
+            return (sdVal as num).toDouble();
+          }
+        }
+      }
+    }
+    return 0.0;
+  }
+
+  /// Admin-only: persist new GST %, Loading Charge, and NC Discount to Supabase,
+  /// then immediately refresh the in-memory sheetDataNotifier.
+  ///
+  /// [gstPct]     — percentage value, e.g. 18.0 (NOT the fraction 0.18)
+  /// [lcRate]     — rupees per MT, e.g. 255.0
+  /// [ncDiscount] — NC cash-discount per MT, e.g. 3000.0 (optional, omit to keep existing)
+  static Future<void> updateGlobalCharges({
+    required double gstPct,
+    required double lcRate,
+    double? ncDiscount,
+  }) async {
+    final Map<String, dynamic> payload = {
+      'id': 'singleton',
+      'gst_rate': gstPct,
+      'lc_rate': lcRate,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    if (ncDiscount != null) payload['nc_discount'] = ncDiscount;
+    await SupabaseService.client.from('global_charges').upsert(payload);
+    debugPrint(
+        '[DataRepository] global_charges updated: GST=$gstPct% LC=₹$lcRate NC=₹${ncDiscount ?? "(unchanged)"} ');
+    // Refresh in-memory meta immediately so the calculator sees the new values
+    await syncSheetData(null, force: true);
+  }
+
+  static void updateNotifiersFromErpStock() {
+    final Map<String, dynamic> erp = erpStockNotifier.value;
+    if (erp.isEmpty) return;
+
+    final Map<String, dynamic> summary = erp['summary'] ?? {};
+    totalStockNotifier.value =
+        (summary['grandTotal'] as num?)?.toDouble() ?? 0.0;
+
+    final Map<String, dynamic> locStocks = summary['locationStocks'] ?? {};
+    double yardVal = (locStocks['YARD'] as num?)?.toDouble() ?? 0.0;
+    double factoryVal = (locStocks['FACTORY'] as num?)?.toDouble() ?? 0.0;
+    locStocks.forEach((k, v) {
+      final norm = StockUtils.normalizeLocation(k);
+      final d = (v as num?)?.toDouble() ?? 0.0;
+      if (norm == 'YARD') yardVal = d;
+      if (norm == 'FACTORY') factoryVal = d;
+    });
+    yardStockNotifier.value = yardVal;
+    factoryStockNotifier.value = factoryVal;
+
+    todayInNotifier.value = (summary['todayIn'] as num?)?.toDouble() ?? 0.0;
+    todayOutNotifier.value = (summary['todayOut'] as num?)?.toDouble() ?? 0.0;
+
+    List<ItemVariant> list = [];
+    final List<dynamic> locations = erp['locations'] as List? ?? [];
+    for (var loc in locations) {
+      if (loc is Map) {
+        final String locName = loc['location']?.toString() ?? '';
+        final List<dynamic> items = loc['items'] as List? ?? [];
+        for (var item in items) {
+          if (item is Map) {
+            final String itemName = item['itemName']?.toString() ?? '';
+            final String category = item['category']?.toString() ?? itemName;
+            final List<dynamic> variants = item['variants'] as List? ?? [];
+            for (var v in variants) {
+              if (v is Map) {
+                list.add(ItemVariant(
+                  itemName: itemName,
+                  category: category,
+                  size: v['size']?.toString() ?? '',
+                  currentStockMT: (v['qtyMT'] as num?)?.toDouble() ?? 0.0,
+                  location: locName,
+                ));
+              }
+            }
+          }
+        }
+      }
+    }
+
+    list.sort((a, b) {
+      int catComp = SortingUtils.compareCategories(a.category, b.category);
+      if (catComp != 0) return catComp;
+      int itemComp = a.itemName.compareTo(b.itemName);
+      if (itemComp != 0) return itemComp;
+      int locComp = a.location.compareTo(b.location);
+      if (locComp != 0) return locComp;
+      return SortingUtils.compareSizes(a.size, b.size);
+    });
+
+    inventoryListNotifier.value = list;
+  }
+
+  /// Fetches raw current stock records from Supabase view 'v_current_stock'.
+  static Future<List<Map<String, dynamic>>> fetchCurrentStock(
+      [String locationFilter = 'ALL']) async {
+    try {
+      var query = SupabaseService.client.from('v_current_stock').select('*');
+      if (locationFilter != 'ALL') {
+        final normLoc = StockUtils.normalizeLocation(locationFilter);
+        query = query.ilike('location', '%$normLoc%');
+      }
+      final response = await query.limit(10000);
+      final list = List<Map<String, dynamic>>.from(response as List);
+      list.sort((a, b) {
+        final catA = a['item_name']?.toString() ?? '';
+        final catB = b['item_name']?.toString() ?? '';
+        final catComp = ItemOrderUtil.compare(catA, catB);
+        if (catComp != 0) return catComp;
+        final sizeA = a['size_label']?.toString() ?? '';
+        final sizeB = b['size_label']?.toString() ?? '';
+        return SortingUtils.compareSizes(sizeA, sizeB);
+      });
+      return list;
+    } catch (e) {
+      debugPrint('[DataRepository] Error fetching current stock: $e');
+      return [];
+    }
+  }
+
+  /// Fetches dynamic benchmark categories for the Sample Rate Calc screen directly from Supabase item_sizes
+  static Future<Map<String, List<SampleRateSize>>> fetchSampleRateBenchmarks({
+    bool force = false,
+  }) async {
+    return SampleRateService.fetchSampleRateCategories(force: force);
+  }
+
+  /// Fetches stock chart records for dealer sharing directly from 'v_current_stock'
+  /// enriched with size_difference and unit_weight_kg from item_sizes table.
+  static Future<List<Map<String, dynamic>>> fetchDealerStockChart(
+      [String locationFilter = 'ALL']) async {
+    try {
+      await ensureMasterLookupData();
+
+      // Fetch v_current_stock records directly
+      final stockRows = await fetchCurrentStock(locationFilter);
+
+      // Fetch item_sizes for size_difference & unit_weight_kg mapping
+      Map<int, Map<String, dynamic>> sizeMetaById = {};
+      Map<String, Map<String, dynamic>> sizeMetaByLabel = {};
+      try {
+        final sizeRows = await SupabaseService.client
+            .from('item_sizes')
+            .select('id, size_label, size_difference, unit_weight_kg, material_id')
+            .limit(10000);
+        for (final sr in sizeRows) {
+          final id = sr['id'] as int? ?? int.tryParse(sr['id']?.toString() ?? '');
+          final label = sr['size_label']?.toString() ?? '';
+          final sd = (sr['size_difference'] as num?)?.toDouble() ??
+              double.tryParse(sr['size_difference']?.toString() ?? '0') ??
+              0.0;
+          final unitWeight = (sr['unit_weight_kg'] as num?)?.toDouble() ??
+              double.tryParse(sr['unit_weight_kg']?.toString() ?? '0') ??
+              0.0;
+          final meta = {
+            'size_difference': sd,
+            'unit_weight_kg': unitWeight,
+          };
+          if (id != null) {
+            sizeMetaById[id] = meta;
+          }
+          if (label.isNotEmpty) {
+            sizeMetaByLabel[label] = meta;
+          }
+        }
+      } catch (e) {
+        debugPrint('[DataRepository] Error fetching item_sizes meta: $e');
+      }
+
+      final List<Map<String, dynamic>> result = [];
+      for (final row in stockRows) {
+        final double netStock = (row['net_stock_mt'] as num?)?.toDouble() ??
+            double.tryParse(row['net_stock_mt']?.toString() ?? '0') ??
+            0.0;
+
+        // Allow raw negative deficit items for audit integrity
+        if (netStock == 0) continue;
+
+        final itemName = resolveItemName(row);
+        final sizeLabel = resolveSizeLabel(row);
+        final category = canonicalizeCategory(itemName);
+        final location = row['location']?.toString().toUpperCase() ?? 'YARD';
+
+        final rawSizeId = row['item_size_id'] ?? row['size_id'] ?? row['id'];
+        final sizeId =
+            rawSizeId is int ? rawSizeId : int.tryParse(rawSizeId?.toString() ?? '');
+        final meta = (sizeId != null ? sizeMetaById[sizeId] : null) ??
+            sizeMetaByLabel[sizeLabel];
+        final double sd = (meta?['size_difference'] as num?)?.toDouble() ??
+            (row['size_difference'] as num?)?.toDouble() ??
+            0.0;
+        final double unitWeight =
+            (row['unit_weight_kg'] as num?)?.toDouble() ??
+                (meta?['unit_weight_kg'] as num?)?.toDouble() ??
+                0.0;
+
+        result.add({
+          'item_size_id': sizeId,
+          'size_id': sizeId,
+          'category_name': category,
+          'item_name': itemName,
+          'size_label': sizeLabel,
+          'size_difference': sd,
+          'unit_weight_kg': unitWeight,
+          'current_stock_mt': netStock,
+          'net_stock_mt': netStock,
+          'location': location,
+        });
+      }
+
+      result.sort((a, b) {
+        final catA = a['category_name']?.toString() ?? a['item_name']?.toString() ?? '';
+        final catB = b['category_name']?.toString() ?? b['item_name']?.toString() ?? '';
+        final catComp = ItemOrderUtil.compare(catA, catB);
+        if (catComp != 0) return catComp;
+        final sizeA = a['size_label']?.toString() ?? '';
+        final sizeB = b['size_label']?.toString() ?? '';
+        return SortingUtils.compareSizes(sizeA, sizeB);
+      });
+
+      return result;
+    } catch (e) {
+      debugPrint('[DataRepository] Error fetching dealer stock chart: $e');
+      return [];
+    }
+  }
+
+  /// Fetches summary records for today's transactions from view 'v_todays_summary'.
+  static Future<List<Map<String, dynamic>>> fetchTodaysSummaryView(
+      [String locationFilter = 'ALL']) async {
+    try {
+      var query = SupabaseService.client.from('v_todays_summary').select('*');
+      if (locationFilter != 'ALL') {
+        query = query.eq('location', locationFilter);
+      }
+      final response = await query.limit(10000);
+      return List<Map<String, dynamic>>.from(response as List);
+    } catch (e) {
+      debugPrint('[DataRepository] Error fetching todays summary view: $e');
+      return [];
+    }
+  }
+
+  /// Fetches low stock items from view 'v_low_stock'.
+  static Future<List<Map<String, dynamic>>> fetchLowStockView(
+      [String locationFilter = 'ALL']) async {
+    try {
+      var query = SupabaseService.client.from('v_low_stock').select('*');
+      if (locationFilter != 'ALL') {
+        query = query.eq('location', locationFilter);
+      }
+      final response = await query.limit(10000);
+      return List<Map<String, dynamic>>.from(response as List);
+    } catch (e) {
+      debugPrint('[DataRepository] Error fetching low stock view: $e');
+      return [];
+    }
+  }
+
+  /// Fetches non-moving stock items from view 'v_non_moving_stock'.
+  static Future<List<Map<String, dynamic>>> fetchNonMovingStockView(
+      [String locationFilter = 'ALL']) async {
+    try {
+      var query = SupabaseService.client.from('v_non_moving_stock').select('*');
+      if (locationFilter != 'ALL') {
+        query = query.eq('location', locationFilter);
+      }
+      final response = await query.limit(10000);
+      return List<Map<String, dynamic>>.from(response as List);
+    } catch (e) {
+      debugPrint('[DataRepository] Error fetching non-moving stock view: $e');
+      return [];
+    }
+  }
+
+  /// Fetches vendor purchase summary from view 'v_vendor_summary'.
+  static Future<List<Map<String, dynamic>>> fetchVendorSummaryView() async {
+    try {
+      final response = await SupabaseService.client
+          .from('v_vendor_summary')
+          .select('*')
+          .limit(10000);
+      return List<Map<String, dynamic>>.from(response as List);
+    } catch (e) {
+      debugPrint('[DataRepository] Error fetching vendor summary view: $e');
+      return [];
+    }
+  }
+
+  /// Calls RPC 'get_vendor_statement' for purchase details of a vendor.
+  static Future<List<Map<String, dynamic>>> fetchVendorStatement({
+    required String vendorId,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    try {
+      final response =
+          await SupabaseService.client.rpc('get_vendor_statement', params: {
+        'p_vendor_id': vendorId,
+        'p_start': (startDate ?? DateTime(1970)).toUtc().toIso8601String(),
+        'p_end': (endDate ?? DateTime.now()).toUtc().toIso8601String(),
+      });
+      return List<Map<String, dynamic>>.from(response as List);
+    } catch (e) {
+      debugPrint('[DataRepository] Error fetching vendor statement RPC: $e');
+      return [];
+    }
+  }
+
+  /// Calls RPC 'get_stock_movement_report' to calculate backend-computed stock movements.
+  static Future<List<Map<String, dynamic>>> fetchStockMovementReport({
+    required DateTime startDate,
+    required DateTime endDate,
+    String locationFilter = 'ALL',
+  }) async {
+    try {
+      final startOfLocalDayUtc = DateTime(
+        startDate.year,
+        startDate.month,
+        startDate.day,
+      ).toUtc().toIso8601String();
+
+      final endOfLocalDayUtc = DateTime(
+        endDate.year,
+        endDate.month,
+        endDate.day,
+        23,
+        59,
+        59,
+        999,
+      ).toUtc().toIso8601String();
+
+      final normLoc = StockUtils.normalizeLocation(locationFilter);
+
+      final response = await SupabaseService.client
+          .rpc('get_stock_movement_report', params: {
+        'start_date': startOfLocalDayUtc,
+        'end_date': endOfLocalDayUtc,
+        'loc_filter': normLoc,
+      });
+      return List<Map<String, dynamic>>.from(response as List);
+    } catch (e) {
+      debugPrint(
+          '[DataRepository] Error fetching stock movement report RPC: $e');
+      return [];
+    }
+  }
+
+  /// Calls RPC 'get_stock_ledger' for item transaction history with running balance.
+  static Future<List<Map<String, dynamic>>> fetchStockLedgerRpc({
+    required int materialId,
+    int? sizeId,
+  }) async {
+    try {
+      final params = <String, dynamic>{'p_material_id': materialId};
+      if (sizeId != null) params['p_size_id'] = sizeId;
+      final response =
+          await SupabaseService.client.rpc('get_stock_ledger', params: params);
+      return List<Map<String, dynamic>>.from(response as List);
+    } catch (e) {
+      debugPrint('[DataRepository] Error fetching stock ledger RPC: $e');
+      return [];
+    }
+  }
+
+  /// Uses backend RPC 'get_stock_movement_report' to compute opening balance,
+  /// period inward, period outward, and closing stock per item size.
+  static Future<Map<String, Map<String, dynamic>>> fetchStockLedgerDataFromRpc({
+    required DateTime startDate,
+    required DateTime endDate,
+    String selectedLocation = 'ALL',
+  }) async {
+    final rows = await fetchStockMovementReport(
+      startDate: startDate,
+      endDate: endDate,
+      locationFilter: selectedLocation,
+    );
+
+    final Map<String, Map<String, dynamic>> ledgerMap = {};
+    for (final row in rows) {
+      final itemName = row['item_name']?.toString() ?? '';
+      final size = row['size_label']?.toString() ?? '';
+      final key = '${itemName}_$size';
+      final double op = _parseDouble(row['opening_stock_mt']);
+      final double pIn = _parseDouble(row['period_in_mt']);
+      final double pOut = _parseDouble(row['period_out_mt']);
+      final double cl = _parseDouble(row['closing_stock_mt']);
+
+      final String cat = canonicalizeCategory(itemName);
+
+      if (!ledgerMap.containsKey(key)) {
+        ledgerMap[key] = {
+          'itemName': itemName,
+          'category': cat,
+          'category_name': cat,
+          'size': size,
+          'opening': op,
+          'opening_mt': op,
+          'opening_balance': op,
+          'inward': pIn,
+          'outward': pOut,
+          'closing': cl,
+          'closing_mt': cl,
+        };
+      } else {
+        final existing = ledgerMap[key]!;
+        final double newOp = (existing['opening'] as double) + op;
+        existing['opening'] = newOp;
+        existing['opening_mt'] = newOp;
+        existing['opening_balance'] = newOp;
+        existing['inward'] = (existing['inward'] as double) + pIn;
+        existing['outward'] = (existing['outward'] as double) + pOut;
+        final double newCl = (existing['closing'] as double) + cl;
+        existing['closing'] = newCl;
+        existing['closing_mt'] = newCl;
+      }
+    }
+    return ledgerMap;
+  }
+
+  /// Safely converts dynamic values into doubles for stock calculations.
+  static double _parseDouble(dynamic val) {
+    if (val == null) return 0.0;
+    if (val is num) return val.toDouble();
+    return double.tryParse(val.toString()) ?? 0.0;
+  }
+
+  /// Fetches low stock items directly from Supabase view 'v_low_stock'.
+  static Future<List<Map<String, dynamic>>> fetchLowStockItems({
+    String locationFilter = 'ALL',
+    double defaultMinStock = 5.0,
+  }) async {
+    try {
+      final viewRows = await fetchLowStockView(locationFilter);
+      if (viewRows.isNotEmpty) {
+        return viewRows;
+      }
+      final rawList = await fetchCurrentStock(locationFilter);
+      final Map<dynamic, Map<String, dynamic>> uniqueSizesMap = {};
+
+      for (var item in rawList) {
+        final loc = item['location']?.toString().toUpperCase() ?? 'YARD';
+        if (locationFilter != 'ALL' && loc != locationFilter.toUpperCase()) {
+          continue;
+        }
+
+        final sizeId = item['size_id'] ??
+            item['size_label'] ??
+            '${item['item_name'] ?? item['category']}|${item['size']}';
+
+        final double closingMt = _parseDouble(item['closing_mt'] ??
+            item['net_stock_mt'] ??
+            item['qty_mt'] ??
+            item['currentStockMT'] ??
+            item['qty']);
+
+        if (!uniqueSizesMap.containsKey(sizeId)) {
+          final newItem = Map<String, dynamic>.from(item);
+          newItem['closing_mt'] = closingMt;
+          newItem['low_stock_qty'] = closingMt;
+          newItem['net_stock_mt'] = closingMt;
+          newItem['currentStockMT'] = closingMt;
+          newItem['size_id'] = sizeId;
+          uniqueSizesMap[sizeId] = newItem;
+        } else {
+          // Aggregate tonnage if multi-location entries exist
+          final existingMt =
+              _parseDouble(uniqueSizesMap[sizeId]!['closing_mt']);
+          final newTotal = existingMt + closingMt;
+          uniqueSizesMap[sizeId]!['closing_mt'] = newTotal;
+          uniqueSizesMap[sizeId]!['low_stock_qty'] = newTotal;
+          uniqueSizesMap[sizeId]!['net_stock_mt'] = newTotal;
+          uniqueSizesMap[sizeId]!['currentStockMT'] = newTotal;
+        }
+      }
+
+      final List<Map<String, dynamic>> result =
+          uniqueSizesMap.values.where((item) {
+        final double qty = _parseDouble(item['closing_mt']);
+        final double minStock = _parseDouble(
+            item['min_stock'] ?? item['minStock'] ?? defaultMinStock);
+        return qty <= minStock;
+      }).toList();
+
+      result.sort((a, b) {
+        final catA = (a['category'] ?? a['item_name'] ?? '').toString();
+        final catB = (b['category'] ?? b['item_name'] ?? '').toString();
+        int catComp = SortingUtils.compareCategories(catA, catB);
+        if (catComp != 0) return catComp;
+        final double qtyA = _parseDouble(a['closing_mt'] ??
+            a['qty_mt'] ??
+            a['stock'] ??
+            a['low_stock_qty'] ??
+            a['currentStockMT']);
+        final double qtyB = _parseDouble(b['closing_mt'] ??
+            b['qty_mt'] ??
+            b['stock'] ??
+            b['low_stock_qty'] ??
+            b['currentStockMT']);
+        int qtyComp = qtyB.compareTo(qtyA);
+        if (qtyComp != 0) return qtyComp;
+        final sizeA = (a['size_label'] ?? a['size'] ?? '').toString();
+        final sizeB = (b['size_label'] ?? b['size'] ?? '').toString();
+        return SortingUtils.compareSizes(sizeA, sizeB);
+      });
+
+      return result;
+    } catch (e) {
+      debugPrint('[DataRepository] Error fetching low stock items: $e');
+      return [];
+    }
+  }
+
+  /// Queries 'v_current_stock', groups by 'item_name' (or category),
+  /// and aggregates 'net_stock_mt' directly across all size rows
+  /// (without filtering out negative size balances).
+  static Future<Map<String, double>> fetchLiveStockByCategories(
+      [String locationFilter = 'ALL']) async {
+    final rows = await fetchCurrentStock(locationFilter);
+    final Map<String, double> categoryTotals = {};
+
+    for (final row in rows) {
+      final String itemName = row['item_name']?.toString() ??
+          row['category']?.toString() ??
+          'Other';
+      final double netStock = (row['net_stock_mt'] as num?)?.toDouble() ??
+          (row['qty_mt'] as num?)?.toDouble() ??
+          0.0;
+      categoryTotals[itemName] = (categoryTotals[itemName] ?? 0.0) + netStock;
+    }
+
+    return categoryTotals;
+  }
+
+  static Future<void> refreshAllStockData({bool forceRefresh = false}) async {
+    try {
+      isSyncing.value = true;
+      await ensureMasterLookupData();
+
+      // 1. Authoritative Current Stock from v_current_stock view
+      final stockRows = await fetchCurrentStock('ALL');
+      List<ItemVariant> list = [];
+      if (stockRows.isNotEmpty) {
+        list = stockRows
+            .map((row) {
+              final itemName = resolveItemName(row);
+              final sizeLabel = resolveSizeLabel(row);
+              final location =
+                  StockUtils.normalizeLocation(row['location']?.toString() ?? 'YARD');
+              final netStock = (row['net_stock_mt'] as num?)?.toDouble() ??
+                  double.tryParse(row['net_stock_mt']?.toString() ?? '') ??
+                  0.0;
+              final rawSizeId = row['item_size_id'] ?? row['size_id'] ?? row['id'];
+              final itemSizeId =
+                  rawSizeId is int ? rawSizeId : int.tryParse(rawSizeId?.toString() ?? '');
+              final rawWeight = row['unit_weight_kg'] ?? row['unitWeightKg'] ?? row['weight'];
+              final unitWeightKg = (rawWeight is num)
+                  ? rawWeight
+                  : num.tryParse(rawWeight?.toString() ?? '');
+              return ItemVariant(
+                itemSizeId: itemSizeId,
+                itemName: itemName,
+                category: canonicalizeCategory(itemName),
+                size: sizeLabel,
+                unitWeightKg: unitWeightKg,
+                currentStockMT: netStock,
+                location: location,
+              );
+            })
+            .toList();
+      }
+
+      list.sort((a, b) {
+        int catComp = SortingUtils.compareCategories(a.category, b.category);
+        if (catComp != 0) return catComp;
+        int itemComp = a.itemName.compareTo(b.itemName);
+        if (itemComp != 0) return itemComp;
+        int locComp = a.location.compareTo(b.location);
+        if (locComp != 0) return locComp;
+        return SortingUtils.compareSizes(a.size, b.size);
+      });
+
+      totalStockNotifier.value = list.fold(0.0, (s, v) => s + v.currentStockMT);
+      yardStockNotifier.value = list
+          .where((v) => StockUtils.normalizeLocation(v.location) == 'YARD')
+          .fold(0.0, (s, v) => s + v.currentStockMT);
+      factoryStockNotifier.value = list
+          .where((v) => StockUtils.normalizeLocation(v.location) == 'FACTORY')
+          .fold(0.0, (s, v) => s + v.currentStockMT);
+      inventoryListNotifier.value = list;
+      _updateErpStockNotifierFromInventoryList(list);
+
+      // 2. Transactions list with joined names
+      final response = await SupabaseService.client
+          .from('transactions')
+          .select('*')
+          .order('created_at', ascending: false)
+          .limit(10000);
+
+      final List<StockTransaction> txns = response.where((row) {
+        final txnType = row['txn_type']?.toString().toUpperCase() ?? '';
+        final type = row['type']?.toString().toUpperCase() ?? '';
+        final txnId = row['txn_id']?.toString() ?? '';
+        return txnType != 'PURCHASE' &&
+            type != 'PURCHASE' &&
+            !txnId.startsWith('S-17') &&
+            !txnId.startsWith('IN_V_');
+      }).map((row) {
+        final itemName = resolveItemName(row);
+        return StockTransaction(
+          txnId: row['txn_id']?.toString() ?? row['id'].toString(),
+          dateTime: ReportsRepository.parseRowDateTime(row),
+          itemName: itemName,
+          size: resolveSizeLabel(row),
+          type: row['txn_type']?.toString() ?? row['type']?.toString() ?? 'IN',
+          qtyMT: (row['qty_mt'] as num?)?.toDouble() ?? 0.0,
+          location: row['location']?.toString() ?? 'YARD',
+          toLocation: row['to_location']?.toString(),
+          reason: row['reason']?.toString(),
+          note: row['note']?.toString(),
+          invoiceNo: row['invoice_no']?.toString(),
+          lorryNo: row['lorry_no']?.toString(),
+          transportCo: row['transport_co']?.toString(),
+          driverName: row['driver_name']?.toString(),
+          driverPhone: row['driver_phone']?.toString(),
+          partyName: row['party_name']?.toString(),
+          contactNo: row['contact_no']?.toString(),
+          batchId: row['batch_id']?.toString(),
+          user: row['user']?.toString(),
+          isReversed: row['is_reversed'] == true,
+          category: canonicalizeCategory(itemName),
+        );
+      }).toList();
+
+      allTransactionsNotifier.value = txns;
+      transactionsNotifier.value = txns;
+    } catch (e) {
+      debugPrint("Error refreshing all stock data from Supabase: $e");
+    } finally {
+      isSyncing.value = false;
+    }
+  }
+
+  static void _updateErpStockNotifierFromInventoryList(
+      List<ItemVariant> inventoryList) {
+    double yardTotal = 0;
+    double factoryTotal = 0;
+
+    // Group by location
+    final Map<String, List<ItemVariant>> locGroups = {};
+    for (var v in inventoryList) {
+      final loc = StockUtils.normalizeLocation(v.location);
+      locGroups.putIfAbsent(loc, () => []);
+      locGroups[loc]!.add(v);
+      if (loc == 'YARD') yardTotal += v.currentStockMT;
+      if (loc == 'FACTORY') factoryTotal += v.currentStockMT;
+    }
+
+    final List<Map<String, dynamic>> formattedLocations = [];
+    locGroups.forEach((locName, variants) {
+      // Group variants by itemName
+      final Map<String, List<ItemVariant>> itemGroups = {};
+      for (var v in variants) {
+        itemGroups.putIfAbsent(v.itemName, () => []);
+        itemGroups[v.itemName]!.add(v);
+      }
+
+      final List<Map<String, dynamic>> itemsList = [];
+      itemGroups.forEach((itemName, itemVariants) {
+        final double totalQty =
+            itemVariants.fold(0.0, (sum, v) => sum + v.currentStockMT);
+        final List<Map<String, dynamic>> formattedVariants =
+            itemVariants.map((v) {
+          return {
+            'size': v.size,
+            'qtyMT': v.currentStockMT,
+            'stockStatus': v.currentStockMT <= 0
+                ? 'Out of Stock'
+                : (v.currentStockMT <= v.minStock ? 'Low Stock' : 'In Stock'),
+          };
+        }).toList();
+
+        itemsList.add({
+          'itemName': itemName,
+          'category': itemVariants.first.category,
+          'totalQty': totalQty,
+          'variants': formattedVariants,
+        });
+      });
+
+      itemsList.sort((a, b) {
+        int catComp = ItemOrderUtil.compare(
+            a['category']?.toString(), b['category']?.toString());
+        if (catComp != 0) return catComp;
+        return a['itemName'].toString().compareTo(b['itemName'].toString());
+      });
+
+      formattedLocations.add({
+        'location': locName,
+        'totalStock': locName == 'YARD' ? yardTotal : factoryTotal,
+        'items': itemsList,
+      });
+    });
+
+    // Ensure both YARD and FACTORY exist in list
+    if (!formattedLocations.any((l) => l['location'] == 'YARD')) {
+      formattedLocations
+          .add({'location': 'YARD', 'totalStock': 0.0, 'items': []});
+    }
+    if (!formattedLocations.any((l) => l['location'] == 'FACTORY')) {
+      formattedLocations
+          .add({'location': 'FACTORY', 'totalStock': 0.0, 'items': []});
+    }
+
+    final double grandTotal = yardTotal + factoryTotal;
+    final double todayInVal = todayInNotifier.value;
+    final double todayOutVal = todayOutNotifier.value;
+    final int activeItemsVal =
+        inventoryList.map((e) => e.itemName).toSet().length;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final erpMap = {
+        'summary': {
+          'grandTotal': grandTotal,
+          'activeItems': activeItemsVal,
+          'todayIn': todayInVal,
+          'todayOut': todayOutVal,
+          'yardStock': yardTotal,
+          'factoryStock': factoryTotal,
+          'locationStocks': {
+            'YARD': yardTotal,
+            'FACTORY': factoryTotal,
+          }
+        },
+        'locations': formattedLocations
+      };
+      try {
+        _box.put('erp_stock', jsonEncode(erpMap));
+      } catch (_) {}
+      erpStockNotifier.value = erpMap;
+    });
+  }
+
+  /// Fetches today's summary by calling the RPC 'get_stock_movement_report' for the given date window.
+  static Future<List<Map<String, dynamic>>> fetchTodaysSummary({
+    String locationFilter = 'ALL',
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    final now = DateTime.now();
+    final start = startDate ?? DateTime(now.year, now.month, now.day);
+    final end = endDate ??
+        DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
+    return fetchStockMovementReport(
+      startDate: start,
+      endDate: end,
+      locationFilter: locationFilter,
+    );
+  }
+
+  /// Calls RPC 'get_stock_movement_report' to compute opening balance,
+  /// period inward, period outward, and closing stock per item size,
+  /// structured as [StockMovementEntry] instances for reports and exports.
+  static Future<List<StockMovementEntry>> fetchStockMovementEntries({
+    required DateTime startDate,
+    required DateTime endDate,
+    String location = 'ALL',
+  }) async {
+    await ensureMasterLookupData();
+
+    final rows = await fetchStockMovementReport(
+      startDate: startDate,
+      endDate: endDate,
+      locationFilter: location,
+    );
+
+    final Map<String, StockMovementEntry> itemMap = {};
+
+    for (final row in rows) {
+      final itemName = row['item_name']?.toString() ?? '';
+      final size = row['size_label']?.toString() ?? '';
+      final cat = canonicalizeCategory(itemName);
+
+      final op = _parseDouble(row['opening_stock_mt']);
+      final pIn = _parseDouble(row['period_in_mt']);
+      final pOut = _parseDouble(row['period_out_mt']);
+      final cl = _parseDouble(row['closing_stock_mt']);
+
+      final key = "${cat.toUpperCase()}_${itemName.toUpperCase()}";
+      itemMap.putIfAbsent(
+        key,
+        () => StockMovementEntry(
+          category: cat,
+          item: itemName,
+          sizes: [],
+        ),
+      );
+
+      final existingIdx =
+          itemMap[key]!.sizes.indexWhere((s) => s.label == size);
+      if (existingIdx >= 0) {
+        final prev = itemMap[key]!.sizes[existingIdx];
+        itemMap[key]!.sizes[existingIdx] = StockSizeMovement(
+          label: size,
+          opening: prev.opening + op,
+          inQty: prev.inQty + pIn,
+          outQty: prev.outQty + pOut,
+          closing: prev.closing + cl,
+        );
+      } else {
+        itemMap[key]!.sizes.add(StockSizeMovement(
+          label: size,
+          opening: op,
+          inQty: pIn,
+          outQty: pOut,
+          closing: cl,
+        ));
+      }
+    }
+
+    // Comprehensive catalog inclusion: Guarantee all registered sizes from master item_sizes exist
+    for (final s in itemSizesNotifier.value) {
+      final matName = s['material_name']?.toString() ??
+          s['materialName']?.toString() ??
+          '';
+      final cat = canonicalizeCategory(matName);
+      final sizeLabel = s['size_label']?.toString() ??
+          s['sizeLabel']?.toString() ??
+          s['label']?.toString() ??
+          '';
+      if (sizeLabel.isEmpty) continue;
+
+      final key = "${cat.toUpperCase()}_${matName.toUpperCase()}";
+      itemMap.putIfAbsent(
+        key,
+        () => StockMovementEntry(
+          category: cat,
+          item: matName,
+          sizes: [],
+        ),
+      );
+
+      if (!itemMap[key]!.sizes.any((existing) => existing.label == sizeLabel)) {
+        itemMap[key]!.sizes.add(StockSizeMovement(
+          label: sizeLabel,
+          opening: 0.0,
+          inQty: 0.0,
+          outQty: 0.0,
+          closing: 0.0,
+        ));
+      }
+    }
+
+    final list = itemMap.values.toList();
+    list.sort((a, b) => SortingUtils.compareCategories(a.item, b.item));
+    for (var entry in list) {
+      entry.sizes.sort((a, b) => SortingUtils.compareSizes(a.label, b.label));
+    }
+    return list;
+  }
+
+  static Future<bool> submitTransactions(
+      BuildContext context, List<dynamic> transactions) async {
+    isSyncing.value = true;
+    try {
+      final result = SyncResult(success: true); // Stubbed
+
+      if (!result.success) {
+        throw "Unknown Server Error";
+      }
+
+      // 1. Refresh ALL Stock Data (Transactions + Derived Metrics)
+      await refreshAllStockData(forceRefresh: true);
+
+      return true;
+    } catch (e) {
+      debugPrint("Transaction failed: $e");
+      rethrow;
+    } finally {
+      isSyncing.value = false;
+    }
+  }
+
+  static const String _resetTimestampKey = 'stock_dashboard_last_reset';
+  static const String _vendorResetTimestampKey = 'vendor_purchase_last_reset';
+
+  static Future<DateTime?> getLastResetTimestamp() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tsStr = prefs.getString(_resetTimestampKey);
+    if (tsStr == null) return null;
+    return DateTime.tryParse(tsStr);
+  }
+
+  static Future<void> setLastResetTimestamp(DateTime dt) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_resetTimestampKey, dt.toIso8601String());
+  }
+
+  static Future<DateTime?> getVendorResetTimestamp() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tsStr = prefs.getString(_vendorResetTimestampKey);
+    if (tsStr == null) return null;
+    return DateTime.tryParse(tsStr);
+  }
+
+  static Future<void> setVendorResetTimestamp(DateTime dt) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_vendorResetTimestampKey, dt.toIso8601String());
+  }
+
+  static Future<void> clearLocalCacheOnly() async {
+    await _box.clear(); // 🚀 Wipe EVERYTHING in the cache box
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('stock_transactions_v2');
+    // await SheetService.clearPendingTransactions();
+
+    final now = DateTime.now();
+    await setLastResetTimestamp(now);
+    debugPrint("App Reset Triggered. New Cutoff: $now");
+
+    allTransactionsNotifier.value = [];
+    transactionsNotifier.value = [];
+    totalStockNotifier.value = 0.0;
+    yardStockNotifier.value = 0.0;
+    factoryStockNotifier.value = 0.0;
+    todayInNotifier.value = 0.0;
+    todayOutNotifier.value = 0.0;
+    inventoryListNotifier.value = [];
+
+    erpStockNotifier.value = {
+      "summary": {"yardStock": 0, "factoryStock": 0, "grandTotal": 0},
+      "locations": []
+    };
+    sheetDataNotifier.value = {
+      'meta': {'gst_rate': '0.18', 'loading_charge': '255'},
+      'items': []
+    };
+
+    await refreshAllStockData(forceRefresh: true);
+  }
+
+  static Future<void> clearVendorPurchaseCache() async {
+    await _box.delete('sauda_reports');
+    vendorTotalQtyNotifier.value = 0.0;
+    vendorAvgRateNotifier.value = 0.0;
+    vendorSaudaListNotifier.value = [];
+    await setVendorResetTimestamp(DateTime.now());
+  }
+
+  static Future<void> clearLocalStockCache() async {
+    if (_box.isOpen) {
+      await _box.delete('erp_stock');
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('cached_total_stock');
+
+    totalStockNotifier.value = 0.0;
+    yardStockNotifier.value = 0.0;
+    factoryStockNotifier.value = 0.0;
+    todayInNotifier.value = 0.0;
+    todayOutNotifier.value = 0.0;
+    inventoryListNotifier.value = [];
+    erpStockNotifier.value = {
+      "summary": {"yardStock": 0, "factoryStock": 0, "grandTotal": 0},
+      "locations": []
+    };
+    debugPrint("[DataRepository] Stock local memory and Hive cache flushed.");
+  }
+
+  static Stream<List<StockTransaction>> getSupabaseTransactionsStream() {
+    return SupabaseService.client
+        .from('transactions')
+        .stream(primaryKey: ['id'])
+        .order('created_at', ascending: false)
+        .map((list) => list
+            .where((row) {
+              final txnType = row['txn_type']?.toString().toUpperCase() ?? '';
+              final type = row['type']?.toString().toUpperCase() ?? '';
+              final txnId = row['txn_id']?.toString() ?? '';
+              return txnType != 'PURCHASE' &&
+                  type != 'PURCHASE' &&
+                  !txnId.startsWith('S-17') &&
+                  !txnId.startsWith('IN_V_');
+            })
+            .map((row) {
+              final txnType = row['txn_type']?.toString() ??
+                  row['type']?.toString() ??
+                  'IN';
+              final txnId =
+                  row['txn_id']?.toString() ?? row['id']?.toString() ?? '';
+              return StockTransaction(
+                txnId: txnId,
+                dateTime: ReportsRepository.parseRowDateTime(row),
+                itemName: resolveItemName(row),
+                size: resolveSizeLabel(row),
+                type: txnType,
+                qtyMT: (row['qty_mt'] as num?)?.toDouble() ?? 0.0,
+                location: row['location']?.toString() ?? 'YARD',
+                toLocation: row['to_location']?.toString(),
+                reason: row['reason']?.toString(),
+                note: row['note']?.toString(),
+                invoiceNo: row['invoice_no']?.toString(),
+                lorryNo: row['lorry_no']?.toString(),
+                transportCo: row['transport_co']?.toString(),
+                driverName: row['driver_name']?.toString(),
+                driverPhone: row['driver_phone']?.toString(),
+                partyName: row['party_name']?.toString(),
+                contactNo: row['contact_no']?.toString(),
+                batchId: row['batch_id']?.toString(),
+                user: row['user']?.toString(),
+                isReversed: row['is_reversed'] == true,
+              );
+            })
+            .whereType<StockTransaction>()
+            .toList());
+  }
+
+  static Stream<List<ItemVariant>> getSupabaseStockStream() {
+    return getSupabaseTransactionsStream().asyncMap((_) async {
+      await ensureMasterLookupData();
+      final stockRows = await fetchCurrentStock('ALL');
+      final List<ItemVariant> stockList = stockRows
+          .map((row) {
+            final itemName = resolveItemName(row);
+            final sizeLabel = resolveSizeLabel(row);
+            final location =
+                StockUtils.normalizeLocation(row['location']?.toString() ?? 'YARD');
+            final netStock = _parseDouble(row['net_stock_mt']);
+            final rawSizeId = row['item_size_id'] ?? row['size_id'] ?? row['id'];
+            final itemSizeId =
+                rawSizeId is int ? rawSizeId : int.tryParse(rawSizeId?.toString() ?? '');
+            final rawWeight = row['unit_weight_kg'] ?? row['unitWeightKg'] ?? row['weight'];
+            final unitWeightKg = (rawWeight is num)
+                ? rawWeight
+                : num.tryParse(rawWeight?.toString() ?? '');
+            return ItemVariant(
+              itemSizeId: itemSizeId,
+              itemName: itemName,
+              category: canonicalizeCategory(itemName),
+              size: sizeLabel,
+              unitWeightKg: unitWeightKg,
+              currentStockMT: netStock,
+              location: location,
+            );
+          })
+          .where((v) => v.currentStockMT != 0)
+          .toList();
+
+      stockList.sort((a, b) {
+        int catComp = SortingUtils.compareCategories(a.category, b.category);
+        if (catComp != 0) return catComp;
+        int itemComp = a.itemName.compareTo(b.itemName);
+        if (itemComp != 0) return itemComp;
+        int locComp = a.location.compareTo(b.location);
+        if (locComp != 0) return locComp;
+        return SortingUtils.compareSizes(a.size, b.size);
+      });
+
+      return stockList;
+    });
+  }
+
+  static Future<List<MaterialModel>> getSupabaseMaterials() async {
+    final list = await SupabaseService().fetchMaterials();
+    return list.map((map) => MaterialModel.fromSupabaseMap(map)).toList();
+  }
+
+  static Future<SyncResult> deletePurchaseEntry(String id) async {
+    try {
+      if (id.isEmpty) {
+        return SyncResult(
+            success: false, errorMessage: "Invalid transaction ID");
+      }
+
+      try {
+        await SupabaseService.client
+            .from('transactions')
+            .delete()
+            .eq('txn_id', id);
+      } catch (e) {
+        debugPrint("[DataRepository] Delete by txn_id error: $e");
+      }
+
+      if (int.tryParse(id) != null) {
+        try {
+          await SupabaseService.client
+              .from('transactions')
+              .delete()
+              .eq('id', int.parse(id));
+        } catch (e) {
+          debugPrint("[DataRepository] Delete by id error: $e");
+        }
+      }
+
+      // Update local cache notifier
+      final currentList = List<dynamic>.from(vendorSaudaListNotifier.value);
+      currentList.removeWhere((e) =>
+          (e['srNo']?.toString() == id) ||
+          (e['id']?.toString() == id) ||
+          (e['txn_id']?.toString() == id));
+      vendorSaudaListNotifier.value = currentList;
+
+      return SyncResult(success: true);
+    } catch (e) {
+      debugPrint("[DataRepository] deletePurchaseEntry Error: $e");
+      return SyncResult(success: false, errorMessage: e.toString());
+    }
+  }
+
+  static Future<SyncResult> toggleSaudaHiddenStatus({
+    required String saudaId,
+    required bool isHidden,
+  }) async {
+    return SheetService.toggleSaudaHiddenStatus(
+        saudaId: saudaId, isHidden: isHidden);
+  }
+
+  static Future<SyncResult> updatePurchaseEntry({
+    required String saudaId,
+    required double qtyMt,
+    required double rate,
+    String? vendorName,
+    String? itemName,
+    String? size,
+    String? region,
+    String? location,
+    String? date,
+  }) async {
+    return SheetService.updatePurchaseEntry(
+      saudaId: saudaId,
+      qtyMt: qtyMt,
+      rate: rate,
+      vendorName: vendorName,
+      itemName: itemName,
+      size: size,
+      region: region,
+      location: location,
+      date: date,
+    );
+  }
+
+  /// Fetches stock transactions up to [endDate] for calculating date-bounded stock movements.
+  static Future<List<StockTransaction>> fetchStockMovement({
+    required DateTime startDate,
+    required DateTime endDate,
+    String? location,
+  }) async {
+    await ensureMasterLookupData();
+
+    var query = SupabaseService.client
+        .from('transactions')
+        .select('*')
+        .not('txn_id', 'like', 'IN_V_%');
+
+    if (location != null && location != 'ALL') {
+      final normLoc = StockUtils.normalizeLocation(location);
+      query = query.or('location.ilike.%$normLoc%,to_location.ilike.%$normLoc%');
+    }
+
+    final response =
+        await query.order('created_at', ascending: false).limit(10000);
+
+    final List<StockTransaction> txns = (response as List).where((row) {
+      final txnId = row['txn_id']?.toString() ?? '';
+      final isReversed = row['is_reversed'] == true;
+      final txnType = row['txn_type']?.toString().toUpperCase() ?? '';
+      final type = row['type']?.toString().toUpperCase() ?? '';
+      return !isReversed &&
+          !txnId.startsWith('S-17') &&
+          !txnId.startsWith('IN_V_') &&
+          txnType != 'PURCHASE' &&
+          type != 'PURCHASE';
+    }).map((row) {
+      final itemName = resolveItemName(row);
+      return StockTransaction(
+        txnId: row['txn_id']?.toString() ?? row['id'].toString(),
+        dateTime: ReportsRepository.parseRowDateTime(row),
+        itemName: itemName,
+        size: resolveSizeLabel(row),
+        type: row['txn_type']?.toString() ?? row['type']?.toString() ?? 'IN',
+        qtyMT: (row['qty_mt'] as num?)?.toDouble() ?? 0.0,
+        location: row['location']?.toString() ?? 'YARD',
+        toLocation: row['to_location']?.toString(),
+        reason: row['reason']?.toString(),
+        note: row['note']?.toString(),
+        invoiceNo: row['invoice_no']?.toString(),
+        lorryNo: row['lorry_no']?.toString(),
+        transportCo: row['transport_co']?.toString(),
+        driverName: row['driver_name']?.toString(),
+        driverPhone: row['driver_phone']?.toString(),
+        partyName: row['party_name']?.toString(),
+        contactNo: row['contact_no']?.toString(),
+        batchId: row['batch_id']?.toString(),
+        user: row['user']?.toString(),
+        isReversed: row['is_reversed'] == true,
+        category: canonicalizeCategory(itemName),
+      );
+    }).toList();
+
+    return txns;
+  }
+
+  /// Calculates stock ledger opening balance, inward, outward, and closing MT per size.
+  /// Opening Stock = SUM(qty_mt where txn_type IN ('IN','INWARD','OPENING_STOCK','OPENING','RETURN') AND created_at < startDate)
+  ///                 - SUM(qty_mt where txn_type IN ('OUT','OUTWARD','SALE','TRANSFER') AND created_at < startDate)
+  /// Period Inward = SUM(qty_mt where txn_type IN ('IN','INWARD','OPENING_STOCK','OPENING','RETURN') AND created_at BETWEEN startDate AND endDate)
+  /// Period Outward = SUM(qty_mt where txn_type IN ('OUT','TRANSFER') AND created_at BETWEEN startDate AND endDate)
+  /// Net Remaining Stock = Opening Stock + Period Inward - Period Outward
+  static Map<String, Map<String, dynamic>> calculateStockLedgerData({
+    required List<StockTransaction> transactions,
+    required DateTime startDate,
+    required DateTime endDate,
+    String selectedLocation = 'ALL',
+  }) {
+    final startOfDay = DateTime(startDate.year, startDate.month, startDate.day);
+    final endOfDay =
+        DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59, 999);
+    final selectedLoc = StockUtils.normalizeLocation(selectedLocation);
+
+    final Map<String, Map<String, dynamic>> ledgerMap = {};
+
+    // 1. Pre-populate ledgerMap with known inventory sizes to preserve items with 0 movements
+    for (final v in inventoryListNotifier.value) {
+      if (selectedLoc != 'ALL' &&
+          StockUtils.normalizeLocation(v.location) != selectedLoc) {
+        continue;
+      }
+      final String cat = canonicalizeCategory(v.category);
+      final key = "${v.itemName}_${v.size}";
+      ledgerMap.putIfAbsent(
+        key,
+        () => {
+          'itemName': v.itemName,
+          'category': cat,
+          'category_name': cat,
+          'size': v.size,
+          'opening': 0.0,
+          'opening_mt': 0.0,
+          'opening_balance': 0.0,
+          'inward': 0.0,
+          'outward': 0.0,
+          'closing': 0.0,
+          'closing_mt': 0.0,
+        },
+      );
+    }
+
+    for (var tx in transactions) {
+      if (tx.isReversed) continue;
+      if (tx.txnId.startsWith('S-17')) continue;
+      if (tx.txnId.startsWith('IN_V_')) continue;
+
+      final String txLoc = StockUtils.normalizeLocation(tx.location);
+      final String toLoc = StockUtils.normalizeLocation(tx.toLocation ?? '');
+      final String type = tx.type.trim().toUpperCase();
+
+      // Explicitly ignore PURCHASE transactions for warehouse stock
+      if (type == 'PURCHASE') continue;
+
+      bool isRelevant = false;
+      bool isTransferIn = false;
+      bool isTransferOut = false;
+
+      if (selectedLoc == 'ALL') {
+        isRelevant = true;
+      } else {
+        if (txLoc == selectedLoc) {
+          isRelevant = true;
+          if (type == 'TRANSFER') {
+            isTransferOut = true;
+          }
+        }
+        if (toLoc == selectedLoc && type == 'TRANSFER') {
+          isRelevant = true;
+          isTransferIn = true;
+        }
+      }
+
+      if (!isRelevant) continue;
+
+      final key = "${tx.itemName}_${tx.size}";
+      final String cat = canonicalizeCategory(
+          tx.category.isNotEmpty && tx.category != 'General'
+              ? tx.category
+              : tx.itemName);
+
+      ledgerMap.putIfAbsent(
+          key,
+          () => {
+                'itemName': tx.itemName,
+                'category': cat,
+                'category_name': cat,
+                'size': tx.size,
+                'opening': 0.0,
+                'opening_mt': 0.0,
+                'opening_balance': 0.0,
+                'inward': 0.0,
+                'outward': 0.0,
+                'closing': 0.0,
+                'closing_mt': 0.0,
+              });
+
+      final entry = ledgerMap[key]!;
+      final double qty = tx.qtyMT.abs();
+
+      double txIn = 0.0;
+      double txOut = 0.0;
+
+      if (selectedLoc != 'ALL' && type == 'TRANSFER') {
+        if (isTransferIn) txIn = qty;
+        if (isTransferOut) txOut = qty;
+      } else if (type == 'TRANSFER') {
+        txIn = 0.0;
+        txOut = 0.0;
+      } else if (['IN', 'INWARD', 'OPENING_STOCK', 'OPENING', 'RETURN'].contains(type)) {
+        txIn = qty;
+      } else if (['OUT', 'OUTWARD', 'SALE', 'RESERVE'].contains(type)) {
+        txOut = qty;
+      } else if (type == 'ADJUSTMENT') {
+        if (tx.qtyMT >= 0) {
+          txIn = qty;
+        } else {
+          txOut = qty;
+        }
+      }
+
+      final bool isOpeningTxn = type == 'OPENING' ||
+          type == 'OPENING_STOCK' ||
+          tx.txnId.startsWith('OPENING-');
+
+      if (tx.dateTime.isBefore(startOfDay) || isOpeningTxn) {
+        final double currentOp = (entry['opening'] as double) + (txIn - txOut);
+        entry['opening'] = currentOp;
+        entry['opening_mt'] = currentOp;
+        entry['opening_balance'] = currentOp;
+      } else if ((tx.dateTime.isAtSameMomentAs(startOfDay) ||
+              tx.dateTime.isAfter(startOfDay)) &&
+          (tx.dateTime.isAtSameMomentAs(endOfDay) ||
+              tx.dateTime.isBefore(endOfDay))) {
+        entry['inward'] = (entry['inward'] as double) + txIn;
+        entry['outward'] = (entry['outward'] as double) + txOut;
+      }
+    }
+
+    for (var entry in ledgerMap.values) {
+      final double op = entry['opening'] as double;
+      final double inQty = entry['inward'] as double;
+      final double outQty = entry['outward'] as double;
+      final double cl = op + inQty - outQty;
+      entry['closing'] = cl;
+      entry['closing_mt'] = cl;
+    }
+
+    ledgerMap.removeWhere((k, v) =>
+        (v['opening'] as double) == 0.0 &&
+        (v['inward'] as double) == 0.0 &&
+        (v['outward'] as double) == 0.0 &&
+        (v['closing'] as double) == 0.0);
+
+    return ledgerMap;
+  }
+
+  // ── Customer / Delivery Addresses Cache ─────────────────────────────────────
+  static final Map<String, String> customerAddressCache = {};
+
+  /// Loads cached customer addresses from SharedPreferences / Hive
+  static Future<void> loadCustomerAddresses() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final rawJson = prefs.getString('customer_addresses_cache');
+      if (rawJson != null && rawJson.isNotEmpty) {
+        final Map<String, dynamic> decoded = jsonDecode(rawJson);
+        for (final entry in decoded.entries) {
+          customerAddressCache[entry.key.toLowerCase()] = entry.value.toString();
+        }
+      }
+    } catch (e) {
+      debugPrint('[DataRepository] Error loading customer addresses cache: $e');
+    }
+
+    // Attempt to seed from Supabase parties/dealers if available
+    try {
+      final parties = await SupabaseService.client
+          .from('parties')
+          .select('name, address, city, location')
+          .limit(100);
+      for (final row in parties) {
+        final name = row['name']?.toString().trim();
+        final addr = (row['address']?.toString().trim().isNotEmpty == true)
+            ? row['address']?.toString().trim()
+            : (row['city']?.toString().trim().isNotEmpty == true
+                ? row['city']?.toString().trim()
+                : row['location']?.toString().trim());
+        if (name != null && name.isNotEmpty && addr != null && addr.isNotEmpty) {
+          customerAddressCache[name.toLowerCase()] = addr;
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Gets stored address for customer / firm name (case-insensitive)
+  static String? getCustomerAddress(String customerName) {
+    final key = customerName.trim().toLowerCase();
+    return customerAddressCache[key];
+  }
+
+  /// Saves or updates a customer address mapping into cache & SharedPreferences
+  static Future<void> saveCustomerAddress(
+      String customerName, String address) async {
+    final trimmedName = customerName.trim();
+    final trimmedAddr = address.trim();
+    if (trimmedName.isEmpty || trimmedAddr.isEmpty) return;
+    customerAddressCache[trimmedName.toLowerCase()] = trimmedAddr;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+          'customer_addresses_cache', jsonEncode(customerAddressCache));
+    } catch (e) {
+      debugPrint('[DataRepository] Error saving customer address cache: $e');
+    }
+  }
+}

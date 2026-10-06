@@ -1,0 +1,849 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
+/// Enterprise Export Toolbar for Stock Reports.
+/// Houses Date Range Picker, Search Bar, Location Selector, View Toggles, PDF Export, and CSV Export.
+class ReportsExportToolbar extends StatelessWidget {
+  final DateTime startDate;
+  final DateTime endDate;
+  final String selectedDatePreset;
+  final String locationFilter;
+  final TextEditingController searchController;
+  final ValueChanged<String> onSearch;
+  final VoidCallback onDateRangeTap;
+  final ValueChanged<String>? onPresetSelected;
+  final ValueChanged<String?> onLocationChanged;
+  final VoidCallback onRefresh;
+  final VoidCallback onExportPdf;
+  final VoidCallback? onExportCsv;
+  final bool isPdfLoading;
+  final bool isCsvLoading;
+  final bool showViewToggle;
+  final bool isDetailedView;
+  final ValueChanged<bool>? onViewToggle;
+  final bool activeOnly;
+  final String? todayTabMode;
+  final ValueChanged<String>? onTodayTabModeChanged;
+  final String? todayFlowMode;
+  final ValueChanged<String>? onTodayFlowModeChanged;
+  final String activeTabId;
+  final String? summaryMetricLabel;
+  final double? summaryMetricValue;
+  final Color? summaryMetricColor;
+  final Color? summaryMetricBgColor;
+  final String? pdfTooltip;
+
+  const ReportsExportToolbar({
+    super.key,
+    required this.startDate,
+    required this.endDate,
+    required this.selectedDatePreset,
+    required this.locationFilter,
+    required this.searchController,
+    required this.onSearch,
+    required this.onDateRangeTap,
+    this.onPresetSelected,
+    required this.onLocationChanged,
+    required this.onRefresh,
+    required this.onExportPdf,
+    this.onExportCsv,
+    this.isPdfLoading = false,
+    this.isCsvLoading = false,
+    this.showViewToggle = false,
+    this.isDetailedView = false,
+    this.onViewToggle,
+    this.activeOnly = true,
+    this.todayTabMode,
+    this.onTodayTabModeChanged,
+    this.todayFlowMode,
+    this.onTodayFlowModeChanged,
+    required this.activeTabId,
+    this.summaryMetricLabel,
+    this.summaryMetricValue,
+    this.summaryMetricColor,
+    this.summaryMetricBgColor,
+    this.pdfTooltip,
+  });
+
+  String _formatDateRange() {
+    final bool isSameDay = startDate.year == endDate.year &&
+        startDate.month == endDate.month &&
+        startDate.day == endDate.day;
+    if (isSameDay) {
+      if (selectedDatePreset == 'Today') return 'Today';
+      if (selectedDatePreset == 'Yesterday') return 'Yesterday';
+      return DateFormat('dd MMM yyyy').format(startDate);
+    }
+    return '${DateFormat('dd MMM').format(startDate)} - ${DateFormat('dd MMM yy').format(endDate)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bool isMobile = constraints.maxWidth < 600;
+        final bool isCompact = constraints.maxWidth < 900;
+
+        // Mobile Layout (< 600px): Clean 2-Tier Header
+        if (isMobile) {
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x04000000),
+                  blurRadius: 4,
+                  offset: Offset(0, 1),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Tier 1 (Search & Filters):
+                // - Compact search field (isDense: true, height 36px, fill color #F1F5F9, border radius 8px)
+                // - Location dropdown chip/icon button next to search
+                Row(
+                  children: [
+                    Expanded(child: _buildMobileSearchField()),
+                    const SizedBox(width: 8),
+                    _buildMobileLocationChip(),
+                    const SizedBox(width: 6),
+                    _buildMobileRefreshButton(),
+                  ],
+                ),
+                const SizedBox(height: 8),
+
+                // Tier 2 (Toggles):
+                // - Date pills: [ Today | Yesterday | Custom ] (height 30px)
+                // - View toggle: [ Summary | Detailed ] pill segmented control
+                Row(
+                  children: [
+                    Expanded(child: _buildMobileDatePills()),
+                    if (showViewToggle && onViewToggle != null) ...[
+                      const SizedBox(width: 8),
+                      _buildMobileSummaryDetailedToggle(),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          );
+        }
+
+        // Compact Tablet Layout (600px <= width < 900px)
+        if (isCompact) {
+          return Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Top Row: Search + Location
+                Row(
+                  children: [
+                    Expanded(child: _buildSearchField()),
+                    const SizedBox(width: 8),
+                    _buildLocationDropdown(),
+                    const SizedBox(width: 8),
+                    _buildIconButton(
+                      icon: Icons.refresh_rounded,
+                      tooltip: 'Refresh',
+                      onTap: onRefresh,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                // Middle Row: Date Range + View Toggles (if any)
+                Row(
+                  children: [
+                    Expanded(child: _buildDateRangeButton()),
+                    if (showViewToggle && onViewToggle != null) ...[
+                      const SizedBox(width: 8),
+                      _buildSummaryDetailedToggle(),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 10),
+                // Bottom Row: Action Button (Export PDF)
+                _buildActionButton(
+                  label: 'Export PDF',
+                  icon: Icons.picture_as_pdf_rounded,
+                  backgroundColor: const Color(0xFFC62828),
+                  textColor: Colors.white,
+                  iconColor: Colors.white,
+                  isLoading: isPdfLoading,
+                  onTap: onExportPdf,
+                  tooltip: pdfTooltip ??
+                      (activeTabId == 'low'
+                          ? 'Export Full Low Stock Report'
+                          : 'Export PDF'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        // Desktop Layout (Width >= 768px): Single Horizontal Command Bar
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // 1. Search Field (Expanded)
+              Expanded(
+                flex: 3,
+                child: _buildSearchField(),
+              ),
+              const SizedBox(width: 12),
+
+              // 2. Date Range Picker
+              _buildDateRangeButton(),
+              const SizedBox(width: 10),
+
+              // 3. Location Dropdown
+              _buildLocationDropdown(),
+              const SizedBox(width: 10),
+
+              // 4. View Toggles (Summary | Detailed)
+              if (showViewToggle && onViewToggle != null) ...[
+                _buildSummaryDetailedToggle(),
+                const SizedBox(width: 10),
+              ],
+
+              // 5. Summary Metric Pill Badge (Desktop)
+              if (summaryMetricLabel != null && summaryMetricValue != null) ...[
+                Container(
+                  height: 38,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: summaryMetricBgColor ?? const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: summaryMetricBgColor != null
+                          ? (summaryMetricColor?.withValues(alpha: 0.3) ??
+                              const Color(0xFFCBD5E1))
+                          : const Color(0xFFCBD5E1),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text(
+                        '$summaryMetricLabel: ',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                      Text(
+                        '${summaryMetricValue!.toStringAsFixed(3)} MT',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w900,
+                          color: summaryMetricColor ?? const Color(0xFF0F172A),
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+              ],
+
+              // 6. Export PDF (Primary Action - Deep Crimson)
+              _buildActionButton(
+                label: 'Export PDF',
+                icon: Icons.picture_as_pdf_rounded,
+                backgroundColor: const Color(0xFFC62828),
+                textColor: Colors.white,
+                iconColor: Colors.white,
+                isLoading: isPdfLoading,
+                onTap: onExportPdf,
+                tooltip: pdfTooltip ??
+                    (activeTabId == 'low'
+                        ? 'Export Full Low Stock Report'
+                        : 'Export PDF'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // MOBILE (< 600px) 2-TIER HEADER COMPONENTS
+  // ───────────────────────────────────────────────────────────────────────────
+  Widget _buildMobileSearchField() {
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F5F9), // Light slate fill
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.search_rounded, size: 16, color: Color(0xFF64748B)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: TextField(
+              controller: searchController,
+              onChanged: onSearch,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF0F172A),
+              ),
+              decoration: const InputDecoration(
+                hintText: 'Search items, sizes...',
+                hintStyle: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF94A3B8),
+                ),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+          if (searchController.text.isNotEmpty)
+            InkWell(
+              onTap: () {
+                searchController.clear();
+                onSearch('');
+              },
+              child: const Padding(
+                padding: EdgeInsets.all(2.0),
+                child: Icon(Icons.close_rounded, size: 15, color: Color(0xFF94A3B8)),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileLocationChip() {
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: locationFilter,
+          icon: const Icon(Icons.keyboard_arrow_down_rounded,
+              size: 15, color: Color(0xFF64748B)),
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF1E293B),
+          ),
+          items: const [
+            DropdownMenuItem(
+              value: 'ALL',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.location_on_outlined, size: 13, color: Color(0xFF64748B)),
+                  SizedBox(width: 4),
+                  Text('All'),
+                ],
+              ),
+            ),
+            DropdownMenuItem(
+              value: 'YARD',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.location_on_outlined, size: 13, color: Color(0xFF64748B)),
+                  SizedBox(width: 4),
+                  Text('Yard'),
+                ],
+              ),
+            ),
+            DropdownMenuItem(
+              value: 'FACTORY',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.location_on_outlined, size: 13, color: Color(0xFF64748B)),
+                  SizedBox(width: 4),
+                  Text('Factory'),
+                ],
+              ),
+            ),
+          ],
+          onChanged: onLocationChanged,
+          dropdownColor: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileRefreshButton() {
+    return Material(
+      color: const Color(0xFFF1F5F9),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onRefresh,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: const Icon(Icons.refresh_rounded, size: 16, color: Color(0xFF475569)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileDatePills() {
+    final bool isToday = selectedDatePreset == 'Today';
+    final bool isYesterday = selectedDatePreset == 'Yesterday';
+    final bool isCustom = !isToday && !isYesterday;
+
+    return Container(
+      height: 30,
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          _buildMobileDatePill(
+            label: 'Today',
+            isSelected: isToday,
+            onTap: () => onPresetSelected?.call('Today'),
+          ),
+          _buildMobileDatePill(
+            label: 'Yesterday',
+            isSelected: isYesterday,
+            onTap: () => onPresetSelected?.call('Yesterday'),
+          ),
+          _buildMobileDatePill(
+            label: 'Custom',
+            isSelected: isCustom,
+            onTap: onDateRangeTap,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileDatePill({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            boxShadow: isSelected
+                ? const [
+                    BoxShadow(
+                      color: Color(0x0C000000),
+                      blurRadius: 3,
+                      offset: Offset(0, 1),
+                    )
+                  ]
+                : null,
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+              color: isSelected
+                  ? const Color(0xFFD32F2F)
+                  : const Color(0xFF64748B),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileSummaryDetailedToggle() {
+    return Container(
+      height: 30,
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildMobileToggleOption(
+            label: 'Summary',
+            isSelected: !isDetailedView,
+            onTap: () => onViewToggle?.call(false),
+          ),
+          _buildMobileToggleOption(
+            label: 'Detailed',
+            isSelected: isDetailedView,
+            onTap: () => onViewToggle?.call(true),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileToggleOption({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: isSelected
+              ? const [
+                  BoxShadow(
+                    color: Color(0x0C000000),
+                    blurRadius: 3,
+                    offset: Offset(0, 1),
+                  )
+                ]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+            color: isSelected
+                ? const Color(0xFFD32F2F)
+                : const Color(0xFF64748B),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchField() {
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFCBD5E1)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const Icon(Icons.search_rounded, size: 17, color: Color(0xFF64748B)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: searchController,
+              onChanged: onSearch,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF0F172A),
+              ),
+              decoration: const InputDecoration(
+                hintText: 'Search items, sizes or categories...',
+                hintStyle: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF94A3B8),
+                ),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+          if (searchController.text.isNotEmpty)
+            InkWell(
+              onTap: () {
+                searchController.clear();
+                onSearch('');
+              },
+              borderRadius: BorderRadius.circular(10),
+              child: const Padding(
+                padding: EdgeInsets.all(2.0),
+                child: Icon(Icons.close_rounded,
+                    size: 16, color: Color(0xFF94A3B8)),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDateRangeButton() {
+    return InkWell(
+      onTap: onDateRangeTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFCBD5E1)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const Icon(Icons.calendar_today_rounded,
+                size: 14, color: Color(0xFFC62828)),
+            const SizedBox(width: 8),
+            Text(
+              _formatDateRange(),
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1E293B),
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.arrow_drop_down_rounded,
+                size: 18, color: Color(0xFF64748B)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocationDropdown() {
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFCBD5E1)),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: locationFilter,
+          icon: const Icon(Icons.keyboard_arrow_down_rounded,
+              size: 16, color: Color(0xFF64748B)),
+          style: const TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF1E293B),
+          ),
+          items: const [
+            DropdownMenuItem(value: 'ALL', child: Text('All Locations')),
+            DropdownMenuItem(value: 'YARD', child: Text('Yard Only')),
+            DropdownMenuItem(value: 'FACTORY', child: Text('Factory Only')),
+          ],
+          onChanged: onLocationChanged,
+          dropdownColor: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryDetailedToggle() {
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.all(2.5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          _buildToggleOption(
+            label: 'Summary',
+            isSelected: !isDetailedView,
+            onTap: () => onViewToggle?.call(false),
+          ),
+          _buildToggleOption(
+            label: 'Detailed',
+            isSelected: isDetailedView,
+            onTap: () => onViewToggle?.call(true),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToggleOption({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: isSelected
+              ? const [
+                  BoxShadow(
+                    color: Color(0x0A000000),
+                    blurRadius: 4,
+                    offset: Offset(0, 1),
+                  )
+                ]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+            color: isSelected
+                ? const Color(0xFFC62828)
+                : const Color(0xFF475569),
+          ),
+        ),
+      ),
+    );
+  }
+
+
+  Widget _buildIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFCBD5E1)),
+            ),
+            child: Icon(icon, size: 18, color: const Color(0xFF475569)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionButton({
+    required String label,
+    required IconData icon,
+    required Color backgroundColor,
+    required Color textColor,
+    required Color iconColor,
+    Color? borderColor,
+    required bool isLoading,
+    required VoidCallback onTap,
+    String? tooltip,
+    double height = 38,
+  }) {
+    final button = Material(
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: isLoading ? null : onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          height: height,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: borderColor != null ? Border.all(color: borderColor) : null,
+          ),
+          alignment: Alignment.center,
+          child: isLoading
+              ? SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: textColor,
+                  ),
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(icon, size: 16, color: iconColor),
+                    const SizedBox(width: 7),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: textColor,
+                        letterSpacing: 0.1,
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+
+    if (tooltip != null) {
+      return Tooltip(
+        message: tooltip,
+        child: button,
+      );
+    }
+    return button;
+  }
+}

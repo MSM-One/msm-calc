@@ -1,0 +1,701 @@
+import 'package:intl/intl.dart';
+import '../services/data_repository.dart';
+import '../utils/formatters.dart';
+
+String detectCategory(String itemName) {
+  final trimmed = itemName.trim();
+  if (trimmed.isEmpty || trimmed.toUpperCase() == 'UNKNOWN') {
+    return "General";
+  }
+
+  // 1. Dynamic matching against DataRepository master material lookup
+  for (final matName in DataRepository.materialIdToNameMap.values) {
+    if (matName.trim().toUpperCase() == trimmed.toUpperCase()) {
+      return matName.trim();
+    }
+  }
+
+  // 2. Specific pipe and shape heuristics
+  final name = trimmed.toUpperCase();
+  if (name.contains("ERW PIPE")) return "ERW Pipe";
+  if (name.contains("HR PIPE")) return "HR Pipe";
+  if (name.contains("CR PIPE")) return "CR Pipe";
+  if (name.contains("PIPE")) return "MS Pipe";
+  if (name.contains("ANGLE")) return "MS Angle";
+  if (name.contains("GATE")) return "GATE Channel";
+  if (name.contains("CHANNEL")) return "MS Channel";
+  if (name.contains("FLAT")) return "Flats";
+  if (name.contains("SQUARE") || name.contains("SQR")) return "Sqr Bar";
+  if (name.contains("ROUND")) return "Round Bar";
+  if (name.contains("NAIL")) return "Nails";
+  if (name.contains("BINDING")) return "Binding Wire";
+  if (name.contains("BARBED")) return "Barbed Wire";
+  if (name.contains("WIRE")) return "Wire";
+  if (name.contains("ISMC")) return "MS Structure ISMC";
+  if (name.contains("ISMB")) return "Heavy Structure ISMB";
+  return trimmed;
+}
+
+class StockItem {
+  final int? itemSizeId;
+  final int? materialId;
+  final String itemName;
+  final String categoryName;
+  final String sizeLabel;
+  final num? unitWeightKg;
+  final double netStockMt;
+  final double minStock;
+  final String location;
+
+  StockItem({
+    this.itemSizeId,
+    this.materialId,
+    required this.itemName,
+    required this.categoryName,
+    required this.sizeLabel,
+    this.unitWeightKg,
+    this.netStockMt = 0.0,
+    this.minStock = 5.0,
+    this.location = 'YARD',
+  });
+
+  String get displayTitle => resolveDynamicSizeTitle(
+        rawLabel: sizeLabel,
+        unitWeightKg: unitWeightKg,
+      );
+
+  factory StockItem.fromJson(Map<String, dynamic> json) {
+    final rawSizeId = json['item_size_id'] ?? json['size_id'] ?? json['id'];
+    final rawMatId = json['material_id'] ?? json['materialId'];
+    final rawWeight = json['unit_weight_kg'] ??
+        json['unitWeightKg'] ??
+        json['weight'] ??
+        json['std_weight'];
+    final rawStock = json['net_stock_mt'] ??
+        json['current_stock_mt'] ??
+        json['qty_mt'] ??
+        json['currentStockMT'] ??
+        0.0;
+    final rawMinStock = json['min_stock'] ?? json['minStock'] ?? 5.0;
+
+    return StockItem(
+      itemSizeId:
+          rawSizeId is int ? rawSizeId : int.tryParse(rawSizeId?.toString() ?? ''),
+      materialId:
+          rawMatId is int ? rawMatId : int.tryParse(rawMatId?.toString() ?? ''),
+      itemName: (json['item_name'] ?? json['itemName'] ?? '').toString(),
+      categoryName:
+          (json['category_name'] ?? json['category'] ?? '').toString(),
+      sizeLabel:
+          (json['size_label'] ?? json['size'] ?? json['label'] ?? '').toString(),
+      unitWeightKg: (rawWeight is num)
+          ? rawWeight
+          : num.tryParse(rawWeight?.toString() ?? ''),
+      netStockMt: rawStock is num
+          ? rawStock.toDouble()
+          : (double.tryParse(rawStock.toString()) ?? 0.0),
+      minStock: rawMinStock is num
+          ? rawMinStock.toDouble()
+          : (double.tryParse(rawMinStock.toString()) ?? 5.0),
+      location: (json['location'] ?? 'YARD').toString(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        if (itemSizeId != null) 'item_size_id': itemSizeId,
+        if (materialId != null) 'material_id': materialId,
+        'item_name': itemName,
+        'category_name': categoryName,
+        'size_label': sizeLabel,
+        if (unitWeightKg != null) 'unit_weight_kg': unitWeightKg,
+        'net_stock_mt': netStockMt,
+        'min_stock': minStock,
+        'location': location,
+      };
+}
+
+typedef CurrentStock = StockItem;
+
+class ItemVariant {
+  final int? itemSizeId;
+  final String itemName;
+  final String category;
+  final String size;
+  final num? unitWeightKg;
+  double openingStockMT;
+  double currentStockMT;
+  double reservedStockMT;
+  double minStock;
+  double price;
+  final String location; // 'YARD' or 'FACTORY' or 'ALL'
+  String stockStatus;
+
+  double yardTotal;
+  double factoryTotal;
+
+  ItemVariant({
+    this.itemSizeId,
+    required this.itemName,
+    required String category,
+    required this.size,
+    this.unitWeightKg,
+    this.openingStockMT = 0,
+    required this.currentStockMT,
+    this.reservedStockMT = 0,
+    this.minStock = 5.0,
+    this.price = 0,
+    required this.location,
+    this.stockStatus = 'In Stock',
+    this.yardTotal = 0.0,
+    this.factoryTotal = 0.0,
+  }) : category = (category.trim().isNotEmpty
+            ? category.trim()
+            : (itemName.trim().isNotEmpty
+                ? detectCategory(itemName)
+                : 'General'));
+
+  double get availableStockMT {
+    final diff = currentStockMT - reservedStockMT;
+    return diff < 0 ? 0.0 : diff;
+  }
+
+  String get id => '$category-$itemName-$size-$location';
+
+  String get sizeLabel => size;
+  double get netStockMt => currentStockMT;
+
+  String get displayTitle => resolveDynamicSizeTitle(
+        rawLabel: size,
+        unitWeightKg: unitWeightKg,
+      );
+
+  factory ItemVariant.fromSupabaseStockMap(Map<String, dynamic> map) {
+    double parseDouble(dynamic val) {
+      if (val == null) return 0.0;
+      if (val is num) return val.toDouble();
+      return double.tryParse(val.toString()) ?? 0.0;
+    }
+
+    final itemName = map['item_name']?.toString() ?? '';
+    final rawCat =
+        map['category']?.toString() ?? map['category_name']?.toString() ?? '';
+    final rawSizeId = map['item_size_id'] ?? map['size_id'] ?? map['id'];
+    final itemSizeId =
+        rawSizeId is int ? rawSizeId : int.tryParse(rawSizeId?.toString() ?? '');
+    final rawWeight = map['unit_weight_kg'] ??
+        map['unitWeightKg'] ??
+        map['weight'] ??
+        map['std_weight'];
+    final unitWeightKg = (rawWeight is num)
+        ? rawWeight
+        : num.tryParse(rawWeight?.toString() ?? '');
+
+    return ItemVariant(
+      itemSizeId: itemSizeId,
+      itemName: itemName,
+      category: rawCat.isNotEmpty ? rawCat : itemName,
+      size: map['size_label']?.toString() ?? map['size']?.toString() ?? '',
+      unitWeightKg: unitWeightKg,
+      currentStockMT: parseDouble(map['net_stock_mt'] ?? map['current_stock_mt']),
+      yardTotal: parseDouble(map['yard_total']),
+      factoryTotal: parseDouble(map['factory_total']),
+      location: map['location']?.toString() ?? 'ALL',
+    );
+  }
+}
+
+class SampleRateSize {
+  final int? id;
+  final int? materialId;
+  final String label;
+  final num sd;
+  final num weight;
+  final bool isMissing;
+  final bool isCustom;
+  final bool isSampleRateActive;
+
+  SampleRateSize(
+    this.label,
+    this.sd,
+    this.weight, {
+    this.id,
+    this.materialId,
+    this.isMissing = false,
+    this.isCustom = false,
+    this.isSampleRateActive = true,
+  });
+
+  String get sizeLabel => label;
+
+  Map<String, dynamic> toJson() => {
+        if (id != null) 'id': id,
+        if (materialId != null) 'material_id': materialId,
+        'label': label,
+        'sd': sd,
+        'weight': weight,
+        'isMissing': isMissing,
+        'isCustom': isCustom,
+        'is_sample_rate_active': isSampleRateActive,
+      };
+
+  factory SampleRateSize.fromJson(Map<String, dynamic> json) {
+    final rawId = json['id'];
+    final rawMatId = json['material_id'] ?? json['materialId'];
+    return SampleRateSize(
+      (json['label'] ?? json['size_label'] ?? '').toString(),
+      (json['sd'] is num)
+          ? json['sd']
+          : (num.tryParse(json['sd']?.toString() ??
+                  json['size_difference']?.toString() ??
+                  '0') ??
+              0),
+      (json['weight'] is num)
+          ? json['weight']
+          : (num.tryParse(json['weight']?.toString() ??
+                  json['unit_weight_kg']?.toString() ??
+                  '0') ??
+              0),
+      id: rawId is int ? rawId : int.tryParse(rawId?.toString() ?? ''),
+      materialId:
+          rawMatId is int ? rawMatId : int.tryParse(rawMatId?.toString() ?? ''),
+      isMissing: json['isMissing'] == true,
+      isCustom: json['isCustom'] == true,
+      isSampleRateActive: json['is_sample_rate_active'] == true ||
+          json['isSampleRateActive'] == true ||
+          json['is_sample_rate_active'] == null,
+    );
+  }
+
+  factory SampleRateSize.fromSupabaseMap(Map<String, dynamic> map,
+      {bool isCustom = false}) {
+    final rawId = map['id'];
+    final rawMatId = map['material_id'] ?? map['materialId'];
+    final rawSd = map['size_difference'] ?? map['sd'] ?? map['diffRate'];
+    final rawWeight = map['unit_weight_kg'] ?? map['weight'] ?? map['std_weight'];
+    return SampleRateSize(
+      (map['size_label'] ?? map['label'] ?? map['size'] ?? '').toString().trim(),
+      rawSd is num ? rawSd : (num.tryParse(rawSd?.toString() ?? '0') ?? 0),
+      rawWeight is num
+          ? rawWeight
+          : (num.tryParse(rawWeight?.toString() ?? '0') ?? 0),
+      id: rawId is int ? rawId : int.tryParse(rawId?.toString() ?? ''),
+      materialId:
+          rawMatId is int ? rawMatId : int.tryParse(rawMatId?.toString() ?? ''),
+      isCustom: isCustom,
+      isSampleRateActive: map['is_sample_rate_active'] == true ||
+          map['is_sample_rate_active'] == null,
+    );
+  }
+
+  SampleRateSize copyWith({
+    int? id,
+    int? materialId,
+    String? label,
+    num? sd,
+    num? weight,
+    bool? isMissing,
+    bool? isCustom,
+    bool? isSampleRateActive,
+  }) {
+    return SampleRateSize(
+      label ?? this.label,
+      sd ?? this.sd,
+      weight ?? this.weight,
+      id: id ?? this.id,
+      materialId: materialId ?? this.materialId,
+      isMissing: isMissing ?? this.isMissing,
+      isCustom: isCustom ?? this.isCustom,
+      isSampleRateActive: isSampleRateActive ?? this.isSampleRateActive,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SampleRateSize &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          materialId == other.materialId &&
+          label == other.label &&
+          sd == other.sd &&
+          weight == other.weight &&
+          isMissing == other.isMissing &&
+          isCustom == other.isCustom &&
+          isSampleRateActive == other.isSampleRateActive;
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      materialId.hashCode ^
+      label.hashCode ^
+      sd.hashCode ^
+      weight.hashCode ^
+      isMissing.hashCode ^
+      isCustom.hashCode ^
+      isSampleRateActive.hashCode;
+}
+
+class SampleRateSpec {
+  final int? id;
+  final String label;
+  final num defaultWeight;
+  final num defaultSd;
+  final List<String> matchKeys;
+
+  const SampleRateSpec({
+    this.id,
+    required this.label,
+    required this.defaultWeight,
+    required this.defaultSd,
+    this.matchKeys = const [],
+  });
+}
+
+class StockUtils {
+  static String normalizeLocation(String? loc) {
+    if (loc == null) return '';
+    String n = loc.toUpperCase().trim();
+    if (n.contains('PLANT') || n.contains('FACTORY')) return 'FACTORY';
+    if (n.contains('YARD') || n.contains('WH') || n.contains('WAREHOUSE')) {
+      return 'YARD';
+    }
+    return n;
+  }
+}
+
+class LocationStockGroup {
+  final String location;
+  final Map<String, Map<String, double>> items; // ItemName -> Size -> Qty
+
+  LocationStockGroup({required this.location, required this.items});
+
+  double get totalMT {
+    double total = 0;
+    items.forEach((itemName, sizes) {
+      sizes.forEach((size, qty) {
+        total += qty;
+      });
+    });
+    return total;
+  }
+}
+
+class ItemGroup {
+  final String itemName;
+  final String category;
+  final String? location;
+  final List<ItemVariant> variants = [];
+
+  ItemGroup(this.itemName, this.category, {this.location});
+
+  double get totalMT => variants.fold(0.0, (sum, v) => sum + v.currentStockMT);
+  bool get hasLowStock => variants.any((v) => v.currentStockMT <= v.minStock);
+}
+
+class StockTransaction {
+  final String txnId;
+  final DateTime dateTime;
+  final String itemName;
+  final String size;
+  final String type; // 'IN', 'OUT', 'TRANSFER', 'ADJUSTMENT', 'RETURN'
+  final double qtyMT;
+  final double? basicRate; // For linking with Sauda
+  final String location; // Source location or primary location
+  final String? toLocation; // Destination for Transfers
+  final String? reason; // For Adjustments
+  final String? note;
+  final String? invoiceNo;
+  final String? lorryNo;
+  final String? transportCo;
+  final String? driverName;
+  final String? driverPhone;
+  final String? partyName;
+  final String? contactNo;
+  final String? batchId;
+  final String? region; // NEW: Region field
+  final double? handMT;
+  final double? craneMT;
+  final String? user;
+  bool isReversed;
+  final String? _category;
+
+  // Helpers for reports alignment
+  String get category => (_category != null &&
+          _category!.trim().isNotEmpty &&
+          _category != 'General')
+      ? _category!.trim()
+      : (itemName.trim().isNotEmpty && itemName != 'Unknown'
+          ? detectCategory(itemName)
+          : 'General');
+  String get sizeLabel => size;
+  DateTime get date => dateTime;
+  double get qty => qtyMT;
+
+  // User attribution & time helpers
+  String? get createdByName => user;
+  String? get createdByEmail => user?.contains('@') == true ? user : null;
+  String? get userName => user;
+  String? get createdBy => user;
+  String? get userEmail => user?.contains('@') == true ? user : null;
+  String? get operatorName => user;
+  String get formattedTime => DateFormat('hh:mm a').format(dateTime);
+  String get displayUserName => DataRepository.resolveUserDisplayName(user);
+
+  StockTransaction({
+    required this.txnId,
+    required this.dateTime,
+    required this.itemName,
+    required this.size,
+    required this.type,
+    required this.qtyMT,
+    this.basicRate,
+    required this.location,
+    this.toLocation,
+    this.reason,
+    this.note,
+    this.invoiceNo,
+    this.lorryNo,
+    this.transportCo,
+    this.driverName,
+    this.driverPhone,
+    this.partyName,
+    this.contactNo,
+    this.batchId,
+    this.region,
+    this.handMT,
+    this.craneMT,
+    this.user,
+    this.isReversed = false,
+    String? category,
+  }) : _category = category;
+
+  Map<String, dynamic> toJson() => {
+        'txnId': txnId,
+        'itemName': itemName,
+        'size': size,
+        'type': type,
+        'qtyMT': qtyMT,
+        'basicRate': basicRate,
+        'location': location,
+        'toLocation': toLocation,
+        'reason': reason,
+        'note': note,
+        'invoiceNo': invoiceNo,
+        'lorryNo': lorryNo,
+        'transportCo': transportCo,
+        'driverName': driverName,
+        'driverPhone': driverPhone,
+        'dateTime': dateTime.toIso8601String(),
+        'partyName': partyName,
+        'contactNo': contactNo,
+        'batchId': batchId,
+        'region': region,
+        'handMT': handMT,
+        'craneMT': craneMT,
+        'user': user,
+        'isReversed': isReversed,
+      };
+
+  /// Safely converts any dynamic value to double, avoiding cast exceptions
+  /// when Supabase returns unexpected types (bool, null, etc.).
+  static double _safeDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
+  }
+
+  /// Parses timestamps stored as local wall-clock IST time tagged with UTC (+00 or Z).
+  /// Strips the UTC timezone suffix (+00:00, +00, Z) so DateTime.tryParse treats it as wall-clock time,
+  /// preventing the double +05:30 offset bug.
+  static DateTime parseIstDateTime(dynamic value) {
+    if (value == null) return DateTime.now();
+    if (value is DateTime) return value.isUtc ? value.toLocal() : value;
+    final raw = value.toString().trim();
+    if (raw.isEmpty) return DateTime.now();
+
+    final cleaned = raw.replaceAll(RegExp(r'(\+00(:?00)?|Z)$'), '').trim();
+    return DateTime.tryParse(cleaned) ?? DateTime.now();
+  }
+
+  factory StockTransaction.fromJson(Map<String, dynamic> json) {
+
+    // Stable ID for manual entries: If no ID exists, create one from content
+    final itemName = (json['itemName'] ??
+                json['Item Name'] ??
+                json['ITEM NAME'] ??
+                json['Item'] ??
+                json['item_name'])
+            ?.toString() ??
+        "Unknown";
+    final size = (json['size'] ?? json['Size'] ?? json['Spec'] ?? json['SIZE'] ?? json['size_label'])
+            ?.toString() ??
+        "Standard";
+    final qty = (json['qtyMT'] ??
+            json['Qty (MT)'] ??
+            json['QTY (MT)'] ??
+            json['qty'] ??
+            json['Qty'] ??
+            json['QTY'] ??
+            json['qty_mt'] ??
+            0.0)
+        .toString();
+    final dateStr = (json['dateTime'] ??
+                json['date_time'] ??
+                json['created_at'] ??
+                json['date'] ??
+                json['Date'] ??
+                json['Timestamp'] ??
+                json['DateTime'])
+            ?.toString() ??
+        "";
+
+    final id = (json['txnId'] ??
+                json['txn_id'] ??
+                json['TXN ID'] ??
+                json['TXNID'] ??
+                json['ID'] ??
+                json['id'] ??
+                json['Transaction ID'])
+            ?.toString() ??
+        "MANUAL_${itemName}_${size}_${qty}_${dateStr.replaceAll(RegExp(r'[^0-9]'), '')}";
+
+    return StockTransaction(
+      txnId: id,
+      dateTime: parseTransactionTimestamp(json),
+      itemName: (json['itemName'] ??
+                  json['item_name'] ??
+                  json['Item Name'] ??
+                  json['ITEM NAME'] ??
+                  json['Item'])
+              ?.toString() ??
+          "Unknown",
+      size: (json['size'] ?? json['size_label'] ?? json['Size'] ?? json['Spec'] ?? json['SIZE'])
+              ?.toString() ??
+          "Standard",
+      type: (json['type'] ?? json['txn_type'] ?? json['Type'] ?? json['TYPE'])?.toString() ?? "IN",
+      qtyMT: _safeDouble(json['qtyMT'] ??
+          json['qty_mt'] ??
+          json['Qty (MT)'] ??
+          json['QTY (MT)'] ??
+          json['qty'] ??
+          json['Qty'] ??
+          json['QTY']),
+      basicRate:
+          _safeDouble(json['basicRate'] ?? json['Rate'] ?? json['BASIC RATE']),
+      location: (json['location'] ?? json['Location'] ?? json['LOCATION'])
+              ?.toString() ??
+          'YARD',
+      toLocation:
+          (json['toLocation'] ?? json['To Location'] ?? json['TO LOCATION'])
+              ?.toString(),
+      reason: (json['reason'] ?? json['Reason'] ?? json['REASON'])?.toString(),
+      note: (json['note'] ?? json['Note'] ?? json['Remark'] ?? json['NOTE'])
+          ?.toString(),
+      invoiceNo: (json['invoice_no'] ??
+              json['bill_no'] ??
+              json['invoiceNo'] ??
+              json['Invoice No'] ??
+              json['INVOICE NO'] ??
+              json['billNo'] ??
+              json['Bill No'])
+          ?.toString(),
+      lorryNo: (json['lorry_no'] ??
+              json['lorryNo'] ??
+              json['Lorry No'] ??
+              json['LORRY NO'])
+          ?.toString(),
+      transportCo: (json['transport_co'] ??
+              json['transport_name'] ??
+              json['transportCo'] ??
+              json['Transport'] ??
+              json['TRANSPORT'])
+          ?.toString(),
+      driverName: (json['driver_name'] ??
+              json['driverName'] ??
+              json['Driver Name'] ??
+              json['DRIVER'])
+          ?.toString(),
+      driverPhone: (json['driver_phone'] ??
+              json['driverPhone'] ??
+              json['Driver Phone'] ??
+              json['PHONE'])
+          ?.toString(),
+      partyName: (json['party_name'] ??
+              json['partyName'] ??
+              json['Party Name'] ??
+              json['Party'] ??
+              json['PARTY'])
+          ?.toString(),
+      contactNo: (json['contact_no'] ??
+              json['contactNo'] ??
+              json['Contact No'])
+          ?.toString(),
+      batchId: (json['batch_id'] ??
+              json['batchId'] ??
+              json['Batch ID'] ??
+              json['Batch'])
+          ?.toString(),
+      region: (json['region'] ??
+              json['Region'] ??
+              json['Purchase Region'] ??
+              json['REGION'])
+          ?.toString(),
+      handMT: _safeDouble(json['hand_mt'] ??
+          json['handMT'] ??
+          json['Hand (MT)'] ??
+          json['HAND (MT)']),
+      craneMT: _safeDouble(json['crane_mt'] ??
+          json['craneMT'] ??
+          json['Crane (MT)'] ??
+          json['CRANE (MT)']),
+      user: (json['user_name'] ??
+              json['userName'] ??
+              json['created_by_name'] ??
+              json['createdByName'] ??
+              json['user_email'] ??
+              json['userEmail'] ??
+              json['created_by_email'] ??
+              json['createdByEmail'] ??
+              json['operator_name'] ??
+              json['operatorName'] ??
+              json['created_by'] ??
+              json['createdBy'] ??
+              json['user'] ??
+              json['User'] ??
+              json['USER'] ??
+              json['Entry By'] ??
+              json['entry_by'] ??
+              json['entryBy'])
+          ?.toString(),
+      isReversed: (json['isReversed'] ?? json['Reversed'] ?? json['REVERSED'])
+              ?.toString()
+              .toLowerCase() ==
+          'true',
+      category: (json['category'] ??
+              json['Category'] ??
+              json['category_name'] ??
+              json['itemName'] ??
+              json['Item Name'])
+          ?.toString(),
+    );
+  }
+}
+
+class MaterialModel {
+  final int id;
+  final String itemName;
+
+  MaterialModel({required this.id, required this.itemName});
+
+  factory MaterialModel.fromSupabaseMap(Map<String, dynamic> map) {
+    return MaterialModel(
+      id: map['id'] is int
+          ? map['id'] as int
+          : int.tryParse(map['id']?.toString() ?? '') ?? 0,
+      itemName: map['item_name']?.toString() ?? '',
+    );
+  }
+}

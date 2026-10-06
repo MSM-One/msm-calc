@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metaroll Rewards Prototype</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div id="app-container">
+        <!-- Screen 1: Login -->
+        <div id="screen-login" class="screen active">
+            <div class="logo-container">
+                <img src="../metaroll_logo_gold_1778156455052.png" alt="Logo" class="logo-img">
+                <h1>Metaroll Rewards</h1>
+                <p>The Gold Standard of Industry Loyalty</p>
+            </div>
+            <div class="input-group">
+                <label class="input-label">Mobile Number</label>
+                <input type="text" class="input-field" placeholder="+91 98XXX XXXXX" value="98765 43210" readonly>
+            </div>
+            <button class="btn" onclick="handleLogin()">Login with OTP</button>
+            <div id="login-loading" style="display: none;">
+                <div class="loading-spinner"></div>
+                <p style="text-align: center;">Authenticating...</p>
+            </div>
+            <div id="login-success" class="success-message" style="display: none;">
+                OTP Sent Successfully!
+            </div>
+        </div>
+
+        <!-- Screen 2: Security -->
+        <div id="screen-security" class="screen">
+            <h1 style="margin-top: 40px;">Secure OTP Login</h1>
+            <p>Enter the 6-digit code sent to your number</p>
+            <div class="otp-inputs">
+                <div class="otp-box">4</div>
+                <div class="otp-box">8</div>
+                <div class="otp-box">2</div>
+                <div class="otp-box">9</div>
+                <div class="otp-box">1</div>
+                <div class="otp-box">7</div>
+            </div>
+            <div style="text-align: center; margin-bottom: 30px;">
+                <img src="https://img.icons8.com/ios-filled/100/D4AF37/shield.png" width="80" alt="Secure">
+                <p style="color: var(--gold); margin-top: 10px; font-weight: 700;">Verified Users. Transparent Transactions.</p>
+            </div>
+            <button class="btn" onclick="handleVerify()">Verify & Secure Login</button>
+        </div>
+
+        <!-- Screen 3: Admin Panel -->
+        <div id="screen-admin" class="screen">
+            <h1 style="margin-top: 20px;">Admin Dashboard</h1>
+            <div class="card-grid">
+                <div class="stat-card">
+                    <div class="stat-val">128</div>
+                    <div class="stat-label">Total Dealers</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val">4.2M</div>
+                    <div class="stat-label">Total Rewards</div>
+                </div>
+            </div>
+            <div style="margin-top: 30px;">
+                <h2 style="font-size: 18px; color: var(--gold); margin-bottom: 15px;">Register New Dealer</h2>
+                <div class="input-group">
+                    <label class="input-label">Dealer Name</label>
+                    <input type="text" class="input-field" value="Rajendra Patil" readonly>
+                </div>
+                <div class="input-group">
+                    <label class="input-label">Firm Name</label>
+                    <input type="text" class="input-field" value="Shri Ram Enterprises" readonly>
+                </div>
+                <div class="input-group">
+                    <label class="input-label">Location</label>
+                    <input type="text" class="input-field" value="Jalna" readonly>
+                </div>
+                <button class="btn" onclick="handleRegister()">Register Dealer</button>
+            </div>
+            <div id="admin-loading" style="display: none;">
+                <div class="loading-spinner"></div>
+                <p style="text-align: center;">Registering Dealer...</p>
+            </div>
+            <div id="admin-success" class="success-message" style="display: none;">
+                Dealer Registered Successfully!
+            </div>
+        </div>
+
+        <!-- Screen 4: Live Sales Feed -->
+        <div id="screen-feed" class="screen">
+            <h1 style="margin-top: 20px;">Live Sales Feed</h1>
+            <div class="card-grid">
+                <div class="stat-card">
+                    <div class="stat-val">24,500 L</div>
+                    <div class="stat-label">Fuel Usage Today</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val">15,200</div>
+                    <div class="stat-label">Points Distributed</div>
+                </div>
+            </div>
+            <div class="feed-container" id="feed-list">
+                <!-- Items injected by JS -->
+            </div>
+            <button class="btn" style="margin-top: 10px;" onclick="goToContractor()">View Contractor Profile</button>
+        </div>
+
+        <!-- Screen 5: Contractor Rewards -->
+        <div id="screen-contractor" class="screen">
+            <div style="text-align: center; margin-top: 40px;">
+                <div style="width: 80px; height: 80px; background: var(--gold); border-radius: 50%; margin: 0 auto 15px; display: flex; justify-content: center; align-items: center; font-size: 30px; color: var(--black); font-weight: 800;">VK</div>
+                <h1>Vijay Kumar</h1>
+                <p>Elite Contractor</p>
+            </div>
+            <div class="stat-card" style="margin-top: 30px; text-align: center; border-color: var(--gold);">
+                <div class="stat-label">Available Points</div>
+                <div class="stat-val" style="font-size: 36px; color: var(--gold);">45,280</div>
+            </div>
+            <div style="margin-top: 30px;">
+                <h2 style="font-size: 16px; margin-bottom: 10px;">Recent Activity</h2>
+                <div class="feed-item" style="animation-delay: 0.1s">
+                    <div class="feed-left">
+                        <span class="feed-name">Fuel Purchase - HP Pump</span>
+                        <span class="feed-time">2 hours ago</span>
+                    </div>
+                    <div class="feed-right">
+                        <span class="feed-pts">+450 Pts</span>
+                    </div>
+                </div>
+                <div class="feed-item" style="animation-delay: 0.2s">
+                    <div class="feed-left">
+                        <span class="feed-name">Steel Purchase - Metaroll</span>
+                        <span class="feed-time">Yesterday</span>
+                    </div>
+                    <div class="feed-right">
+                        <span class="feed-pts">+1,200 Pts</span>
+                    </div>
+                </div>
+            </div>
+            <button class="btn" style="margin-top: auto;" onclick="goToFinal()">Redeem Rewards</button>
+        </div>
+
+        <!-- Screen 6: Final Branding -->
+        <div id="screen-final" class="screen">
+            <div class="logo-container" style="margin-top: 150px;">
+                <img src="../metaroll_logo_gold_1778156455052.png" alt="Logo" class="logo-img" style="width: 150px; height: 150px;">
+                <h1 style="font-size: 32px; margin-top: 20px;">Metaroll Rewards</h1>
+                <p style="color: var(--gold); font-size: 18px; margin-top: 10px;">"We don't just connect steel,<br>we connect trust."</p>
+            </div>
+            <div style="margin-top: auto; text-align: center; padding-bottom: 60px;">
+                <h2 style="font-weight: 300; letter-spacing: 2px;">THANK YOU</h2>
+            </div>
+        </div>
+    </div>
+
+    <!-- Navigation for Demo Control -->
+    <div class="nav-controls">
+        <button class="nav-btn" id="prev-btn" onclick="prevStep()">←</button>
+        <button class="nav-btn" id="next-btn" onclick="nextStep()">→</button>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
