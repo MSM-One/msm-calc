@@ -549,7 +549,7 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
         : (items.isNotEmpty ? items.first.freightType : 'PER_MT');
     final String freightSummaryStr = totalOrderFreight > 0
         ? (effectiveFreightType == 'PER_MT'
-            ? "₹${effectiveFreightCharge.toStringAsFixed(0)}/MT (Total: ₹${formatIndianCurrency(totalOrderFreight)})"
+            ? "₹${effectiveFreightCharge.toStringAsFixed(0)}/MT"
             : "₹${formatIndianCurrency(totalOrderFreight)} Fixed")
         : "To Pay";
 
@@ -2752,7 +2752,7 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
               );
 
               final freightDropdown = DropdownButtonFormField<String>(
-                value: freightType,
+                initialValue: freightType,
                 decoration: msmInputDeco("Freight Type"),
                 items: const [
                   DropdownMenuItem(

@@ -296,9 +296,59 @@ class DeliveryOrderPrintService {
     );
   }
 
+  /// Format freight display string cleanly for PDF header and HTML view.
+  static String formatFreightDisplay(DeliveryOrderDataModel model) {
+    if (model.freightCharge > 0) {
+      if (model.freightType == 'PER_MT') {
+        final rateStr = model.freightCharge == model.freightCharge.roundToDouble()
+            ? model.freightCharge.toStringAsFixed(0)
+            : model.freightCharge.toStringAsFixed(2);
+        return "Rs. $rateStr/MT";
+      }
+      return "Rs. ${formatIndianCurrency(model.freightCharge)} Fixed";
+    }
+    final String raw =
+        model.freight != null ? model.freight.toString().trim() : '';
+    if (raw.isNotEmpty) {
+      if (raw.toLowerCase().contains('to pay') || raw.contains('/MT')) {
+        return raw;
+      }
+      final parsed = double.tryParse(raw);
+      if (parsed != null) {
+        return "Rs. ${parsed.toStringAsFixed(0)}/MT";
+      }
+      return raw;
+    }
+    return "To Pay";
+  }
+
+  /// Resolve default freight per MT for the order.
+  static double resolveDefaultOrderFreightPerMt(DeliveryOrderDataModel model) {
+    if (model.freightCharge > 0) {
+      return model.freightType == 'PER_MT'
+          ? model.freightCharge
+          : (model.totalEffectiveQty > 0
+              ? model.freightCharge / model.totalEffectiveQty
+              : model.freightCharge);
+    }
+    return double.tryParse(model.freight?.toString() ?? '0') ?? 0.0;
+  }
+
+  /// Resolve freight per MT for an individual item.
+  static double resolveItemFreightPerMt({
+    required DeliveryOrderItemModel item,
+    required double defaultOrderFreightPerMt,
+  }) {
+    if (item.freightCharge > 0) {
+      return item.freightType == 'PER_MT'
+          ? item.freightCharge
+          : (item.totalQty > 0 ? item.freightCharge / item.totalQty : item.freightCharge);
+    }
+    return defaultOrderFreightPerMt;
+  }
+
   /// 1. Header Grid (Top of Document):
   /// - Top metadata row/table:
-  ///   * PO Order No. | Date (DD/MM/YYYY)
   ///   * PO Order No. | Date (DD/MM/YYYY)
   ///   * Lorry No (from vehicleNo) | OB
   ///   * Bill Type (e.g., NC / BILL) | PO Date
@@ -314,21 +364,7 @@ class DeliveryOrderPrintService {
     // 1. Top Metadata Fields
     final String poNo = model.poNo.trim();
     final String formattedDate = formatDateDdMmYyyy(model.orderDate);
-    final String rawFreight =
-        model.freight != null ? model.freight.toString().trim() : '';
-    final String freight = model.freightCharge > 0
-        ? (model.freightType == 'PER_MT'
-            ? "Rs. ${model.freightCharge == model.freightCharge.roundToDouble() ? model.freightCharge.toStringAsFixed(0) : model.freightCharge.toStringAsFixed(2)}/MT"
-            : "Rs. ${formatIndianCurrency(model.freightCharge)} Fixed")
-        : (rawFreight.isNotEmpty
-            ? (rawFreight.toLowerCase().contains('to pay')
-                ? rawFreight
-                : (rawFreight.contains('/MT')
-                    ? rawFreight
-                    : (double.tryParse(rawFreight) != null
-                        ? "Rs. ${double.parse(rawFreight).toStringAsFixed(0)}/MT"
-                        : rawFreight)))
-            : "To Pay");
+    final String freight = formatFreightDisplay(model);
     final String lorryNo = model.lorryNo.trim().toUpperCase();
     final String ob = model.ob != null ? model.ob.toString().trim() : '';
     final String formattedPoDate = formatDateDdMmYyyy(model.poDate);
@@ -690,13 +726,8 @@ class DeliveryOrderPrintService {
     double grandTotalQty = 0;
     double totalOrderValue = 0;
     final charges = DataRepository.instance.globalCharges;
-    final double defaultOrderFreightPerMt = model.freightCharge > 0
-        ? (model.freightType == 'PER_MT'
-            ? model.freightCharge
-            : (model.totalEffectiveQty > 0
-                ? model.freightCharge / model.totalEffectiveQty
-                : model.freightCharge))
-        : (double.tryParse(model.freight?.toString() ?? '0') ?? 0.0);
+    final double defaultOrderFreightPerMt =
+        resolveDefaultOrderFreightPerMt(model);
     final double ob = double.tryParse(model.ob?.toString() ?? '0') ?? 0.0;
 
     final sortedItems = List<DeliveryOrderItemModel>.from(model.items)
@@ -707,13 +738,10 @@ class DeliveryOrderPrintService {
           double.tryParse(item.saudaRate?.toString() ?? '0') ?? 0.0;
       final String itemBillType =
           item.rateType.isNotEmpty ? item.rateType : model.billType;
-      final double itemFreight = item.freightCharge > 0
-          ? (item.freightType == 'PER_MT'
-              ? item.freightCharge
-              : (item.totalQty > 0
-                  ? item.freightCharge / item.totalQty
-                  : item.freightCharge))
-          : defaultOrderFreightPerMt;
+      final double itemFreight = resolveItemFreightPerMt(
+        item: item,
+        defaultOrderFreightPerMt: defaultOrderFreightPerMt,
+      );
 
       final sortedSizes = List<DeliveryOrderSizeModel>.from(item.sizes)
         ..sort((a, b) => SortingUtils.compareSizes(a.size, b.size));
@@ -986,21 +1014,7 @@ class DeliveryOrderPrintService {
     // 1. Top Metadata
     final String poNo = model.poNo.trim();
     final String formattedDate = formatDateDdMmYyyy(model.orderDate);
-    final String rawFreightHtml =
-        model.freight != null ? model.freight.toString().trim() : '';
-    final String freight = model.freightCharge > 0
-        ? (model.freightType == 'PER_MT'
-            ? "Rs. ${model.freightCharge == model.freightCharge.roundToDouble() ? model.freightCharge.toStringAsFixed(0) : model.freightCharge.toStringAsFixed(2)}/MT"
-            : "Rs. ${formatIndianCurrency(model.freightCharge)} Fixed")
-        : (rawFreightHtml.isNotEmpty
-            ? (rawFreightHtml.toLowerCase().contains('to pay')
-                ? rawFreightHtml
-                : (rawFreightHtml.contains('/MT')
-                    ? rawFreightHtml
-                    : (double.tryParse(rawFreightHtml) != null
-                        ? "Rs. ${double.parse(rawFreightHtml).toStringAsFixed(0)}/MT"
-                        : rawFreightHtml)))
-            : "To Pay");
+    final String freight = formatFreightDisplay(model);
     final String lorryNo = model.lorryNo.trim().toUpperCase();
     final String ob = model.ob != null ? model.ob.toString().trim() : '';
     final String formattedPoDate = formatDateDdMmYyyy(model.poDate);
@@ -1119,13 +1133,8 @@ class DeliveryOrderPrintService {
     double grandTotalQty = 0;
     double totalOrderValue = 0;
     final charges = DataRepository.instance.globalCharges;
-    final double defaultOrderFreightPerMt = model.freightCharge > 0
-        ? (model.freightType == 'PER_MT'
-            ? model.freightCharge
-            : (model.totalEffectiveQty > 0
-                ? model.freightCharge / model.totalEffectiveQty
-                : model.freightCharge))
-        : (double.tryParse(model.freight?.toString() ?? '0') ?? 0.0);
+    final double defaultOrderFreightPerMt =
+        resolveDefaultOrderFreightPerMt(model);
     final double obVal = double.tryParse(model.ob?.toString() ?? '0') ?? 0.0;
 
     final sortedItems = List<DeliveryOrderItemModel>.from(model.items)
@@ -1136,13 +1145,10 @@ class DeliveryOrderPrintService {
           double.tryParse(item.saudaRate?.toString() ?? '0') ?? 0.0;
       final String itemBillType =
           item.rateType.isNotEmpty ? item.rateType : model.billType;
-      final double itemFreight = item.freightCharge > 0
-          ? (item.freightType == 'PER_MT'
-              ? item.freightCharge
-              : (item.totalQty > 0
-                  ? item.freightCharge / item.totalQty
-                  : item.freightCharge))
-          : defaultOrderFreightPerMt;
+      final double itemFreight = resolveItemFreightPerMt(
+        item: item,
+        defaultOrderFreightPerMt: defaultOrderFreightPerMt,
+      );
 
       final sortedSizes = List<DeliveryOrderSizeModel>.from(item.sizes)
         ..sort((a, b) => SortingUtils.compareSizes(a.size, b.size));
