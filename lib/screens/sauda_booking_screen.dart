@@ -26,22 +26,31 @@ class SaudaBookingScreen extends StatefulWidget {
 }
 
 class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
-  final TextEditingController firmNameCtrl = TextEditingController();
-  final TextEditingController billingNameCtrl = TextEditingController();
+  final TextEditingController _dealerNameController = TextEditingController();
+  final TextEditingController _billingNameController = TextEditingController();
+  final TextEditingController _consigneeNameController = TextEditingController();
+
+  TextEditingController get firmNameCtrl => _dealerNameController;
+  TextEditingController get billingNameCtrl => _billingNameController;
+  TextEditingController get consigneeNameCtrl => _consigneeNameController;
+
   final TextEditingController billingAddressCtrl = TextEditingController();
-  final TextEditingController consigneeNameCtrl = TextEditingController();
   final TextEditingController shippingAddressCtrl = TextEditingController();
   final TextEditingController vehicleCtrl = TextEditingController();
   final TextEditingController remarksCtrl = TextEditingController();
   final TextEditingController _dateCtrl = TextEditingController();
   final TextEditingController freightCtrl = TextEditingController();
 
+  final FocusNode firmNameFocusNode = FocusNode();
+  final FocusNode billingNameFocusNode = FocusNode();
+  final FocusNode consigneeNameFocusNode = FocusNode();
+
   double freightCharge = 0.0;
   String freightType = 'PER_MT'; // 'PER_MT' or 'FIXED'
 
-  bool _isBillingNameAutoFilled = false;
+  bool _isBillingUntouched = true;
+  bool _isConsigneeUntouched = true;
   bool _isBillingAddressAutoFilled = false;
-  bool _isConsigneeNameAutoFilled = false;
   bool _isShippingAddressAutoFilled = false;
 
   DateTime bookingDate = DateTime.now();
@@ -74,6 +83,9 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
 
   @override
   void dispose() {
+    firmNameFocusNode.dispose();
+    billingNameFocusNode.dispose();
+    consigneeNameFocusNode.dispose();
     firmNameCtrl.dispose();
     billingNameCtrl.dispose();
     billingAddressCtrl.dispose();
@@ -92,10 +104,47 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
   Future<void> _loadSavedData() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      firmNameCtrl.text = prefs.getString('sauda_firm') ?? "";
-      billingNameCtrl.text = prefs.getString('sauda_billing_name') ?? "";
+      final savedFirm = (prefs.getString('sauda_firm') ?? "").trim();
+      final savedBilling =
+          (prefs.getString('sauda_billing_name') ?? "").trim();
+      final savedConsignee =
+          (prefs.getString('sauda_consignee_name') ?? "").trim();
+
+      final storedDisplayName =
+          prefs.getString('user_display_name')?.trim().toLowerCase();
+      final userEmail = prefs.getString('user_email')?.trim().toLowerCase();
+      final currentUserEmail =
+          DataRepository.currentUserNotifier.value?.email.trim().toLowerCase();
+
+      // 1. Remove default prefill of logged-in user name ("Vivek salve")
+      bool isUserMatch(String val) {
+        final lower = val.toLowerCase();
+        if (lower == 'vivek salve' || lower == 'vivek') return true;
+        if (storedDisplayName != null &&
+            storedDisplayName.isNotEmpty &&
+            lower == storedDisplayName) {
+          return true;
+        }
+        if (userEmail != null &&
+            userEmail.isNotEmpty &&
+            (lower == userEmail || lower == userEmail.split('@').first)) {
+          return true;
+        }
+        if (currentUserEmail != null &&
+            currentUserEmail.isNotEmpty &&
+            (lower == currentUserEmail ||
+                lower == currentUserEmail.split('@').first)) {
+          return true;
+        }
+        return false;
+      }
+
+      final cleanFirm = isUserMatch(savedFirm) ? "" : savedFirm;
+      final cleanBilling = isUserMatch(savedBilling) ? "" : savedBilling;
+      final cleanConsignee = isUserMatch(savedConsignee) ? "" : savedConsignee;
+
+      _dealerNameController.text = cleanFirm;
       billingAddressCtrl.text = prefs.getString('sauda_billing_address') ?? "";
-      consigneeNameCtrl.text = prefs.getString('sauda_consignee_name') ?? "";
       shippingAddressCtrl.text =
           prefs.getString('sauda_shipping_address') ?? "";
       vehicleCtrl.text = prefs.getString('sauda_vehicle') ?? "";
@@ -104,6 +153,27 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
           'SAUDA BOOK / DELIVERY ORDER';
       freightCharge = prefs.getDouble('sauda_freight_charge') ?? 0.0;
       freightType = prefs.getString('sauda_freight_type') ?? 'PER_MT';
+
+      // 2. Initialize smart auto-sync status
+      _isBillingUntouched = cleanBilling.isEmpty ||
+          (cleanFirm.isNotEmpty &&
+              cleanBilling.toLowerCase() == cleanFirm.toLowerCase());
+      _isConsigneeUntouched = cleanConsignee.isEmpty ||
+          (cleanFirm.isNotEmpty &&
+              cleanConsignee.toLowerCase() == cleanFirm.toLowerCase());
+
+      if (_isBillingUntouched) {
+        _billingNameController.text = cleanFirm;
+      } else {
+        _billingNameController.text = cleanBilling;
+      }
+
+      if (_isConsigneeUntouched) {
+        _consigneeNameController.text = cleanFirm;
+      } else {
+        _consigneeNameController.text = cleanConsignee;
+      }
+
       if (freightCharge > 0) {
         freightCtrl.text = (freightCharge % 1 == 0)
             ? freightCharge.toInt().toString()
@@ -677,14 +747,14 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
                         setState(() {
                           items.clear();
                           addItem();
-                          firmNameCtrl.clear();
-                          billingNameCtrl.clear();
+                          _dealerNameController.clear();
+                          _billingNameController.clear();
                           billingAddressCtrl.clear();
-                          consigneeNameCtrl.clear();
+                          _consigneeNameController.clear();
                           shippingAddressCtrl.clear();
-                          _isBillingNameAutoFilled = false;
+                          _isBillingUntouched = true;
                           _isBillingAddressAutoFilled = false;
-                          _isConsigneeNameAutoFilled = false;
+                          _isConsigneeUntouched = true;
                           _isShippingAddressAutoFilled = false;
                           vehicleCtrl.clear();
                           remarksCtrl.clear();
@@ -991,19 +1061,16 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
     );
   }
 
-  void _onFirmChanged(String val) {
-    _saveData();
-    final trimmed = val.trim();
-    if (trimmed.isNotEmpty) {
-      if (billingNameCtrl.text.trim().isEmpty || _isBillingNameAutoFilled) {
-        billingNameCtrl.text = trimmed;
-        _isBillingNameAutoFilled = true;
-      }
-      if (consigneeNameCtrl.text.trim().isEmpty || _isConsigneeNameAutoFilled) {
-        consigneeNameCtrl.text = trimmed;
-        _isConsigneeNameAutoFilled = true;
-      }
+  void _onFirmChanged(String dealerName) {
+    if (_isBillingUntouched) {
+      _billingNameController.text = dealerName;
+    }
+    if (_isConsigneeUntouched) {
+      _consigneeNameController.text = dealerName;
+    }
 
+    final trimmed = dealerName.trim();
+    if (trimmed.isNotEmpty) {
       final defaultAddr = DataRepository.getCustomerAddress(trimmed);
       if (defaultAddr != null && defaultAddr.trim().isNotEmpty) {
         final cleanAddr = defaultAddr.trim();
@@ -1016,9 +1083,9 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
           _isShippingAddressAutoFilled = true;
         }
       }
-      setState(() {});
-      _saveData();
     }
+    setState(() {});
+    _saveData();
   }
 
   Widget _buildPartyDetailsGrid(bool isMobile) {
@@ -1066,28 +1133,49 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
   }
 
   Widget _buildBillingNameField() {
+    final bool isOverridden = !_isBillingUntouched &&
+        _billingNameController.text.trim() != _dealerNameController.text.trim();
+
     return TextField(
-      controller: billingNameCtrl,
+      controller: _billingNameController,
+      focusNode: billingNameFocusNode,
       decoration: msmInputDeco(
         "Billing Name",
         prefix: const Icon(Icons.badge_outlined,
             size: 16, color: Color(0xFF64748B)),
         hint: "Enter billing name (defaults to Dealer)",
       ).copyWith(
-        suffixIcon: billingNameCtrl.text.isNotEmpty
-            ? IconButton(
+        suffixIcon: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isOverridden)
+              IconButton(
+                icon: const Icon(Icons.sync,
+                    size: 18, color: Color(0xFF0284C7)),
+                tooltip: "Re-sync to Dealer Name",
+                onPressed: () {
+                  setState(() {
+                    _billingNameController.text = _dealerNameController.text;
+                    _isBillingUntouched = true;
+                  });
+                  _saveData();
+                },
+              ),
+            if (_billingNameController.text.isNotEmpty)
+              IconButton(
                 icon: const Icon(Icons.clear_rounded,
                     size: 16, color: textGrey),
                 tooltip: "Clear billing name",
                 onPressed: () {
                   setState(() {
-                    billingNameCtrl.clear();
-                    _isBillingNameAutoFilled = false;
+                    _billingNameController.clear();
+                    _isBillingUntouched = false;
                   });
                   _saveData();
                 },
-              )
-            : null,
+              ),
+          ],
+        ),
       ),
       style: const TextStyle(
         fontSize: 13,
@@ -1095,8 +1183,9 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
         color: Color(0xFF0F172A),
       ),
       onChanged: (val) {
-        _isBillingNameAutoFilled = false;
+        _isBillingUntouched = false;
         _saveData();
+        setState(() {});
       },
     );
   }
@@ -1140,28 +1229,49 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
   }
 
   Widget _buildConsigneeNameField() {
+    final bool isOverridden = !_isConsigneeUntouched &&
+        _consigneeNameController.text.trim() != _dealerNameController.text.trim();
+
     return TextField(
-      controller: consigneeNameCtrl,
+      controller: _consigneeNameController,
+      focusNode: consigneeNameFocusNode,
       decoration: msmInputDeco(
         "Consignee Name",
         prefix: const Icon(Icons.person_pin_outlined,
             size: 16, color: Color(0xFF64748B)),
         hint: "Enter consignee name (defaults to Dealer)",
       ).copyWith(
-        suffixIcon: consigneeNameCtrl.text.isNotEmpty
-            ? IconButton(
+        suffixIcon: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isOverridden)
+              IconButton(
+                icon: const Icon(Icons.sync,
+                    size: 18, color: Color(0xFF0284C7)),
+                tooltip: "Re-sync to Dealer Name",
+                onPressed: () {
+                  setState(() {
+                    _consigneeNameController.text = _dealerNameController.text;
+                    _isConsigneeUntouched = true;
+                  });
+                  _saveData();
+                },
+              ),
+            if (_consigneeNameController.text.isNotEmpty)
+              IconButton(
                 icon: const Icon(Icons.clear_rounded,
                     size: 16, color: textGrey),
                 tooltip: "Clear consignee name",
                 onPressed: () {
                   setState(() {
-                    consigneeNameCtrl.clear();
-                    _isConsigneeNameAutoFilled = false;
+                    _consigneeNameController.clear();
+                    _isConsigneeUntouched = false;
                   });
                   _saveData();
                 },
-              )
-            : null,
+              ),
+          ],
+        ),
       ),
       style: const TextStyle(
         fontSize: 13,
@@ -1169,8 +1279,9 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
         color: Color(0xFF0F172A),
       ),
       onChanged: (val) {
-        _isConsigneeNameAutoFilled = false;
+        _isConsigneeUntouched = false;
         _saveData();
+        setState(() {});
       },
     );
   }
@@ -1181,8 +1292,8 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
         .toList();
 
     return RawAutocomplete<String>(
-      textEditingController: firmNameCtrl,
-      focusNode: FocusNode(),
+      textEditingController: _dealerNameController,
+      focusNode: firmNameFocusNode,
       optionsBuilder: (TextEditingValue textEditingValue) {
         final query = textEditingValue.text.trim();
         if (query.isEmpty) {
