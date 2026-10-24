@@ -1661,6 +1661,29 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
                   fontSize: 13.5,
                   valueColor: const Color(0xFF059669),
                 ),
+                if (effectiveNetRate > 0) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFA7F3D0)),
+                    ),
+                    child: Center(
+                      child: Text(
+                        "Effective Landed Net Rate: ₹${effectiveNetRate.round()}/MT",
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF065F46),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1848,6 +1871,7 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
     final double totalOrder = summary['totalOrderValue']! > 0
         ? summary['totalOrderValue']!
         : getTotalOrderValue();
+    final double effectiveNetRate = summary['effectiveNetRate'] ?? 0.0;
     return Container(
       padding: EdgeInsets.fromLTRB(
           14, 8, 14, 8 + MediaQuery.of(context).padding.bottom),
@@ -1904,6 +1928,37 @@ class _SaudaBookingScreenState extends State<SaudaBookingScreen> {
                     ),
                   ],
                 ),
+                if (effectiveNetRate > 0)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFFA7F3D0)),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          "₹${effectiveNetRate.round()}/MT",
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF065F46),
+                          ),
+                        ),
+                        const Text(
+                          "Net Rate",
+                          style: TextStyle(
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF047857),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   mainAxisSize: MainAxisSize.min,

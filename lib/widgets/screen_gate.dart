@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 import '../models/user_session_notifier.dart';
 import '../models/stock_role.dart';
 import '../services/data_repository.dart';
-import '../screens/permission_denied_screen.dart';
 
 /// A reactive wrapper that enforces screen-level access control.
 ///
 /// It listens to [UserSessionNotifier] and [DataRepository.salesOnlyModeNotifier],
-/// automatically replacing [child] with [PermissionDeniedScreen] if the current user
-/// loses permission at runtime or if global Restricted Sales Mode is active.
+/// automatically **silently popping back** if the current user loses permission
+/// at runtime or if global Restricted Sales Mode is active.
+///
+/// Zero-Knowledge Stealth Mode: restricted users never see "Access Denied"
+/// screens — they are silently redirected back, as if the route never existed.
 class ScreenGate extends StatelessWidget {
   /// A function that returns true if the user has access to this screen.
   /// Example: `(s) => s.canAccessReports`
@@ -45,19 +47,36 @@ class ScreenGate extends StatelessWidget {
         return ValueListenableBuilder<PermissionSnapshot>(
           valueListenable: UserSessionNotifier.instance,
           builder: (context, snapshot, _) {
-            // If global Restricted Sales Mode is ON, lock all non-Super-Admin users
-            // out of everything except the 4 allowed sales modules.
+            // ── Stealth Mode: silently redirect forbidden routes ──────────
+            bool denied = false;
+
+            // If global Restricted Sales Mode is ON, lock all non-Super-Admin
+            // users out of everything except the allowed sales modules.
             if (isSalesOnly && !UserSession.isSuperAdmin) {
               final normalizedName = screenName.toLowerCase().trim();
-              final isAllowed = _salesOnlyAllowedScreens.contains(normalizedName);
+              final isAllowed =
+                  _salesOnlyAllowedScreens.contains(normalizedName);
               if (!isAllowed) {
-                return PermissionDeniedScreen(screenName: screenName);
+                denied = true;
               }
             }
 
-            if (!canAccess(snapshot)) {
-              return PermissionDeniedScreen(screenName: screenName);
+            // Standard permission check
+            if (!denied && !canAccess(snapshot)) {
+              denied = true;
             }
+
+            if (denied) {
+              // Stealth pop: schedule a silent pop-back after this frame.
+              // Renders an empty scaffold momentarily to avoid visual flash.
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (context.mounted) {
+                  Navigator.of(context).maybePop();
+                }
+              });
+              return const Scaffold(body: SizedBox.shrink());
+            }
+
             return child;
           },
         );

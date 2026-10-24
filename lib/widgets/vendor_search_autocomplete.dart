@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
 /// Reusable Real-time Vendor Search & Autocomplete Dropdown component.
-/// Displays existing vendor matches or an option to create a new vendor when no exact match exists.
-class VendorSearchAutocomplete extends StatelessWidget {
+/// Displays existing vendor matches with case-insensitive fuzzy substring search,
+/// or an option to create a new vendor when no exact match exists.
+class VendorSearchAutocomplete extends StatefulWidget {
   final TextEditingController controller;
-  final List<String> existingVendors;
+  final List<dynamic> existingVendors;
   final ValueChanged<String>? onVendorSelected;
   final String labelText;
   final String? Function(String?)? validator;
@@ -19,36 +20,72 @@ class VendorSearchAutocomplete extends StatelessWidget {
   });
 
   @override
+  State<VendorSearchAutocomplete> createState() =>
+      _VendorSearchAutocompleteState();
+}
+
+class _VendorSearchAutocompleteState extends State<VendorSearchAutocomplete> {
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     const Color primaryRed = Color(0xFFD71920);
 
-    // Filter non-empty vendors & sort alphabetically
-    final List<String> vendorsList = existingVendors
-        .map((v) => v.trim())
-        .where((v) => v.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    // Extract non-empty vendor names & sort alphabetically
+    final Set<String> seen = {};
+    final List<String> vendorsList = [];
+    for (final v in widget.existingVendors) {
+      String name = '';
+      if (v is Map) {
+        name = (v['name'] ??
+                v['vendor_name'] ??
+                v['party_name'] ??
+                v['party'] ??
+                '')
+            .toString()
+            .trim();
+      } else if (v != null) {
+        name = v.toString().trim();
+      }
+      if (name.isNotEmpty && seen.add(name.toUpperCase())) {
+        vendorsList.add(name.toUpperCase());
+      }
+    }
+    vendorsList.sort();
 
     return RawAutocomplete<String>(
-      textEditingController: controller,
-      focusNode: FocusNode(),
+      textEditingController: widget.controller,
+      focusNode: _focusNode,
       optionsBuilder: (TextEditingValue textEditingValue) {
-        final query = textEditingValue.text.trim();
-        if (query.isEmpty) {
+        final query = textEditingValue.text;
+        final q = query.trim().toLowerCase();
+        if (q.isEmpty) {
           return vendorsList;
         }
 
-        final matches = vendorsList
-            .where((v) => v.toLowerCase().contains(query.toLowerCase()))
-            .toList();
+        // Case-Insensitive Substring Match against all vendor records
+        final matches = vendorsList.where((v) {
+          return v.toLowerCase().contains(q);
+        }).toList();
 
         final hasExactMatch = vendorsList.any(
-          (v) => v.toLowerCase() == query.toLowerCase(),
+          (v) => v.toLowerCase() == q,
         );
 
-        if (!hasExactMatch) {
-          matches.add("+ Add new vendor '$query'");
+        if (!hasExactMatch && query.trim().isNotEmpty) {
+          matches.add("+ Add new vendor '${query.trim()}'");
         }
 
         return matches;
@@ -58,12 +95,14 @@ class VendorSearchAutocomplete extends StatelessWidget {
             selection.endsWith("'")) {
           final newName = selection
               .substring("+ Add new vendor '".length, selection.length - 1)
-              .trim();
-          controller.text = newName;
-          onVendorSelected?.call(newName);
+              .trim()
+              .toUpperCase();
+          widget.controller.text = newName;
+          widget.onVendorSelected?.call(newName);
         } else {
-          controller.text = selection;
-          onVendorSelected?.call(selection);
+          final norm = selection.trim().toUpperCase();
+          widget.controller.text = norm;
+          widget.onVendorSelected?.call(norm);
         }
       },
       fieldViewBuilder:
@@ -71,9 +110,9 @@ class VendorSearchAutocomplete extends StatelessWidget {
         return TextFormField(
           controller: textEditingController,
           focusNode: focusNode,
-          validator: validator,
+          validator: widget.validator,
           decoration: InputDecoration(
-            labelText: labelText,
+            labelText: widget.labelText,
             border: const OutlineInputBorder(),
             prefixIcon: const Icon(Icons.business_rounded, size: 20),
             suffixIcon: textEditingController.text.isNotEmpty
@@ -81,35 +120,41 @@ class VendorSearchAutocomplete extends StatelessWidget {
                     icon: const Icon(Icons.clear, size: 18),
                     onPressed: () {
                       textEditingController.clear();
-                      onVendorSelected?.call('');
+                      widget.onVendorSelected?.call('');
                     },
                   )
                 : null,
           ),
           onChanged: (val) {
-            onVendorSelected?.call(val);
+            widget.onVendorSelected?.call(val);
           },
           onFieldSubmitted: (val) {
             onFieldSubmitted();
-            onVendorSelected?.call(val);
+            widget.onVendorSelected?.call(val);
           },
         );
       },
       optionsViewBuilder: (context, onSelected, options) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
         return Align(
           alignment: Alignment.topLeft,
           child: Material(
-            elevation: 4,
+            elevation: 6,
             borderRadius: BorderRadius.circular(10),
-            color: Colors.white,
-            child: Container(
-              constraints: const BoxConstraints(maxHeight: 220),
-              width: 280,
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            shadowColor: Colors.black.withValues(alpha: 0.2),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 240, maxWidth: 360),
               child: ListView.separated(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 shrinkWrap: true,
                 itemCount: options.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
+                separatorBuilder: (_, __) => Divider(
+                  height: 1,
+                  color: isDark
+                      ? const Color(0xFF334155)
+                      : const Color(0xFFE2E8F0),
+                ),
                 itemBuilder: (BuildContext context, int index) {
                   final option = options.elementAt(index);
                   final isNewOption = option.startsWith("+ Add new vendor '");
@@ -124,7 +169,9 @@ class VendorSearchAutocomplete extends StatelessWidget {
                         fontSize: 13,
                         fontWeight:
                             isNewOption ? FontWeight.bold : FontWeight.w500,
-                        color: isNewOption ? primaryRed : Colors.black87,
+                        color: isNewOption
+                            ? primaryRed
+                            : (isDark ? Colors.white : const Color(0xFF0F172A)),
                       ),
                     ),
                     leading: Icon(
@@ -132,7 +179,11 @@ class VendorSearchAutocomplete extends StatelessWidget {
                           ? Icons.add_circle_outline_rounded
                           : Icons.business_rounded,
                       size: 18,
-                      color: isNewOption ? primaryRed : Colors.grey.shade600,
+                      color: isNewOption
+                          ? primaryRed
+                          : (isDark
+                              ? const Color(0xFF94A3B8)
+                              : Colors.grey.shade600),
                     ),
                     onTap: () => onSelected(option),
                   );

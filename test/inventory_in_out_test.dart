@@ -94,12 +94,12 @@ void main() {
       expect(find.text('Inward'), findsOneWidget);
       expect(find.text('Dispatch'), findsOneWidget);
       expect(find.text('Transfer'), findsOneWidget);
-      expect(find.text('Search vehicle / item...'), findsOneWidget);
+      expect(find.text('Search item, size, user, vehicle, party...'), findsOneWidget);
     });
   });
 
   group('InventoryInOutScreen Full Console Tests', () {
-    testWidgets('renders dual-pane console on desktop viewport',
+    testWidgets('renders TransactionHistoryScreen on desktop viewport',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1400, 900);
       tester.view.devicePixelRatio = 1.0;
@@ -112,13 +112,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Inventory Operations Console'), findsOneWidget);
-      expect(find.text('Live Sync'), findsOneWidget);
-      expect(find.text('New Transaction'), findsOneWidget);
+      expect(find.text('Transaction History'), findsOneWidget);
       expect(find.text('Live Transaction Ledger'), findsOneWidget);
     });
 
-    testWidgets('renders mobile segmented switcher on small viewport',
+    testWidgets('renders TransactionHistoryScreen on small viewport',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(400, 800);
       tester.view.devicePixelRatio = 1.0;
@@ -131,13 +129,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('New Transaction'), findsWidgets);
-      expect(find.text('Live Ledger'), findsOneWidget);
-
-      // Switch to Live Ledger tab
-      await tester.tap(find.text('Live Ledger'));
-      await tester.pumpAndSettle();
-
+      expect(find.text('Transaction History'), findsOneWidget);
       expect(find.text('Live Transaction Ledger'), findsOneWidget);
     });
   });

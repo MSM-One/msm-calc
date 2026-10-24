@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import '../widgets/m_loader.dart';
 import '../widgets/motion_toast.dart';
@@ -46,7 +47,7 @@ class _SaudaEntryScreenState extends State<SaudaEntryScreen> {
   int? _selectedSizeId;
   String _selectedLocation = "YARD";
 
-  List<String> _vendors = [];
+  List<dynamic> _vendors = [];
   bool _isLoading = false;
   ResilientSupabaseStream<List<Map<String, dynamic>>>? _purchaseLedgerStream;
 
@@ -104,16 +105,44 @@ class _SaudaEntryScreenState extends State<SaudaEntryScreen> {
   Future<void> _loadVendors() async {
     if (mounted) setState(() => _isLoading = true);
     try {
+      List<Map<String, dynamic>> vendorsList = [];
+      try {
+        final response = await Supabase.instance.client
+            .from('vendors')
+            .select('id, vendor_name, phone, gstin, city, region, business_type, is_active')
+            .eq('is_active', true)
+            .order('vendor_name', ascending: true);
+
+        vendorsList = List<Map<String, dynamic>>.from(response);
+      } catch (e) {
+        debugPrint("[VendorPurchase] Supabase fetch error: $e");
+      }
+
       final txns = await SheetService.fetchTransactions(limit: 50);
-      final vendorsList = txns
-          .map((t) => t['partyName']?.toString() ?? "")
-          .where((v) => v.isNotEmpty)
-          .toSet()
-          .toList();
+      final Set<String> seen = {};
+      final List<Map<String, dynamic>> allVendors = [];
+
+      for (final v in vendorsList) {
+        final name = (v['vendor_name'] ?? v['name'] ?? '').toString().trim().toUpperCase();
+        if (name.isNotEmpty && seen.add(name)) {
+          allVendors.add(v);
+        }
+      }
+
+      for (final t in txns) {
+        final raw = t['partyName']?.toString() ?? t['party_name']?.toString() ?? "";
+        final trimmed = raw.trim().toUpperCase();
+        if (trimmed.isNotEmpty && seen.add(trimmed)) {
+          allVendors.add({
+            'vendor_name': trimmed,
+            'region': t['region'] ?? '',
+          });
+        }
+      }
 
       if (mounted) {
         setState(() {
-          _vendors = vendorsList;
+          _vendors = allVendors;
           _isLoading = false;
         });
       }
@@ -237,7 +266,7 @@ class _SaudaEntryScreenState extends State<SaudaEntryScreen> {
 
     final data = {
       "date": _dateCtrl.text,
-      "vendor": _vendorCtrl.text.trim(),
+      "vendor": _vendorCtrl.text.trim().toUpperCase(),
       "item": _selectedItem,
       "size": resolvedSize,
       "size_id": _selectedSizeId,
@@ -247,7 +276,7 @@ class _SaudaEntryScreenState extends State<SaudaEntryScreen> {
       "freight_charge": freightCharge,
       "freight_type": _freightType,
       "remark": _remarkCtrl.text.trim(),
-      "region": _regionCtrl.text.trim(),
+      "region": _regionCtrl.text.trim().toUpperCase(),
       "location": _selectedLocation,
     };
 
@@ -498,7 +527,12 @@ class _SaudaEntryScreenState extends State<SaudaEntryScreen> {
         ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+        padding: EdgeInsets.fromLTRB(
+          20,
+          20,
+          20,
+          MediaQuery.of(context).padding.bottom + 32,
+        ),
         child: Center(
           child: Container(
             constraints: const BoxConstraints(maxWidth: 860),
@@ -520,7 +554,21 @@ class _SaudaEntryScreenState extends State<SaudaEntryScreen> {
                           final vendorInput = VendorSearchAutocomplete(
                             controller: _vendorCtrl,
                             existingVendors: _vendors,
-                            onVendorSelected: (val) => _vendorCtrl.text = val,
+                            onVendorSelected: (val) {
+                              _vendorCtrl.text = val;
+                              for (final v in _vendors) {
+                                if (v is Map) {
+                                  final name = (v['vendor_name'] ?? v['name'] ?? '').toString().trim().toUpperCase();
+                                  if (name == val.trim().toUpperCase()) {
+                                    final reg = v['region']?.toString().trim();
+                                    if (reg != null && reg.isNotEmpty && _regionCtrl.text.trim().isEmpty) {
+                                      _regionCtrl.text = reg.toUpperCase();
+                                    }
+                                    break;
+                                  }
+                                }
+                              }
+                            },
                             labelText: "Vendor / Party Name",
                             validator: (v) => v == null || v.trim().isEmpty
                                 ? "Vendor is required"

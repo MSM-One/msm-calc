@@ -72,7 +72,7 @@ class SheetService {
       null;
   static Future<SavePermissionsResult> savePermissions(String email,
           List<String> permissions, String updatedBy, int version) async =>
-      SavePermissionsResult(
+      const SavePermissionsResult(
           success: false, errorMessage: "Legacy Sheets Deprecated");
 
   static Future<List<dynamic>> getSaudas() async => [];
@@ -152,6 +152,10 @@ class SheetService {
           'region': row['region'] ?? "YARD",
           'location': row['location'] ?? "YARD",
           'is_hidden': isHidden,
+          'date_time': row['date_time'],
+          'dateTime': row['date_time'],
+          'created_at': row['created_at'],
+          'createdAt': row['created_at'],
           'date': row['date_time'] != null
               ? formatTransactionDate(parseSupabaseDateTime(row['date_time']))
               : "",
@@ -240,9 +244,10 @@ class SheetService {
         updateData['freight_type'] = freightType.trim();
       }
       if (vendorName != null && vendorName.trim().isNotEmpty) {
-        updateData['party_name'] = vendorName.trim();
-        updateData['vendor_name'] = vendorName.trim();
-        await ensureVendorExists(vendorName.trim());
+        final normVendor = vendorName.trim().toUpperCase();
+        updateData['party_name'] = normVendor;
+        updateData['vendor_name'] = normVendor;
+        await ensureVendorExists(normVendor);
       }
       if (itemName != null && itemName.trim().isNotEmpty) {
         updateData['item_name'] = itemName.trim();
@@ -251,7 +256,7 @@ class SheetService {
         updateData['size_label'] = size.trim();
       }
       if (region != null && region.trim().isNotEmpty) {
-        updateData['region'] = region.trim();
+        updateData['region'] = region.trim().toUpperCase();
       }
       if (location != null && location.trim().isNotEmpty) {
         updateData['location'] = location.trim();
@@ -289,7 +294,7 @@ class SheetService {
             (item['id']?.toString() == saudaId) ||
             (item['txn_id']?.toString() == saudaId)) {
           if (vendorName != null && vendorName.trim().isNotEmpty) {
-            item['party'] = vendorName.trim();
+            item['party'] = vendorName.trim().toUpperCase();
           }
           if (itemName != null && itemName.trim().isNotEmpty) {
             item['item'] = itemName.trim();
@@ -298,7 +303,7 @@ class SheetService {
             item['size'] = size.trim();
           }
           if (region != null && region.trim().isNotEmpty) {
-            item['region'] = region.trim();
+            item['region'] = region.trim().toUpperCase();
           }
           if (location != null && location.trim().isNotEmpty) {
             item['location'] = location.trim();
@@ -357,17 +362,19 @@ class SheetService {
   }
 
   static Future<void> ensureVendorExists(String vendorName) async {
-    final name = vendorName.trim();
+    final name = vendorName.trim().toUpperCase();
     if (name.isEmpty) return;
     try {
       final existing = await SupabaseService.client
           .from('vendors')
           .select('id')
-          .eq('name', name)
+          .eq('vendor_name', name)
           .maybeSingle();
 
       if (existing == null) {
-        await SupabaseService.client.from('vendors').insert({'name': name});
+        await SupabaseService.client
+            .from('vendors')
+            .insert({'vendor_name': name});
       }
     } catch (e) {
       try {
@@ -393,12 +400,14 @@ class SheetService {
           sauda['freight_type']?.toString().trim().isNotEmpty == true
               ? sauda['freight_type']!.toString().trim()
               : 'PER_MT';
-      final String vendor = sauda['vendor']?.toString() ?? "";
+      final String vendor =
+          (sauda['vendor']?.toString() ?? "").trim().toUpperCase();
       final String item = sauda['item']?.toString() ?? "";
       final String size = sauda['size']?.toString() ?? "";
       final String specificSize = sauda['specificSize']?.toString() ?? "";
       final String remark = sauda['remark']?.toString() ?? "";
-      final String region = sauda['region']?.toString() ?? "";
+      final String region =
+          (sauda['region']?.toString() ?? "").trim().toUpperCase();
       final String location = sauda['location']?.toString() ?? "YARD";
 
       if (vendor.isNotEmpty) {

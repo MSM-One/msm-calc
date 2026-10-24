@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/app_config_service.dart';
 import '../models/user_session_notifier.dart';
 import '../widgets/m_loader.dart';
 import '../constants/app_colors.dart';
@@ -27,7 +28,6 @@ import '../widgets/dashboard/executive_telemetry_header.dart';
 import '../widgets/dashboard/compact_kpi_ribbon.dart';
 import '../widgets/dashboard/unified_stock_distribution_card.dart';
 import '../widgets/dashboard/enterprise_quick_actions_grid.dart';
-import '../widgets/dashboard/enterprise_bottom_stock_bar.dart';
 import '../constants/enterprise_design_tokens.dart';
 import '../services/auth_service.dart';
 import '../services/access_guard.dart';
@@ -152,6 +152,13 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
+  /// Returns true when the current user is sales-restricted (stealth mode).
+  bool get _isSalesRestricted {
+    return AppConfigService.isSalesOnlyMode &&
+        !UserSession.isSuperAdmin &&
+        !UserSession.isUserAdmin;
+  }
+
   Future<void> _checkAccess() async {
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('user_email') ?? "";
@@ -169,8 +176,11 @@ class _DashboardScreenState extends State<DashboardScreen>
       });
       _refreshCurrentUserData();
       if (mounted) {
-        DataRepository.syncSheetData(context);
-        DataRepository.syncERPStock(context);
+        // Stealth Mode: skip stock/inventory data fetches for restricted users
+        if (!_isSalesRestricted) {
+          DataRepository.syncSheetData(context);
+          DataRepository.syncERPStock(context);
+        }
       }
       _loadCurrentUser();
     }
@@ -418,10 +428,17 @@ class _DashboardScreenState extends State<DashboardScreen>
           final bool isAdmin = (currentUser != null && currentUser.isAdmin) ||
               UserSession.currentRole == StockRole.ADMIN ||
               snap.role == StockRole.ADMIN;
-          final bool canShowStockKpi = isAdmin ||
-              snap.canAccessStockInventory ||
-              UserSession.isSuperAdmin ||
-              !DataRepository.salesOnlyModeNotifier.value;
+          // Stealth Mode: completely hide stock KPIs for restricted users
+          final bool isSalesRestricted =
+              DataRepository.salesOnlyModeNotifier.value &&
+                  !UserSession.isSuperAdmin &&
+                  !snap.isAdmin &&
+                  !UserSession.isUserAdmin;
+          final bool canShowStockKpi = !isSalesRestricted &&
+              (isAdmin ||
+                  snap.canAccessStockInventory ||
+                  UserSession.isSuperAdmin ||
+                  !DataRepository.salesOnlyModeNotifier.value);
 
           return LayoutBuilder(
             builder: (context, constraints) {
@@ -465,7 +482,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
     return Scaffold(
       backgroundColor: EnterpriseColors.background,
-      bottomNavigationBar: canShowStockKpi ? _buildBottomStockBar() : null,
+      bottomNavigationBar: null,
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _handleSync,
@@ -550,7 +567,8 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ),
         ),
-      if (snap.isAdmin || snap.canAccessSaudaBooking)
+      // ── Stealth-gated: hidden when isSalesOnly ────────────────────────
+      if (!isSalesOnly && (snap.isAdmin || snap.canAccessSaudaBooking))
         _buildMobileCardItem(
           title: "Sauda & Delivery Order",
           icon: Icons.menu_book_rounded,
@@ -565,7 +583,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ),
         ),
-      if (snap.isAdmin || snap.canAccessVendorPurchaseScreen)
+      if (!isSalesOnly && (snap.isAdmin || snap.canAccessVendorPurchaseScreen))
         _buildMobileCardItem(
           title: "Vendor Purchase",
           icon: Icons.local_shipping_rounded,
@@ -580,7 +598,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ),
         ),
-      if (snap.isAdmin || snap.canAccessStockInventory)
+      if (!isSalesOnly && (snap.isAdmin || snap.canAccessStockInventory))
         _buildMobileCardItem(
           title: "Inventory In & Out",
           icon: Icons.inventory_2_rounded,
@@ -595,23 +613,11 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ),
         ),
-      if (snap.isAdmin || snap.canAccessStockSheet)
+      if (!isSalesOnly && (snap.isAdmin || snap.canAccessStockSheet))
         _buildMobileCardItem(
           title: "Stock Sheet",
           icon: Icons.share_rounded,
           onTap: () {
-            if (!snap.isAdmin &&
-                !AccessGuard.can(AppPermissions.screensStockSheet) &&
-                !AccessGuard.can(AppPermissions.canAccessStockSheet)) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                      "Restricted Access: You do not have permission to view the Stock Sheet screen."),
-                  backgroundColor: Colors.red,
-                ),
-              );
-              return;
-            }
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -624,7 +630,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             );
           },
         ),
-      if (snap.isAdmin || snap.canAccessReports)
+      if (!isSalesOnly && (snap.isAdmin || snap.canAccessReports))
         _buildMobileCardItem(
           title: "Reports",
           icon: Icons.bar_chart_rounded,
@@ -654,7 +660,8 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ),
         ),
-      if (snap.isAdmin || snap.role == StockRole.ADMIN || snap.canAccessUsers)
+      if (!isSalesOnly &&
+          (snap.isAdmin || snap.role == StockRole.ADMIN || snap.canAccessUsers))
         _buildMobileCardItem(
           title: "Users",
           icon: Icons.people_rounded,
@@ -690,7 +697,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ),
         ),
-      if (snap.isAdmin || snap.canAccessMasterSize)
+      if (!isSalesOnly && (snap.isAdmin || snap.canAccessMasterSize))
         _buildMobileCardItem(
           title: "Master Size",
           icon: Icons.checklist_rtl_rounded,
@@ -706,6 +713,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           ),
         ),
     ];
+
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9FC),
@@ -1147,53 +1155,6 @@ class _DashboardScreenState extends State<DashboardScreen>
               MaterialPageRoute(
                 builder: (_) =>
                     const ReportsDashboardScreen(initialTabId: 'low'),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildBottomStockBar() {
-    return StreamBuilder<List<ItemVariant>>(
-      stream: DataRepository.getSupabaseStockStream(),
-      builder: (context, snapshot) {
-        final inventory =
-            snapshot.data ?? DataRepository.inventoryListNotifier.value;
-        final totalStock =
-            inventory.fold(0.0, (sum, item) => sum + item.netStockMt);
-        final yardStock = inventory
-            .where((item) =>
-                StockUtils.normalizeLocation(item.location) == 'YARD' ||
-                item.location == 'ALL' ||
-                item.location.trim().isEmpty)
-            .fold(0.0, (sum, item) => sum + item.currentStockMT);
-        final factoryStock = inventory
-            .where((item) =>
-                StockUtils.normalizeLocation(item.location) == 'FACTORY' ||
-                item.location.toLowerCase().contains('factory') ||
-                item.location.toLowerCase().contains('plant'))
-            .fold(0.0, (sum, item) => sum + item.currentStockMT);
-
-        int attentionCount = 0;
-        for (final v in inventory) {
-          if (v.currentStockMT <= 0 || v.currentStockMT < v.minStock) {
-            attentionCount++;
-          }
-        }
-
-        return EnterpriseBottomStockBar(
-          totalStockMT: totalStock,
-          yardStockMT: yardStock,
-          factoryStockMT: factoryStock,
-          attentionCount: attentionCount,
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) =>
-                    const ReportsDashboardScreen(initialTabId: 'movement'),
               ),
             );
           },

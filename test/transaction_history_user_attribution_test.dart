@@ -4,6 +4,8 @@ import 'package:msm_calc/models/stock_models.dart';
 import 'package:msm_calc/services/data_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:msm_calc/services/app_config_service.dart';
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({
@@ -11,7 +13,9 @@ void main() {
       'user_role': 'Admin',
       'user_display_name': 'Vivek Salve',
     });
+    AppConfigService.superAdminEmailNotifier.value = 'j2833945@gmail.com';
     DataRepository.userProfileLookupMap.clear();
+    DataRepository.userProfileLookupMap['j2833945@gmail.com'] = 'Admin (Vivek)';
   });
 
   group('User Attribution Data Extraction Unit Tests', () {
@@ -116,6 +120,7 @@ void main() {
   group('User Attribution Tag UI Placement Tests', () {
     testWidgets('renders user attribution tag with person icon and clean name on transaction card',
         (WidgetTester tester) async {
+      DataRepository.userProfileLookupMap['j2833945@gmail.com'] = 'Admin (Vivek)';
       final tx = StockTransaction(
         txnId: 'TXN_UI_1',
         dateTime: DateTime(2026, 9, 9, 15, 30),

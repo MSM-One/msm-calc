@@ -128,6 +128,7 @@ class _LiveTransactionLedgerTableState extends State<LiveTransactionLedgerTable>
               transportCo: (row['transport_co'] ?? row['transport_name'] ?? '').toString(),
               driverName: (row['driver_name'] ?? '').toString(),
               driverPhone: (row['driver_phone'] ?? '').toString(),
+              partyName: (row['party_name'] ?? row['party'] ?? row['vendor_name'] ?? row['customer_name'] ?? '').toString(),
               note: (row['note'] ?? '').toString(),
               user: (row['user_name'] ?? row['user'] ?? '').toString(),
               isReversed: row['is_reversed'] == true,
@@ -152,6 +153,29 @@ class _LiveTransactionLedgerTableState extends State<LiveTransactionLedgerTable>
     }
   }
 
+  bool _matchesSearchFilter(StockTransaction txn, String q) {
+    if (q.trim().isEmpty) return true;
+    final query = q.trim().toLowerCase();
+    final fields = [
+      txn.itemName,
+      txn.category,
+      txn.sizeLabel,
+      txn.size,
+      txn.userName ?? txn.user ?? '',
+      txn.displayUserName,
+      txn.partyName ?? '',
+      txn.lorryNo ?? '',
+      txn.invoiceNo ?? '',
+      txn.txnId,
+      txn.location,
+      txn.toLocation ?? '',
+      txn.transportCo ?? '',
+      txn.driverName ?? '',
+      txn.note ?? '',
+    ];
+    return fields.any((f) => f.toLowerCase().contains(query));
+  }
+
   List<StockTransaction> get _filteredList {
     return _transactions.where((tx) {
       // Type filter
@@ -164,18 +188,8 @@ class _LiveTransactionLedgerTableState extends State<LiveTransactionLedgerTable>
         return false;
       }
 
-      // Search query
-      if (_searchQuery.isNotEmpty) {
-        final query = _searchQuery.toLowerCase();
-        final matchVehicle = (tx.lorryNo ?? '').toLowerCase().contains(query);
-        final matchItem = tx.itemName.toLowerCase().contains(query);
-        final matchSize = tx.size.toLowerCase().contains(query);
-        final matchTxId = tx.txnId.toLowerCase().contains(query);
-        final matchInvoice = (tx.invoiceNo ?? '').toLowerCase().contains(query);
-        return matchVehicle || matchItem || matchSize || matchTxId || matchInvoice;
-      }
-
-      return true;
+      // Search query across all fields
+      return _matchesSearchFilter(tx, _searchQuery);
     }).toList();
   }
 
@@ -256,36 +270,35 @@ class _LiveTransactionLedgerTableState extends State<LiveTransactionLedgerTable>
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── FILTER & SEARCH TOOLBAR ──
-          _buildToolbar(filtered.length),
-          const Divider(height: 1, color: Color(0xFFE2E8F0)),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final bool isDesktop = constraints.maxWidth >= 780;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── FILTER & SEARCH TOOLBAR ──
+              _buildToolbar(filtered.length, isDesktop: isDesktop),
+              const Divider(height: 1, color: Color(0xFFE2E8F0)),
 
-          // ── TABLE CONTENT ──
-          Expanded(
-            child: _isLoading && _transactions.isEmpty
-                ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-                : filtered.isEmpty
-                    ? _buildEmptyState()
-                    : LayoutBuilder(
-                        builder: (context, constraints) {
-                          if (constraints.maxWidth >= 780) {
-                            return _buildDesktopTable(filtered);
-                          } else {
-                            return _buildMobileList(filtered);
-                          }
-                        },
-                      ),
-          ),
-        ],
+              // ── TABLE CONTENT ──
+              Expanded(
+                child: _isLoading && _transactions.isEmpty
+                    ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                    : filtered.isEmpty
+                        ? _buildEmptyState()
+                        : isDesktop
+                            ? _buildDesktopTable(filtered)
+                            : _buildMobileList(filtered),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
   // ── FILTER & SEARCH TOOLBAR ──
-  Widget _buildToolbar(int count) {
+  Widget _buildToolbar(int count, {required bool isDesktop}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Column(
@@ -336,47 +349,118 @@ class _LiveTransactionLedgerTableState extends State<LiveTransactionLedgerTable>
           ),
           const SizedBox(height: 8),
 
-          // Filters & Search Wrap
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              _buildTypeFilterPill('ALL', 'All'),
-              _buildTypeFilterPill('IN', 'Inward'),
-              _buildTypeFilterPill('OUT', 'Dispatch'),
-              _buildTypeFilterPill('TRANSFER', 'Transfer'),
-              ConstrainedBox(
-                constraints: const BoxConstraints(minWidth: 150, maxWidth: 220),
-                child: SizedBox(
-                  height: 32,
-                  child: TextField(
-                    controller: _searchCtrl,
-                    onChanged: (v) => setState(() => _searchQuery = v.trim()),
-                    style: const TextStyle(fontSize: 11.5, color: Color(0xFF0F172A)),
-                    decoration: InputDecoration(
-                      hintText: 'Search vehicle / item...',
-                      hintStyle: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-                      prefixIcon: const Icon(Icons.search_rounded, size: 14, color: Color(0xFF64748B)),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                      filled: true,
-                      fillColor: const Color(0xFFF8FAFC),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                      ),
-                    ),
+          if (isDesktop)
+            // Desktop: Single wrap/row with Type pills, Divider, Location pills, Search field
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                _buildTypeFilterPill('ALL', 'All'),
+                _buildTypeFilterPill('IN', 'Inward'),
+                _buildTypeFilterPill('OUT', 'Dispatch'),
+                _buildTypeFilterPill('TRANSFER', 'Transfer'),
+                const SizedBox(
+                  height: 16,
+                  child: VerticalDivider(
+                      width: 8, thickness: 1, color: Color(0xFFCBD5E1)),
+                ),
+                _buildLocationFilterPill('ALL', 'All Loc', Icons.domain_outlined),
+                _buildLocationFilterPill('YARD', 'Yard', Icons.warehouse_outlined),
+                _buildLocationFilterPill(
+                    'FACTORY', 'Factory', Icons.factory_outlined),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: 180, maxWidth: 260),
+                  child: SizedBox(
+                    height: 32,
+                    child: _buildSearchTextField(),
                   ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            )
+          else
+            // Mobile: Full-width search bar + 2 dedicated horizontal pill rows
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  height: 34,
+                  child: _buildSearchTextField(),
+                ),
+                const SizedBox(height: 8),
+                // Pill Row 1: Type filters
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _buildTypeFilterPill('ALL', 'All'),
+                      const SizedBox(width: 6),
+                      _buildTypeFilterPill('IN', 'Inward'),
+                      const SizedBox(width: 6),
+                      _buildTypeFilterPill('OUT', 'Dispatch'),
+                      const SizedBox(width: 6),
+                      _buildTypeFilterPill('TRANSFER', 'Transfer'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                // Pill Row 2: Location filters [All Locations | Yard | Factory]
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _buildLocationFilterPill('ALL', 'All Locations', Icons.domain_outlined),
+                      const SizedBox(width: 6),
+                      _buildLocationFilterPill('YARD', 'Yard', Icons.warehouse_outlined),
+                      const SizedBox(width: 6),
+                      _buildLocationFilterPill('FACTORY', 'Factory', Icons.factory_outlined),
+                    ],
+                  ),
+                ),
+              ],
+            ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSearchTextField() {
+    return TextField(
+      controller: _searchCtrl,
+      onChanged: (v) => setState(() => _searchQuery = v.trim()),
+      style: const TextStyle(fontSize: 11.5, color: Color(0xFF0F172A)),
+      decoration: InputDecoration(
+        hintText: 'Search item, size, user, vehicle, party...',
+        hintStyle: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+        prefixIcon: const Icon(Icons.search_rounded, size: 14, color: Color(0xFF64748B)),
+        suffixIcon: _searchQuery.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.clear_rounded, size: 14, color: Color(0xFF64748B)),
+                splashRadius: 12,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onPressed: () {
+                  _searchCtrl.clear();
+                  setState(() => _searchQuery = '');
+                },
+              )
+            : null,
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        filled: true,
+        fillColor: const Color(0xFFF8FAFC),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: Color(0xFFD32F2F)),
+        ),
       ),
     );
   }
@@ -407,6 +491,44 @@ class _LiveTransactionLedgerTableState extends State<LiveTransactionLedgerTable>
     );
   }
 
+  Widget _buildLocationFilterPill(
+      String location, String label, IconData icon) {
+    final bool isSelected = _selectedLocationFilter == location;
+    return InkWell(
+      onTap: () => setState(() => _selectedLocationFilter = location),
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFFD32F2F) : const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: isSelected ? const Color(0xFFD32F2F) : const Color(0xFFE2E8F0),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 11,
+              color: isSelected ? Colors.white : const Color(0xFF64748B),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                color: isSelected ? Colors.white : const Color(0xFF475569),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ── DESKTOP DATA TABLE ──
   Widget _buildDesktopTable(List<StockTransaction> list) {
     return SingleChildScrollView(
@@ -414,8 +536,8 @@ class _LiveTransactionLedgerTableState extends State<LiveTransactionLedgerTable>
         width: double.infinity,
         child: DataTable(
           headingRowHeight: 38,
-          dataRowMinHeight: 40,
-          dataRowMaxHeight: 44,
+          dataRowMinHeight: 46,
+          dataRowMaxHeight: 52,
           horizontalMargin: 14,
           columnSpacing: 14,
           headingRowColor: WidgetStateProperty.all(const Color(0xFFF8FAFC)),
@@ -440,15 +562,52 @@ class _LiveTransactionLedgerTableState extends State<LiveTransactionLedgerTable>
                 return isZebra ? const Color(0xFFF8FAFC) : Colors.white;
               }),
               cells: [
-                // Timestamp
+                // Timestamp & User
                 DataCell(
-                  Text(
-                    _timeFormat.format(tx.dateTime),
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: tx.isReversed ? const Color(0xFF94A3B8) : const Color(0xFF475569),
-                      decoration: tx.isReversed ? TextDecoration.lineThrough : null,
-                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        _timeFormat.format(tx.dateTime),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: tx.isReversed ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                          decoration: tx.isReversed ? TextDecoration.lineThrough : null,
+                        ),
+                      ),
+                      if (tx.displayUserName.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: const Color(0xFFCBD5E1), width: 0.5),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.person_outline, size: 9.5, color: Color(0xFF64748B)),
+                              const SizedBox(width: 2.5),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 85),
+                                child: Text(
+                                  tx.displayUserName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF334155),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 // Type Badge
@@ -507,18 +666,34 @@ class _LiveTransactionLedgerTableState extends State<LiveTransactionLedgerTable>
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        (tx.lorryNo != null && tx.lorryNo!.isNotEmpty)
-                            ? tx.lorryNo!
-                            : ((tx.invoiceNo != null && tx.invoiceNo!.isNotEmpty) ? tx.invoiceNo! : '—'),
+                        (tx.lorryNo != null && tx.lorryNo!.trim().isNotEmpty)
+                            ? tx.lorryNo!.trim()
+                            : ((tx.partyName != null && tx.partyName!.trim().isNotEmpty)
+                                ? tx.partyName!.trim()
+                                : ((tx.invoiceNo != null && tx.invoiceNo!.trim().isNotEmpty) ? tx.invoiceNo!.trim() : '—')),
                         style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      if (tx.invoiceNo != null &&
-                          tx.invoiceNo!.isNotEmpty &&
+                      if (tx.partyName != null &&
+                          tx.partyName!.trim().isNotEmpty &&
                           tx.lorryNo != null &&
-                          tx.lorryNo!.isNotEmpty)
+                          tx.lorryNo!.trim().isNotEmpty)
                         Text(
-                          'Ref: ${tx.invoiceNo}',
+                          tx.partyName!.trim(),
+                          style: const TextStyle(fontSize: 10, color: Color(0xFF475569), fontWeight: FontWeight.w500),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        )
+                      else if (tx.invoiceNo != null &&
+                          tx.invoiceNo!.trim().isNotEmpty &&
+                          tx.lorryNo != null &&
+                          tx.lorryNo!.trim().isNotEmpty)
+                        Text(
+                          'Ref: ${tx.invoiceNo!.trim()}',
                           style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                     ],
                   ),
@@ -562,6 +737,22 @@ class _LiveTransactionLedgerTableState extends State<LiveTransactionLedgerTable>
       separatorBuilder: (_, __) => const SizedBox(height: 6),
       itemBuilder: (context, index) {
         final tx = list[index];
+
+        final vehicle = (tx.lorryNo ?? '').trim();
+        final party = (tx.partyName ?? '').trim();
+        final invoice = (tx.invoiceNo ?? '').trim();
+
+        final List<String> refParts = [];
+        if (vehicle.isNotEmpty) refParts.add(vehicle);
+        if (party.isNotEmpty) {
+          refParts.add(party);
+        } else if (invoice.isNotEmpty && invoice != vehicle) {
+          refParts.add('Ref: $invoice');
+        } else if (tx.transportCo != null && tx.transportCo!.trim().isNotEmpty) {
+          refParts.add(tx.transportCo!.trim());
+        }
+        final refText = refParts.join(' • ');
+
         return Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
@@ -598,6 +789,27 @@ class _LiveTransactionLedgerTableState extends State<LiveTransactionLedgerTable>
                   decoration: tx.isReversed ? TextDecoration.lineThrough : null,
                 ),
               ),
+              if (refText.isNotEmpty) ...[
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    const Icon(Icons.local_shipping_outlined, size: 13, color: Color(0xFF475569)),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        refText,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF334155),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 6),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
